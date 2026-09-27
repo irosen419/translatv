@@ -1,0 +1,1031 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase 0 spike: Web Speech plus WebRTC</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0 auto; padding: 24px; max-width: 900px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 28px 0 8px; text-transform: uppercase; letter-spacing: .06em; opacity: .65; }
+  .sub { opacity: .7; margin: 0 0 20px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 7px; border: 1px solid currentColor; background: transparent; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid rgba(128,128,128,.28); vertical-align: top; }
+  th { font-weight: 600; opacity: .7; width: 34%; }
+  .verdict { font-weight: 600; }
+  .yes { color: #157f3d; } .no { color: #b3261e; } .unknown { opacity: .6; }
+  @media (prefers-color-scheme: dark) { .yes { color: #6ee7a0; } .no { color: #ff9c94; } }
+  #log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+         white-space: pre-wrap; max-height: 340px; overflow-y: auto; padding: 12px;
+         border: 1px solid rgba(128,128,128,.3); border-radius: 8px; background: rgba(128,128,128,.06); }
+  .meter { height: 22px; border-radius: 5px; background: rgba(128,128,128,.18); overflow: hidden; flex: 1; min-width: 200px; }
+  .meter > div { height: 100%; width: 0%; background: currentColor; transition: width .05s linear; }
+  .note { border-left: 3px solid rgba(128,128,128,.5); padding: 2px 0 2px 12px; margin: 12px 0; opacity: .85; }
+  code { background: rgba(128,128,128,.16); padding: 1px 5px; border-radius: 4px; }
+
+  /* The guided run. Everything below exists so this page can be followed without first reading
+     it end to end: the questions it answers need a person with a microphone, and that person
+     should not have to hold the running order in their head while talking. */
+  body { padding-bottom: 190px; }
+  #coach {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    border-top: 2px solid currentColor; padding: 14px 24px 16px;
+    background: Canvas; box-shadow: 0 -8px 24px rgba(0,0,0,.16);
+  }
+  #coach-inner { max-width: 900px; margin: 0 auto; }
+  #coach-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  #coach-count { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
+  #coach-title { font-weight: 700; font-size: 16px; }
+  #coach-detail { margin: 6px 0 10px; opacity: .85; }
+  #coach-detail b { font-weight: 700; }
+  .coach-buttons { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #coach-hint { font-size: 13px; opacity: .7; margin-left: auto; }
+  /* The pointer. An outline plus motion, because an outline alone is easy to miss on a page
+     with this many controls, and motion alone says "something changed" without saying where. */
+  .coach-target {
+    outline: 3px solid #d97706; outline-offset: 3px; border-radius: 7px;
+    animation: coach-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes coach-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(217,119,6,.55); }
+    50% { box-shadow: 0 0 0 8px rgba(217,119,6,0); }
+  }
+  @media (prefers-reduced-motion: reduce) { .coach-target { animation: none; } }
+  .coach-section { background: rgba(217,119,6,.09); border-radius: 8px; }
+  .done-tick { color: #157f3d; font-weight: 700; }
+  @media (prefers-color-scheme: dark) { .done-tick { color: #6ee7a0; } }
+  [title] { cursor: help; }
+  button[title] { cursor: pointer; }
+</style>
+</head>
+<body>
+
+<h1>Phase 0 spike: does speech recognition survive a live WebRTC call?</h1>
+<p class="sub" style="margin:0 0 8px; font-size:13px">
+  build <code id="build-marker">checking</code>. If this does not match the repository, you are
+  looking at a cached page: hard reload with <b>shift and the reload button</b>.
+</p>
+<p class="sub">
+  Settles the two questions that decide the whole speech architecture. Serve this over
+  <strong>https</strong> or from <code>localhost</code>: getUserMedia and SpeechRecognition both
+  need a secure context, and <code>http://192.168.x.x</code> is not one.
+</p>
+
+<div class="note">
+  <strong>Question 1.</strong> Does <code>SpeechRecognition.start(audioTrack)</code> accept a
+  MediaStreamTrack? Research reached opposite conclusions on this, so measure it.<br>
+  <strong>Question 2.</strong> If it does not, recognition opens its own capture stream with no
+  echo cancellation we can configure, and it will transcribe the remote speaker as though they
+  were the local user. Test 3 measures whether that actually happens, and test 4 measures whether
+  an RMS gate can tell the two apart.
+</div>
+
+<h2>Capabilities</h2>
+<table id="caps">
+  <tr><th>SpeechRecognition</th><td id="cap-sr" class="unknown">not checked</td></tr>
+  <tr><th>start() accepts audioTrack</th><td id="cap-track" class="unknown">not checked</td></tr>
+  <tr><th>On device (processLocally)</th><td id="cap-local" class="unknown">not checked</td></tr>
+  <tr><th>Applied audio constraints</th><td id="cap-constraints" class="unknown">not checked</td></tr>
+  <tr><th>Recognition input device</th><td id="cap-device" class="unknown">not checked</td></tr>
+</table>
+
+<h2>1. Microphone and a loopback peer connection</h2>
+<div class="row">
+  <button id="btn-media" title="Opens your microphone and loops it back through a local WebRTC connection, which is what makes this page behave like a real call. Your browser will ask permission: click Allow.">Start mic and loopback</button>
+  <button id="btn-stop" disabled title="Releases the microphone and tears everything down. Do this only when you are finished: the session durability numbers in section 5 need recognition left running for a while.">Stop everything</button>
+</div>
+
+<h2>2. Recognition alongside the live call</h2>
+<div class="row">
+  <label title="Leave this on en-US for the whole run so every number comes from one configuration. Note that the cloud recognizer transcribed Spanish as clean Spanish with this set to en-US, so the language hint is not a filter: what marks a line as echo is that it arrived while you were silent.">Language
+    <select id="lang">
+      <option value="en-US">en-US</option>
+      <option value="es-AR">es-AR</option>
+      <option value="es-MX">es-MX</option>
+      <option value="es-ES">es-ES</option>
+    </select>
+  </label>
+  <button id="btn-recog" disabled title="Starts listening. From here on, every interim and FINAL result appears in the event log at the bottom.">Start recognition</button>
+  <button id="btn-recog-stop" disabled title="Stops listening. Leave recognition running for several minutes before you do this, or section 5 has nothing to report.">Stop recognition</button>
+</div>
+
+<h2>3. Echo test</h2>
+<p class="sub" style="margin:0 0 10px">
+  Play Spanish audio out of your <strong>speakers</strong> (not headphones) with an
+  <code>en-US</code> recognizer running. If transcripts appear while you are silent, echo leaks
+  into recognition and the RMS gate below is required. Then repeat wearing headphones.
+</p>
+<div class="note">
+  The Spanish below is spoken by the browser's own speech synthesizer rather than a downloaded
+  recording. That keeps this page standalone and offline, which is the property that lets it run
+  from a <code>file://</code> URL with no server, and it means the script is KNOWN: whatever the
+  recognizer reports while you are silent can be compared against what was actually said. If you
+  would rather use a real human recording, load one with the file picker.
+</div>
+<div class="note">
+  <strong>Read this before trusting a leak you see here.</strong> Synthesized speech and a local
+  audio file both play as ORDINARY SYSTEM AUDIO, which the WebRTC echo canceller may not have in
+  its reference signal. A real caller's voice does not arrive that way: it comes out of the peer
+  connection's own playback, which the canceller does know about. So a leak measured here is an
+  UPPER BOUND and may be far worse than a real call. It is still worth measuring, because it
+  proves the microphone hears the speakers at all, but it does not settle whether a real peer
+  leaks. Settling that needs a second device in a real call, which is why the matrix in
+  <code>vt-0004</code> asks for one.
+</div>
+<div class="row">
+  <button id="btn-play-spanish" title="Speaks Spanish through your SPEAKERS on a loop. Stay silent while it plays and watch the log for FINAL lines: any that appear are echo leaking into recognition.">Play Spanish through the speakers</button>
+  <button id="btn-stop-spanish" disabled title="Stops the Spanish playback.">Stop Spanish</button>
+  <span id="voice-status" class="unknown">no voice checked yet</span>
+</div>
+<div class="row">
+  <label for="own-audio-file" title="Optional. Any Spanish speech recording works: one clear speaker, continuous, normal conversational volume. Nothing is uploaded, the file is read locally.">
+    Or load your own clip:
+  </label>
+  <input type="file" id="own-audio-file" accept="audio/*">
+</div>
+<audio id="own-audio" controls loop style="width:100%; margin-bottom:14px; display:none"></audio>
+
+<h2>4. RMS gate on the echo cancelled track</h2>
+<p class="sub" style="margin:0 0 10px">
+  This meter reads the <em>getUserMedia</em> track, which does have echo cancellation applied.
+  Speak: it should rise. Then stay silent while remote audio plays: it should stay low. The gap
+  between those two numbers is the threshold constant.
+</p>
+<div class="row">
+  <div class="meter"><div id="meter-fill"></div></div>
+  <span id="rms-now" style="min-width:150px">RMS 0.0000</span>
+</div>
+<div class="row">
+  <button id="btn-mark-speaking" disabled title="Click, then talk normally for about ten seconds, then click again to stop. It records the loudest your own voice gets.">Mark: I am speaking</button>
+  <button id="btn-mark-silent" disabled title="Click while you stay COMPLETELY silent, then click again to stop. What it measures depends on what is playing: with the Spanish running it is leaked speaker audio, with nothing running it is your room and fan noise floor. Both are useful and they are NOT the same number, so record which one you took.">Mark: silent (leaked audio, or noise floor)</button>
+</div>
+<table>
+  <tr><th>Peak while speaking</th><td id="rms-speaking" class="unknown">not sampled</td></tr>
+  <tr><th>Peak while silent</th><td id="rms-silent" class="unknown">not sampled</td></tr>
+  <tr><th>What that silent peak means</th><td class="unknown">leaked speaker audio if something was playing, your room noise floor if not. The suggested threshold below assumes the first.</td></tr>
+  <tr><th>Suggested threshold</th><td id="rms-threshold" class="unknown">sample both above</td></tr>
+</table>
+
+<h2>5. Session durability</h2>
+<table>
+  <tr><th>Recognition started at</th><td id="dur-start" class="unknown">not started</td></tr>
+  <tr><th>First unintentional onend</th><td id="dur-first-end" class="unknown">none yet</td></tr>
+  <tr><th>Restarts so far</th><td id="dur-restarts">0</td></tr>
+  <tr><th>Errors seen</th><td id="dur-errors" class="unknown">none</td></tr>
+</table>
+
+<h2>6. Finalization latency</h2>
+<p class="sub" style="margin:0 0 10px">
+  How long after you stop talking does a FINAL result arrive? This is the one stage of the pipeline
+  that cannot be measured in a container, and <code>docs/proposals/vt-0014.md</code> found it is the
+  largest remaining unknown: everything else between a spoken sentence and a rendered translation is
+  about 11ms, so if this number is large then recognition dominates and swapping the translation
+  model would not help.
+</p>
+<p class="sub" style="margin:0 0 10px">
+  Two measures, and they bracket the answer from BELOW rather than from both sides.
+  <strong>Last interim to final</strong> is automatic and has no human in it, but it starts from
+  the last time the engine reported hearing something rather than from the moment you stopped, so
+  it is the smaller of the two. <strong>Marked speech end to final</strong> is closer to the real
+  gap, and it is still an <strong>underestimate</strong>: clicking late moves the start of the
+  interval forward, which makes the measured gap SHORTER, not longer. Add your reaction time,
+  roughly 200 to 300ms, to get the honest figure. The true speech end to final time is at least
+  the marked number.
+</p>
+<div class="row">
+  <button id="btn-mark-speech-end" disabled title="Click the INSTANT you finish a sentence, not a moment later. The next FINAL result reports the gap. Do it on several sentences so the median means something.">Mark: I just stopped speaking</button>
+</div>
+<table>
+  <tr><th>Last interim to final</th><td id="lat-interim" class="unknown">not sampled</td></tr>
+  <tr><th>Marked speech end to final</th><td id="lat-marked" class="unknown">not sampled</td></tr>
+  <tr><th>Reaction time caveat</th><td class="unknown">clicking late SHORTENS the marked interval, so that row is a floor. Add roughly 200 to 300ms of reaction time to get the real gap.</td></tr>
+</table>
+
+<h2>Event log</h2>
+<div class="row">
+  <button id="btn-copy" title="Copies the whole timeline plus your browser and platform. This is what docs/proposals/vt-0004.md gets written from, so do it before closing the tab.">Copy log</button>
+  <button id="btn-clear" title="Wipes the log. The tables above keep their numbers.">Clear</button>
+</div>
+<div id="log"></div>
+
+<div id="coach">
+  <div id="coach-inner">
+    <div id="coach-head">
+      <span id="coach-count">step 1 of 1</span>
+      <span id="coach-title">Loading</span>
+    </div>
+    <p id="coach-detail">Loading the guided run.</p>
+    <div class="coach-buttons">
+      <button id="coach-back" title="Go back a step. Nothing you have already measured is lost.">Back</button>
+      <button id="coach-next" title="Move to the next step.">Next step</button>
+      <span id="coach-hint"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  /** Identifies this file in a pasted log. See the marker at the bottom for why it exists. */
+  const BUILD = "2026-08-04h silent-label";
+
+  const $ = (id) => document.getElementById(id);
+  const started = Date.now();
+  const lines = [];
+
+  function log(message) {
+    const stamp = ((Date.now() - started) / 1000).toFixed(2).padStart(7, " ");
+    const line = `[${stamp}s] ${message}`;
+    lines.push(line);
+    const box = $("log");
+    box.textContent += (box.textContent ? "\n" : "") + line;
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function verdict(id, ok, text) {
+    const cell = $(id);
+    cell.textContent = text;
+    cell.className = ok === null ? "unknown" : ok ? "verdict yes" : "verdict no";
+  }
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  // State
+  let stream = null;
+  let pcLocal = null;
+  let pcRemote = null;
+  let recognition = null;
+  let audioContext = null;
+  let analyser = null;
+  let rmsTimer = null;
+  let intentionalStop = false;
+  let restarts = 0;
+  let recogStartedAt = 0;
+  let firstEndLogged = false;
+  let sampling = null;
+  let peakSpeaking = 0;
+  let peakSilent = 0;
+  const errorsSeen = new Set();
+
+  // Finalization latency. Both are cleared on every final, so a number is only ever produced from
+  // the utterance it belongs to: a stale mark carried across two sentences would report the gap
+  // between them as recognition latency, which is the one wrong answer worth guarding against.
+  let lastInterimAt = 0;
+  let speechEndMarkedAt = 0;
+  const interimToFinal = [];
+  const markedToFinal = [];
+
+  /**
+   * What SpeechRecognition.available() said about the on device model, and whether to stop asking.
+   *
+   * "downloadable" means the model is OFFERED and not installed. Requesting processLocally in that
+   * state does not fall back: Chrome errors with language-not-supported and recognition never
+   * starts at all, so every measurement below it is unreachable. That is exactly what happened on
+   * the first real run of this page, and the log gave no hint that the two facts were connected.
+   *
+   * usedProcessLocally records which path the numbers actually came from, because on device and
+   * cloud recognition have materially different latency and a finalization figure that does not
+   * say which one it measured is ambiguous.
+   */
+  let onDeviceStatus = null;
+  let forceCloud = false;
+  let usedProcessLocally = false;
+
+  /**
+   * The last time the engine reported hearing ANYTHING, interim or final.
+   *
+   * Separate from lastInterimAt, which every final clears. This one is never cleared, because the
+   * question it answers is how long a session survives SILENCE: the first run ended
+   * unintentionally after 178 seconds, but the tester had stopped talking 68 seconds earlier, and
+   * those are different facts with different consequences for the restart supervisor. Deriving it
+   * by hand from timestamps afterwards is exactly the kind of arithmetic that should not be left
+   * to whoever reads the log.
+   */
+  let lastResultAt = 0;
+
+  // Capability probe
+  verdict("cap-sr", Boolean(SR), SR ? `present as ${window.SpeechRecognition ? "SpeechRecognition" : "webkitSpeechRecognition"}` : "ABSENT (Firefox: subtitles will not work here)");
+
+  if (SR) {
+    // The spec added an optional audioTrack parameter to start(). Function.length does not
+    // report optional parameters reliably across engines, so the only honest probe is to try
+    // it with a real track, which happens once the mic is live.
+    verdict("cap-track", null, "probed when the mic starts");
+
+    if (typeof SR.available === "function") {
+      SR.available({ langs: ["en-US"], processLocally: true })
+        .then((status) => {
+          const ok = status === "available";
+          onDeviceStatus = status;
+          verdict("cap-local", ok, `${status}${ok ? " (audio stays on device)" : " (cloud path: audio goes to the browser vendor)"}`);
+          log(`on device availability for en-US: ${status}`);
+          if (status === "downloadable") {
+            log("NOTE: the on device model is offered but NOT installed, so recognition will use the cloud path. Install the language in Chrome settings to measure the on device path instead, and note which path the numbers came from: their latency differs.");
+          }
+        })
+        .catch((error) => {
+          onDeviceStatus = "unavailable";
+          verdict("cap-local", false, `available() threw: ${error.name}`);
+          log(`on device probe failed: ${error}`);
+        });
+    } else {
+      onDeviceStatus = "unavailable";
+      verdict("cap-local", false, "SpeechRecognition.available() not implemented: cloud path only");
+    }
+  } else {
+    verdict("cap-track", null, "n/a, no SpeechRecognition");
+    verdict("cap-local", null, "n/a, no SpeechRecognition");
+  }
+
+  async function startMedia() {
+    try {
+      // Echo cancellation ON: this is the track whose RMS we trust as the "am I speaking" oracle.
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: false,
+      });
+    } catch (error) {
+      log(`getUserMedia FAILED: ${error.name} ${error.message}`);
+      return;
+    }
+
+    const track = stream.getAudioTracks()[0];
+    const settings = track.getSettings ? track.getSettings() : {};
+    log(`mic live: "${track.label}" readyState=${track.readyState}`);
+    verdict("cap-constraints", Boolean(settings.echoCancellation),
+      `echoCancellation=${settings.echoCancellation} noiseSuppression=${settings.noiseSuppression} autoGainControl=${settings.autoGainControl}`);
+    log(`applied settings: ${JSON.stringify(settings)}`);
+
+    // A loopback peer connection, so recognition is competing with a genuinely active
+    // RTCPeerConnection rather than just a getUserMedia stream sitting idle.
+    pcLocal = new RTCPeerConnection();
+    pcRemote = new RTCPeerConnection();
+    pcLocal.onicecandidate = (e) => e.candidate && pcRemote.addIceCandidate(e.candidate);
+    pcRemote.onicecandidate = (e) => e.candidate && pcLocal.addIceCandidate(e.candidate);
+    pcLocal.oniceconnectionstatechange = () => log(`pc ICE state: ${pcLocal.iceConnectionState}`);
+    stream.getTracks().forEach((t) => pcLocal.addTrack(t, stream));
+
+    const offer = await pcLocal.createOffer();
+    await pcLocal.setLocalDescription(offer);
+    await pcRemote.setRemoteDescription(offer);
+    const answer = await pcRemote.createAnswer();
+    await pcRemote.setLocalDescription(answer);
+    await pcLocal.setRemoteDescription(answer);
+    log("loopback peer connection negotiated, audio is flowing");
+
+    // RMS meter on the AEC'd track.
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 1024;
+    audioContext.createMediaStreamSource(new MediaStream([track])).connect(analyser);
+    const buffer = new Float32Array(analyser.fftSize);
+
+    rmsTimer = setInterval(() => {
+      analyser.getFloatTimeDomainData(buffer);
+      let sum = 0;
+      for (let i = 0; i < buffer.length; i += 1) sum += buffer[i] * buffer[i];
+      const rms = Math.sqrt(sum / buffer.length);
+
+      $("meter-fill").style.width = `${Math.min(100, rms * 400)}%`;
+      $("rms-now").textContent = `RMS ${rms.toFixed(4)}`;
+
+      if (sampling === "speaking" && rms > peakSpeaking) {
+        peakSpeaking = rms;
+        $("rms-speaking").textContent = peakSpeaking.toFixed(4);
+        $("rms-speaking").className = "";
+      }
+      if (sampling === "silent" && rms > peakSilent) {
+        peakSilent = rms;
+        $("rms-silent").textContent = peakSilent.toFixed(4);
+        $("rms-silent").className = "";
+      }
+      if (peakSpeaking > 0 && peakSilent > 0) {
+        const ratio = peakSpeaking / peakSilent;
+        const suggested = (peakSilent + (peakSpeaking - peakSilent) * 0.35).toFixed(4);
+        const usable = ratio >= 3;
+        verdict("rms-threshold", usable,
+          usable
+            ? `${suggested} (speaking is ${ratio.toFixed(1)}x silent: the gate WORKS)`
+            : `only ${ratio.toFixed(1)}x separation: the gate CANNOT discriminate, use push to talk`);
+      }
+    }, 50);
+
+    $("btn-media").disabled = true;
+    $("btn-stop").disabled = false;
+    $("btn-recog").disabled = !SR;
+    $("btn-mark-speaking").disabled = false;
+    $("btn-mark-silent").disabled = false;
+  }
+
+  function startRecognition() {
+    const track = stream && stream.getAudioTracks()[0];
+    recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = $("lang").value;
+
+    // Prefer on device when the engine offers it: audio stays local and the cloud session limits
+    // do not apply. Only when the model is actually INSTALLED, though. "downloadable" means it is
+    // offered and absent, and asking for it then is not a preference the engine can decline: it
+    // refuses the whole session with language-not-supported and nothing starts.
+    usedProcessLocally = false;
+    if ("processLocally" in recognition && onDeviceStatus === "available" && !forceCloud) {
+      try {
+        recognition.processLocally = true;
+        usedProcessLocally = true;
+        log("requested processLocally = true (the on device model is installed)");
+      } catch (error) {
+        log(`processLocally rejected: ${error}`);
+      }
+    } else if ("processLocally" in recognition) {
+      log(`using the CLOUD path (on device model is "${onDeviceStatus ?? "not probed yet"}"${forceCloud ? ", forced after a language-not-supported error" : ""})`);
+    }
+
+    recognition.onstart = () => {
+      recogStartedAt = Date.now();
+      log(`recognition started (lang=${recognition.lang})`);
+      if ($("dur-start").textContent === "not started") {
+        $("dur-start").textContent = new Date().toLocaleTimeString();
+        $("dur-start").className = "";
+      }
+    };
+
+    recognition.onresult = (event) => {
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const text = result[0].transcript.trim();
+        if (!text) continue;
+        const rmsNote = sampling === "silent" ? "  <-- WHILE MARKED SILENT: THIS IS ECHO" : "";
+
+        const now = Date.now();
+        lastResultAt = now;
+        let latencyNote = "";
+        if (result.isFinal) {
+          // An echo final is a result the engine produced from the SPEAKERS, not from this
+          // person, so its timing says nothing about how fast their own speech gets finalized.
+          //
+          // Keyed on whether a known sound source is PLAYING, not on whether the tester happens
+          // to be RMS sampling silence at that moment. The first real run showed why: the echo
+          // test runs for minutes and the silent sample covers ten seconds of it, so two Spanish
+          // finals were counted as speech and moved the median from 129ms to 149ms and the
+          // maximum from 490ms to 1212ms. A latency table that quietly includes echo is
+          // measuring the wrong thing.
+          if (echoSourcePlaying()) {
+            latencyNote = "  (latency not sampled: a sound source is playing, so this is echo)";
+          } else {
+            if (lastInterimAt) {
+              const delta = now - lastInterimAt;
+              interimToFinal.push(delta);
+              latencyNote += `  [last interim to final ${delta}ms]`;
+            }
+            if (speechEndMarkedAt) {
+              const delta = now - speechEndMarkedAt;
+              markedToFinal.push(delta);
+              latencyNote += `  [marked speech end to final ${delta}ms]`;
+            }
+            renderLatency();
+          }
+          lastInterimAt = 0;
+          speechEndMarkedAt = 0;
+        } else {
+          lastInterimAt = now;
+        }
+
+        log(`${result.isFinal ? "FINAL  " : "interim"} "${text}" (confidence ${(result[0].confidence || 0).toFixed(2)})${rmsNote}${latencyNote}`);
+      }
+    };
+
+    recognition.onerror = (event) => {
+      errorsSeen.add(event.error);
+      $("dur-errors").textContent = Array.from(errorsSeen).join(", ");
+      $("dur-errors").className = "";
+      log(`ERROR ${event.error}${event.message ? `: ${event.message}` : ""}`);
+
+      // Belt and braces behind the availability check above. The probe and the actual attempt can
+      // disagree (a model can be evicted between the two), and the cost of not recovering is the
+      // entire run: recognition never starts, and the page goes on cheerfully offering buttons
+      // that measure nothing.
+      if (event.error === "language-not-supported" && usedProcessLocally) {
+        forceCloud = true;
+        log("language-not-supported with processLocally on. Rebuilding on the cloud path.");
+        intentionalStop = true;
+        try { recognition.stop(); } catch { /* already gone */ }
+        recognition = null;
+        setTimeout(() => { intentionalStop = false; startRecognition(); }, 300);
+        return;
+      }
+
+      // A terminal error has to be LOUD. This one cost a whole session on real hardware: the page
+      // logged one line, left every control enabled, and nothing said recognition was not running.
+      if (event.error === "language-not-supported" || event.error === "not-allowed" || event.error === "service-not-allowed") {
+        coachAlert(
+          `Recognition could not start: ${event.error}.`,
+          event.error === "language-not-supported"
+            ? "The selected language is not available on this path. The page is retrying on the cloud path. If this repeats, pick a different language or install the language pack in your browser settings."
+            : "The browser refused microphone access for recognition. Check the site permission in the address bar, then press Start recognition again.",
+        );
+      }
+    };
+
+    recognition.onend = () => {
+      const alive = ((Date.now() - recogStartedAt) / 1000).toFixed(1);
+      if (intentionalStop) {
+        log(`recognition ended (intentional) after ${alive}s`);
+        return;
+      }
+      // Two different durations, and conflating them is how the restart supervisor gets tuned
+      // against the wrong one. Session age says how long the engine held the session open;
+      // silence says how long it tolerated hearing nothing, which is the case a listener in a
+      // real call is in for minutes at a time.
+      const silent = lastResultAt ? ((Date.now() - lastResultAt) / 1000).toFixed(1) : null;
+      log(
+        `recognition ended UNINTENTIONALLY after ${alive}s of session` +
+          (silent === null ? ", with no speech ever recognized" : `, ${silent}s after the last speech it heard`),
+      );
+      if (!firstEndLogged) {
+        firstEndLogged = true;
+        $("dur-first-end").textContent =
+          `${alive}s into the session` + (silent === null ? "" : `, ${silent}s after the last speech`);
+        $("dur-first-end").className = "verdict no";
+      }
+      restarts += 1;
+      $("dur-restarts").textContent = String(restarts);
+      // A deliberately naive immediate restart, because part of what this spike measures is
+      // how quickly a naive restart gets throttled. Production code must back off.
+      setTimeout(() => {
+        if (!intentionalStop && recognition) {
+          try { recognition.start(); } catch (error) { log(`restart threw: ${error.name}`); }
+        }
+      }, 250);
+    };
+
+    // THE QUESTION. Try the track first, fall back to argless.
+    intentionalStop = false;
+    try {
+      recognition.start(track);
+      verdict("cap-track", true, "ACCEPTED a MediaStreamTrack: same AEC'd track as WebRTC, echo is designed away");
+      log("start(audioTrack) ACCEPTED");
+    } catch (error) {
+      if (error instanceof TypeError || error.name === "TypeError") {
+        verdict("cap-track", false, `REJECTED (${error.name}): recognition opens its own capture, echo mitigation IS required`);
+        log(`start(audioTrack) rejected with ${error.name}: ${error.message}. Falling back to argless start().`);
+        try {
+          recognition.start();
+          log("argless start() accepted");
+        } catch (fallbackError) {
+          log(`argless start() ALSO threw: ${fallbackError.name} ${fallbackError.message}`);
+          return;
+        }
+      } else {
+        log(`start(audioTrack) threw ${error.name}: ${error.message}`);
+        verdict("cap-track", false, `threw ${error.name}: ${error.message}`);
+        return;
+      }
+    }
+
+    // Which device is recognition actually listening to? The expectation is that it ignores
+    // any deviceId and uses the OS default, which is why the MVP ships no microphone picker.
+    verdict("cap-device", null,
+      "not directly observable. Infer it: switch the OS default input mid session and see whether transcripts follow.");
+
+    $("btn-recog").disabled = true;
+    $("btn-recog-stop").disabled = false;
+    // Only while recognition is live: a mark with nothing listening has no final to pair with.
+    $("btn-mark-speech-end").disabled = false;
+  }
+
+  function stopRecognition() {
+    intentionalStop = true;
+    if (recognition) { try { recognition.stop(); } catch { /* already stopped */ } }
+    recognition = null;
+    $("btn-recog").disabled = false;
+    $("btn-recog-stop").disabled = true;
+    $("btn-mark-speech-end").disabled = true;
+    // A mark that never got its final would otherwise pair with the first final of the NEXT
+    // session and report the gap between two sittings as recognition latency.
+    speechEndMarkedAt = 0;
+    lastInterimAt = 0;
+  }
+
+  function stopAll() {
+    stopRecognition();
+    if (rmsTimer) { clearInterval(rmsTimer); rmsTimer = null; }
+    if (audioContext) { audioContext.close(); audioContext = null; }
+    if (pcLocal) { pcLocal.close(); pcLocal = null; }
+    if (pcRemote) { pcRemote.close(); pcRemote = null; }
+    if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+    log("stopped everything");
+    $("btn-media").disabled = false;
+    $("btn-stop").disabled = true;
+    $("btn-recog").disabled = true;
+    $("btn-recog-stop").disabled = true;
+    $("btn-mark-speaking").disabled = true;
+    $("btn-mark-silent").disabled = true;
+    $("btn-mark-speech-end").disabled = true;
+    // Otherwise the synthesizer keeps talking to an empty room after everything else has stopped.
+    if (spanishPlaying) stopSpanish();
+  }
+
+  function mark(mode) {
+    // Report the peak when a window CLOSES, into the log.
+    //
+    // These numbers live in a table on screen and the log is what gets pasted into a report, so
+    // twice now a run has come back with the RMS windows visibly opened and closed and no values
+    // attached to them. A measurement that does not survive the copy button may as well not have
+    // been taken.
+    if (sampling !== null) {
+      const peak = sampling === "speaking" ? peakSpeaking : peakSilent;
+      log(`sampling ${sampling} ENDED, peak RMS ${peak.toFixed(4)}`);
+    }
+    sampling = sampling === mode ? null : mode;
+    log(sampling ? `sampling: ${sampling}` : "sampling: off");
+    $("btn-mark-speaking").textContent = sampling === "speaking" ? "Sampling... click to stop" : "Mark: I am speaking";
+    $("btn-mark-silent").textContent = sampling === "silent" ? "Sampling... click to stop" : "Mark: silent, remote playing";
+  }
+
+  /** Is anything this page knows about coming out of the speakers right now? */
+  function echoSourcePlaying() {
+    const own = $("own-audio");
+    return spanishPlaying || Boolean(own && own.src && !own.paused && !own.ended);
+  }
+
+  function markSpeechEnd() {
+    // A mark only means something while an utterance is IN FLIGHT. lastInterimAt is cleared by
+    // every final, so a zero here means the engine already committed whatever was being said and
+    // this mark has nothing to pair with. Left alone it would sit and attach itself to the NEXT
+    // utterance, which on the first real run produced a 3685ms sample out of a mark placed 0.3s
+    // after the final it was aimed at. Refusing it is better than reporting fiction, and saying
+    // why is better than refusing silently.
+    if (lastInterimAt === 0) {
+      log("mark IGNORED: that sentence had already been finalized, so there is nothing to time. Mark the instant you stop talking, before the FINAL line appears.");
+      return;
+    }
+    speechEndMarkedAt = Date.now();
+    log("marked: speech ended. The next FINAL will report the gap.");
+  }
+
+  // -------------------------------------------------------------------------
+  // Spanish audio for the echo test
+  //
+  // Synthesized rather than downloaded, for three reasons. This page has to keep working from a
+  // file:// URL with no server and no network, which a fetched clip would break. A recording
+  // committed to the repository would carry someone else's copyright. And the synthesizer's script
+  // is KNOWN, so whatever an en-US recognizer reports while the tester is silent can be compared
+  // against what was actually said rather than only noted as "something appeared".
+  //
+  // A file picker sits beside it for anyone who would rather use a real human recording. That file
+  // is read locally through an object URL and never leaves the machine.
+  // -------------------------------------------------------------------------
+
+  /** Deliberately ordinary conversational Spanish, and long enough to leave gaps of real silence. */
+  const SPANISH_SCRIPT = [
+    "Hola, buenos días. Esta es una prueba de audio en español para medir el eco.",
+    "Si estas palabras aparecen en la pantalla mientras vos permanecés en silencio, entonces el sonido de los altavoces está entrando en el micrófono.",
+    "¿Tenés tiempo mañana para hablar sobre el proyecto de traducción en tiempo real?",
+    "El reconocimiento de voz debería ignorar por completo esta grabación.",
+  ].join(" ");
+
+  let spanishPlaying = false;
+
+  function spanishVoice() {
+    const voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
+    return voices.find((v) => v.lang && v.lang.toLowerCase().startsWith("es")) || null;
+  }
+
+  function reportVoice() {
+    if (!window.speechSynthesis) {
+      verdict("voice-status", false, "speechSynthesis ABSENT: use the file picker instead");
+      return;
+    }
+    const voice = spanishVoice();
+    if (voice) {
+      verdict("voice-status", true, `using ${voice.name} (${voice.lang})`);
+    } else {
+      // Not a failure of this page. Say what to do about it rather than only that it happened:
+      // an English voice reading Spanish still produces Spanish-ish phonemes and is a weaker
+      // test, and a real recording through the file picker is the better answer.
+      verdict("voice-status", null,
+        "no Spanish voice installed. The English voice will read it, which is a WEAKER test. Prefer the file picker, or install a Spanish voice in your OS settings.");
+    }
+  }
+
+  function playSpanish() {
+    if (!window.speechSynthesis) {
+      log("speechSynthesis is not available: load a clip with the file picker instead");
+      return;
+    }
+    spanishPlaying = true;
+    $("btn-play-spanish").disabled = true;
+    $("btn-stop-spanish").disabled = false;
+    log("Spanish playback STARTED. Stay silent. Any FINAL from here is echo.");
+
+    const speakOnce = () => {
+      if (!spanishPlaying) return;
+      const utterance = new SpeechSynthesisUtterance(SPANISH_SCRIPT);
+      const voice = spanishVoice();
+      if (voice) utterance.voice = voice;
+      utterance.lang = voice ? voice.lang : "es-ES";
+      // Loops, so the tester can keep both hands free and watch the log rather than re-arming
+      // playback every twenty seconds.
+      utterance.onend = () => { if (spanishPlaying) speakOnce(); };
+      window.speechSynthesis.speak(utterance);
+    };
+    speakOnce();
+  }
+
+  function stopSpanish() {
+    spanishPlaying = false;
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    $("btn-play-spanish").disabled = false;
+    $("btn-stop-spanish").disabled = true;
+    log("Spanish playback stopped");
+  }
+
+  function loadOwnAudio(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const audio = $("own-audio");
+    audio.src = URL.createObjectURL(file);
+    audio.style.display = "block";
+    // The NAME only, never the contents, and nothing is uploaded anywhere.
+    log(`loaded a local audio clip (${file.name}). Press play on it, through your SPEAKERS.`);
+  }
+
+  /** Median, and the sample count beside it, so one observation cannot read as a distribution. */
+  function median(values) {
+    const sorted = values.slice().sort((a, b) => a - b);
+    return sorted[Math.ceil(sorted.length / 2) - 1];
+  }
+
+  /**
+   * Report the two latency measures, or say plainly that they were not sampled.
+   *
+   * "not sampled" rather than 0ms, which is the same rule the spend ledger follows for an
+   * unrecoverable cost and script/latency_stats.mjs follows for an unmeasured stage: nobody timed
+   * it and it took no time are different facts, and a zero silently becomes the second one.
+   */
+  function renderLatency() {
+    for (const [id, samples] of [["lat-interim", interimToFinal], ["lat-marked", markedToFinal]]) {
+      if (samples.length === 0) continue;
+      $(id).textContent = `median ${median(samples)}ms, max ${Math.max(...samples)}ms, n=${samples.length}`;
+      $(id).className = "";
+    }
+  }
+
+  $("btn-media").onclick = startMedia;
+  $("btn-stop").onclick = stopAll;
+  $("btn-recog").onclick = startRecognition;
+  $("btn-recog-stop").onclick = stopRecognition;
+  $("btn-mark-speaking").onclick = () => mark("speaking");
+  $("btn-mark-silent").onclick = () => mark("silent");
+  $("btn-mark-speech-end").onclick = markSpeechEnd;
+  $("btn-play-spanish").onclick = playSpanish;
+  $("btn-stop-spanish").onclick = stopSpanish;
+  $("own-audio-file").onchange = loadOwnAudio;
+
+  // -------------------------------------------------------------------------
+  // The guided run
+  //
+  // This page asks a person to talk, stay silent, put headphones on, and click the right control
+  // at the right moment, and it used to convey all of that in prose above the controls. Following
+  // it meant reading the whole page first and then holding the running order in your head while
+  // speaking. The order below is the order the measurements have to happen in: the RMS peaks are
+  // only comparable if both are sampled against the same audio, and the echo test is only
+  // meaningful with recognition already running on en-US.
+  // -------------------------------------------------------------------------
+
+  const STEPS = [
+    {
+      title: "Open your microphone",
+      detail: "Click the highlighted button and choose <b>Allow</b> when the browser asks for the microphone. This also loops your audio back through a local WebRTC connection, so the page behaves like a real call rather than a bare recorder.",
+      target: "btn-media",
+      advanceOn: "click",
+      done: () => stream !== null,
+    },
+    {
+      title: "Leave the language on en-US",
+      detail: "Check the highlighted dropdown reads <b>en-US</b> and leave it there for the whole run, so every number comes from one configuration. Do NOT expect Spanish to arrive as garbled English: on the cloud path Chrome transcribed the whole Spanish passage as clean Spanish at full confidence with the language set to en-US, so the language hint is not the filter it looks like. What tells you a line is echo is that it appeared while you were silent, not that it looks wrong.",
+      target: "lang",
+      hint: "just check it, then press Next step",
+      done: () => recognition !== null,
+    },
+    {
+      title: "Start recognition",
+      detail: "Click the highlighted button. From here everything the recognizer hears appears in the event log at the bottom of the page, as <code>interim</code> lines while you talk and a <code>FINAL</code> line when it commits. Watch for a <code>recognition started</code> line: if you get an <code>ERROR</code> instead, recognition is NOT running and nothing below will measure anything.",
+      target: "btn-recog",
+      advanceOn: "click",
+      done: () => recogStartedAt > 0,
+    },
+    {
+      title: "Talk normally for about thirty seconds",
+      detail: "Say anything, in English, in a normal speaking voice. Watch the event log fill in. Section 6 starts reporting <b>last interim to final</b> on its own, with no clicking from you. That is the automatic half of the number this whole step exists to produce.",
+      target: null,
+      hint: "no button, just talk",
+      done: () => interimToFinal.length >= 3,
+    },
+    {
+      title: "Mark where your sentences end",
+      detail: "Now say a sentence and click the highlighted button <b>the instant you stop talking</b>, not a moment later. Do this for five or six separate sentences. This fills the <b>marked speech end to final</b> row, which is the closest thing here to what a caller actually experiences. Clicking late makes the measured gap shorter than the truth, so being late costs accuracy in the direction that flatters the result.",
+      target: "btn-mark-speech-end",
+      hint: "click it once per sentence, then press Next step",
+      done: () => markedToFinal.length >= 5,
+    },
+    {
+      title: "Sample how loud your own voice is",
+      detail: "Click the highlighted button, talk normally for about ten seconds, then click it again to stop. This records the loudest your own voice reaches on the echo cancelled track.",
+      target: "btn-mark-speaking",
+      hint: "click, talk, click again, then Next step",
+      done: () => peakSpeaking > 0 && sampling !== "speaking",
+    },
+    {
+      title: "Running solo? Skip the next five steps",
+      detail: "Steps 8 to 12 measure echo, and on one machine they cannot answer it. The Spanish here plays as ordinary system audio, which the WebRTC echo canceller may not hold in its reference signal, while a real caller arrives through the peer connection's playback, which it does. So a leak measured solo is an <b>upper bound</b> and may be far worse than a real call. The RMS sample in step 11 inherits the same error, because it needs that same audio to be playing. <b>With a second device in a real call, carry on. Alone, press Next five times and go straight to the log.</b> The numbers you already have from sections 5 and 6 are unaffected either way.",
+      target: null,
+      hint: "solo? press Next five times. Second device? carry on",
+    },
+    {
+      title: "Speakers on, headphones OFF",
+      detail: "Take your headphones off and make sure sound is coming out of your <b>speakers</b>. The whole point of the next few steps is sound leaving a speaker and re-entering your microphone, which is the one thing no container can simulate and the reason this step needs a real machine.",
+      target: null,
+      hint: "nothing to click, just check your audio output",
+    },
+    {
+      title: "Play the Spanish",
+      detail: "Click the highlighted button. The browser will read a short Spanish passage aloud on a loop. If your machine has no Spanish voice installed the status beside the button will say so, and a real recording through the file picker is the better test in that case.",
+      target: "btn-play-spanish",
+      advanceOn: "click",
+      done: () => spanishPlaying,
+    },
+    {
+      title: "Stay completely silent and watch the log",
+      detail: "Do not talk. Watch the event log for about thirty seconds. <b>Any <code>FINAL</code> line that appears now is echo</b>, and the page marks it as such. If nothing appears, echo cancellation is holding and the RMS gate is defensive rather than load bearing. Either answer is a real result.",
+      target: null,
+      hint: "no button, just watch and stay quiet",
+    },
+    {
+      title: "Sample how loud the leaked audio is",
+      detail: "With the Spanish still playing and you still silent, click the highlighted button, wait about ten seconds, then click it again. The gap between this peak and the one from your own voice is the threshold constant the RMS gate would use.",
+      target: "btn-mark-silent",
+      hint: "click, wait, click again, then Next step",
+      done: () => peakSilent > 0 && sampling !== "silent",
+    },
+    {
+      title: "Now put headphones on and repeat",
+      detail: "Stop the Spanish, put your headphones on, and play it again with the highlighted button. Stay silent and watch the log a second time. Headphones should stop the leak completely, and confirming that is what separates an echo problem from a microphone problem.",
+      target: "btn-play-spanish",
+      hint: "stop, headphones on, play again, then Next step",
+    },
+    {
+      title: "Leave it running for a few minutes",
+      detail: "Stop the Spanish and leave recognition running while you get on with something else. Section 5 is measuring how long a session survives before the browser ends it on its own, and how quickly naive restarts get throttled. That number tunes the restart supervisor's constants and it needs real elapsed time.",
+      target: "btn-stop-spanish",
+      hint: "stop the Spanish, then leave the page alone a while",
+    },
+    {
+      title: "Copy the log",
+      detail: "Click the highlighted button. It copies the whole timeline plus your browser and platform. Paste it into <code>docs/proposals/vt-0004.md</code> along with the numbers from sections 4, 5 and 6. <b>The one that decides the next move is the median in section 6</b>: if it is several hundred milliseconds, recognition dominates the pipeline and no provider comparison is worth paying for.",
+      target: "btn-copy",
+      advanceOn: "click",
+    },
+  ];
+
+  let coachStep = 0;
+  /** Auto advance is suspended until this time, so pressing Back does not bounce straight forward. */
+  let coachPausedUntil = 0;
+
+  /**
+   * Raise a blocking message above the step text.
+   *
+   * Terminal recognition errors used to be one line in the log and one cell in a table, with every
+   * control left enabled and nothing saying the session was dead. That silence cost a full run on
+   * real hardware: the mic was live, the buttons all worked, and nothing was being recognized.
+   */
+  function coachAlert(title, detail) {
+    $("coach-title").textContent = title;
+    $("coach-detail").textContent = detail;
+    $("coach-count").textContent = "problem";
+    $("coach-hint").textContent = "fix this before continuing";
+    for (const el of document.querySelectorAll(".coach-target")) el.classList.remove("coach-target");
+    // Hold the message long enough to be read rather than letting the next tick overwrite it.
+    coachPausedUntil = Date.now() + 20_000;
+  }
+
+  function renderCoach() {
+    const step = STEPS[coachStep];
+    for (const el of document.querySelectorAll(".coach-target")) el.classList.remove("coach-target");
+
+    $("coach-count").textContent = `step ${coachStep + 1} of ${STEPS.length}`;
+    $("coach-title").textContent = step.title;
+    // Static strings from the array above, never anything a user typed.
+    $("coach-detail").innerHTML = step.detail;
+    $("coach-back").disabled = coachStep === 0;
+    $("coach-next").disabled = coachStep === STEPS.length - 1;
+    $("coach-next").textContent = coachStep === STEPS.length - 1 ? "Finished" : "Next step";
+
+    const target = step.target ? $(step.target) : null;
+    if (target) {
+      target.classList.add("coach-target");
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+    $("coach-hint").textContent =
+      step.hint || (target ? "the highlighted control is the one to use" : "nothing to click");
+  }
+
+  function moveCoach(delta) {
+    coachStep = Math.min(STEPS.length - 1, Math.max(0, coachStep + delta));
+    renderCoach();
+  }
+
+  $("coach-back").onclick = () => {
+    // Suspend auto advance, or a completed step would bounce straight forward again and going
+    // back to re-read something already done would be impossible.
+    coachPausedUntil = Date.now() + 30_000;
+    moveCoach(-1);
+  };
+  $("coach-next").onclick = () => {
+    coachPausedUntil = 0;
+    moveCoach(1);
+  };
+
+  // Follow what actually HAPPENED, not what was clicked.
+  //
+  // The first version counted its own clicks, so working ahead silently desynced it: pressing
+  // Start recognition without pressing Next left the highlight on the language dropdown, pointing
+  // confidently at something already done. A guide that can be wrong about where you are is worse
+  // than no guide. Each step now declares how to tell it is finished, and this re-syncs to the
+  // first unfinished one.
+  setInterval(() => {
+    if (Date.now() < coachPausedUntil) return;
+    const step = STEPS[coachStep];
+    if (coachStep >= STEPS.length - 1 || !step.done || !step.done()) return;
+    moveCoach(1);
+  }, 600);
+
+  // Advance on the real click rather than only on Next, so a step whose whole content is "press
+  // this" does not need two presses. Delayed slightly so the button's own handler runs first and
+  // the tester sees what it did before the highlight moves on.
+  document.addEventListener("click", (event) => {
+    const step = STEPS[coachStep];
+    if (!step.target || step.advanceOn !== "click") return;
+    const target = $(step.target);
+    if (!target || !(event.target === target || target.contains(event.target))) return;
+    setTimeout(() => {
+      if (STEPS[coachStep] === step) moveCoach(1);
+    }, 500);
+  });
+
+  renderCoach();
+
+  // Voices load asynchronously in Chrome, so the first getVoices() is usually empty.
+  reportVoice();
+  if (window.speechSynthesis) window.speechSynthesis.addEventListener("voiceschanged", reportVoice);
+  $("btn-clear").onclick = () => { lines.length = 0; $("log").textContent = ""; };
+  $("btn-copy").onclick = async () => {
+    const header = [
+      `userAgent: ${navigator.userAgent}`,
+      `platform: ${navigator.platform}`,
+      `language: ${navigator.language}`,
+      "",
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(header + lines.join("\n"));
+      log("log copied to clipboard, paste it into docs/proposals/vt-0001.md");
+    } catch {
+      log("clipboard blocked, select the log text and copy it by hand");
+    }
+  };
+
+  // The build marker is in the log on purpose, and it is the FIRST line.
+  //
+  // This page is run by a person on a different machine who reports back by pasting the log, and
+  // the first real run produced a report nobody could act on: a symptom that did not match the
+  // code, with no way to tell whether the page in that browser was the page in the repository. A
+  // stale tab and a genuine bug look identical from a pasted log. Bump BUILD whenever this file
+  // changes in a way a tester would notice.
+  // Whether the tab was in front matters to the durability number and to nothing else here.
+  // Chrome treats a hidden tab differently, and in the real app the call is the tab the user is
+  // looking at, so a session that survived while backgrounded answers a question this project is
+  // not asking. Recorded rather than asked of the tester, because "was the tab in front for the
+  // whole nine minutes" is not something anyone reliably remembers afterwards.
+  document.addEventListener("visibilitychange", () => {
+    log(`tab became ${document.visibilityState.toUpperCase()}. Durability numbers spanning a hidden period measure background throttling, not a real call.`);
+  });
+
+  $("build-marker").textContent = BUILD;
+  log(`spike build ${BUILD}`);
+  log(`spike loaded. secureContext=${window.isSecureContext} ua=${navigator.userAgent}`);
+  if (!window.isSecureContext) {
+    log("WARNING: not a secure context. getUserMedia and SpeechRecognition will refuse to run.");
+  }
+})();
+</script>
+</body>
+</html>

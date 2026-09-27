@@ -1,0 +1,905 @@
+/* Dark by default: this is a video app, and a bright chrome around a video frame is glare. */
+
+:root {
+  color-scheme: dark;
+  --bg: #0b0d10;
+  --panel: #14181d;
+  --panel-2: #1b2027;
+  --line: #262c34;
+  --text: #e8ecf1;
+  --muted: #97a3b2;
+  --accent: #5eead4;
+  --danger: #ff8f85;
+  /* The R and G channels of --danger, swapped. Same lightness and saturation, so the on and off
+     words read as a matched pair rather than as two colours that happen to be green and red. */
+  --ok: #8fff85;
+  --warn: #ffc978;
+  --radius: 10px;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+/*
+ * The document itself never scrolls. Only the conversation log and the drawer body do, and both
+ * declare their own overflow.
+ *
+ * This is not tidiness. On iOS Safari 100vh is the LARGE viewport, measured as though the URL bar
+ * were hidden, so a 100vh element is taller than what you can actually see and the page scrolls to
+ * compensate. That one fact produced three separate bug reports from a single phone test: the top
+ * bar scrolled away, the settings drawer could be reached by scrolling toward it rather than only
+ * through its button, and the drawer's last row sat below the fold where it could not be tapped.
+ */
+html, body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Spanish runs about a quarter longer than English, and the app now renders in whichever the
+   reader picked, so every label on this page can grow without warning. overflow-wrap is the
+   floor under that: a long word ("micrófono", "transcripción") breaks rather than pushing its
+   button through the side of whatever contains it. line-height is deliberately not left at
+   `normal` on anything with tight vertical padding, because `normal` is a font's own number and
+   some of them do not reserve room for the accent on a capital A. */
+button {
+  font: inherit;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 9px 15px;
+  cursor: pointer;
+  line-height: 1.35;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+button:hover:not(:disabled) { border-color: var(--muted); }
+/* Square button holding only an icon, so it needs its own padding rather than the text default. */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  color: var(--muted);
+}
+.icon-button:hover:not(:disabled) { color: var(--text); }
+
+/* Copy confirmation.
+   Colour is the actual signal and motion is decoration on top, so the reduced motion rule below
+   drops only the pop. A confirmation that exists solely as movement would be invisible to anyone
+   who has asked the OS for less of it. */
+button.copied, .icon-button.copied, .icon-button.copied:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.icon-button.copied { animation: copy-pop 320ms ease-out; }
+
+@keyframes copy-pop {
+  0% { transform: scale(0.82); }
+  55% { transform: scale(1.14); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-button.copied { animation: none; }
+}
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary { background: var(--accent); color: #06231f; border-color: transparent; font-weight: 600; }
+button.danger { background: transparent; color: var(--danger); border-color: #4a2a28; }
+button.danger:hover:not(:disabled) { background: #2a1a19; }
+
+/*
+ * The translation toggle, outlined in its own state's colour so the button agrees with the word
+ * inside it. Same treatment as button.danger above: transparent fill, a muted border of the hue,
+ * and the hue's dark tint on hover.
+ *
+ * The off pair is button.danger's own #4a2a28 and #2a1a19, reused rather than re-picked, so this
+ * control and End chat cannot drift apart. The on pair is those two with R and G swapped, which
+ * is the same relationship --ok has to --danger, so the green side is derived rather than
+ * guessed.
+ *
+ * Only the state WORD is coloured, not the whole label. End chat colours all of its text because
+ * the whole thing is the warning. Here the warning is one word: translation being off is a state
+ * someone chose, not a danger, and a fully red button would read as one.
+ */
+button.toggle-on { background: transparent; border-color: #2a4a28; }
+button.toggle-on:hover:not(:disabled) { background: #1a2a19; }
+button.toggle-off { background: transparent; border-color: #4a2a28; }
+button.toggle-off:hover:not(:disabled) { background: #2a1a19; }
+
+input, select {
+  font: inherit;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  width: 100%;
+}
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.field { margin-bottom: 15px; }
+.hint { margin: 6px 0 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
+.hint.bad { color: var(--warn); }
+
+/* The admin login. Deliberately the quietest thing on the card: one person needs it and
+   everyone else has to read past it. */
+.admin-strip {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.admin-state { color: var(--muted); }
+.admin-login { width: 100%; }
+.linklike {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  /* Spanish runs longer and these sit in a flex row, so let them wrap rather than push the row
+     wider than the card. */
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.linklike:hover { color: var(--text); }
+
+/* Centered card layouts for landing and prejoin. */
+.center {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 28px;
+}
+.card h1 { margin: 0 0 6px; font-size: 21px; }
+.card .sub { margin: 0 0 22px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.row { display: flex; gap: 10px; align-items: center; }
+/* min-width 0 so a long primary label ("Crear y permitir el micrófono") wraps inside its button
+   instead of forcing the row wider than the card that holds it. A flex child's default minimum
+   is its content, which is exactly the wrong default here. */
+.row > * { flex: 1; min-width: 0; }
+.divider { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; margin: 20px 0; }
+.divider::before, .divider::after { content: ""; height: 1px; background: var(--line); flex: 1; }
+
+.notice {
+  border-left: 3px solid var(--warn);
+  background: #1e1a12;
+  padding: 10px 13px;
+  border-radius: 0 8px 8px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 16px;
+  color: #f0e2c8;
+}
+.notice.bad { border-color: var(--danger); background: #221614; color: #f3d4d0; }
+
+/* Room layout: video stage plus an optional side panel. */
+/* Flex rather than a two row grid, because the top bar is CONDITIONAL: a narrow screen has no
+   header at all. Fixed rows meant the stage landed in the auto row when the header was absent and
+   collapsed the video area to zero height, which renders as an entirely blank screen. Flex sizes
+   the stage from what is actually there.
+
+   Positioned so the drawer and its gear anchor here and not to the viewport.
+
+   Both height declarations are load bearing. dvh tracks the viewport that is actually visible as
+   the browser chrome shows and hides; vh stays underneath as the fallback for anything that does
+   not know dvh. overflow clips the closed drawer, which sits at translateY(101%) and would
+   otherwise extend the scrollable area past the bottom of the screen. */
+.room {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+.room > .topbar { flex: 0 0 auto; }
+/* min-height 0 or a flex child refuses to shrink below its content, which puts the bottom of the
+   stage past the bottom of the screen and takes the drawer with it. */
+.room > .stage { flex: 1; min-height: 0; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+/* The top bar already wraps. What it did not do was let the names shrink, so a long pair
+   ("Ana y esperando a alguien") pushed the chips and the transcript toggle onto a second row
+   earlier than it needed to. */
+.names { font-weight: 600; font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
+.names .muted { color: var(--muted); font-weight: 400; }
+.spacer { flex: 1; }
+
+/* Still one line: a status chip reads as a label, and a wrapped one reads as a paragraph. What
+   changes for a longer language is what happens when one genuinely does not fit. It now clips
+   with an ellipsis inside its own pill rather than spilling across the video, and every chip
+   that can grow carries a title with the whole sentence in it, so nothing is lost by the clip.
+   "subtítulos reconectando" is half again the width of "subtitles reconnecting". */
+.chip {
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A chip that is also a control. Keeps the chip's look, drops the button chrome. */
+/*
+ * A chip you can press has to look pressable WITHOUT a pointer.
+ *
+ * cursor and :hover are the two cues this had, and a phone has neither, so the speech chip was
+ * indistinguishable from the purely informational chips beside it. The dotted underline is the
+ * only always visible part, which is the point: it survives touch, and it reads as "there is
+ * something behind this" rather than as a link, which this is not.
+ */
+.chip-button {
+  cursor: pointer;
+  background: none;
+  font: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+}
+.chip-button:hover:not(:disabled) { border-color: currentColor; }
+
+/* The state word inside a control that names its own state. Colour carries the same meaning as
+   the word, never instead of it: the word is still "on" or "off" for anyone who does not see the
+   difference. */
+.state-on { color: var(--ok); font-weight: 600; }
+.state-off { color: var(--danger); font-weight: 600; }
+.chip.good { color: var(--accent); border-color: #1e4a44; }
+.chip.warn { color: var(--warn); border-color: #4a3a1e; }
+.chip.bad { color: var(--danger); border-color: #4a2a28; }
+
+.code-badge {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.14em;
+  font-size: 15px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 11px;
+}
+
+/*
+ * The transcript drawer.
+ *
+ * The width lives on the GRID, not on the panel, which is what makes this a drawer rather than
+ * an overlay: the video area takes the space back as the column closes, in the same motion. The
+ * panel only rides along with a small slide, so the two edges do not arrive at once.
+ *
+ * `visibility` is transitioned with a delay rather than being left alone. `pointer-events: none`
+ * stops a closed panel catching clicks but does NOT take it out of the tab order, so without
+ * this a hidden transcript still swallowed Tab presses.
+ *
+ * The delay matches the OPACITY duration, not the slide. Those are 180ms and 260ms, and using
+ * the slide left an 80ms window where the panel was already fully transparent and still
+ * focusable. Nothing visible is lost by flipping at 180ms: the panel is at opacity 0 from that
+ * moment, and the transform carrying it the last few pixels is invisible either way.
+ */
+.stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+  overflow: hidden;
+  transition: grid-template-columns 260ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.stage.with-panel { grid-template-columns: 1fr 340px; }
+.stage.with-panel-closed { grid-template-columns: 1fr 0px; }
+.stage.with-panel > .panel,
+.stage.with-panel-closed > .panel {
+  transition:
+    transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 180ms ease-out,
+    border-left-width 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    visibility 0s linear 0s;
+}
+.stage.with-panel-closed > .panel {
+  /* The WIDTH, not just the colour. The column goes to 0 but the panel's own left border still
+     occupies a pixel of layout, so a transparent border still measured 1px and still drew a
+     hairline down the edge of the video with the drawer shut. It is transitioned rather than
+     dropped so the edge does not jump, and 1px over 260ms is not something an eye resolves. */
+  border-left-width: 0;
+  transform: translateX(16px);
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition:
+    transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 180ms ease-out,
+    border-left-width 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    visibility 0s linear 180ms;
+}
+
+/*
+ * Reduced motion, and it has to live HERE, below the rules it overrides.
+ *
+ * A media query adds no specificity, so this only wins on source order. The first version of
+ * this block sat 200 lines up beside the other reduced motion rules, where it parsed, matched,
+ * and lost to the rules above: a reduced motion user got the full 260ms slide. client/src/
+ * styles.test.ts now fails if any reduced motion rule in this file drifts back above its target.
+ *
+ * The drawer still opens and closes. It just arrives rather than travelling, and visibility
+ * flips at once so a closed panel leaves the tab order immediately instead of after a delay
+ * that no longer has a slide to cover.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .stage,
+  .stage.with-panel > .panel,
+  .stage.with-panel-closed > .panel {
+    transition: none;
+  }
+  .stage.with-panel-closed > .panel { transition: visibility 0s linear 0s; }
+}
+
+.video-area { position: relative; background: #000; overflow: hidden; }
+.video-area video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/*
+ * The REMOTE video, and only it: fit the whole frame in, do not crop to fill.
+ *
+ * The direct child selector matters, because .self-view lives INSIDE .video-area and the rule
+ * above reaches its video too. The self view should keep cover: it is a small fixed ratio
+ * thumbnail of yourself, where filling the box is what you want and the crop costs nothing.
+ *
+ * The remote video is the opposite case, and it was losing more than the portrait phone that
+ * exposed it. The stage is whatever shape the window and the transcript panel leave behind, NOT
+ * 16 by 9, so a source almost never matches it and cover crops away the difference every time.
+ * Measured against this stylesheet in a 1100x900 stage (a 1440 wide desktop with the panel open):
+ *
+ *   portrait 9:16, a phone held upright   46.0 percent of the frame survived
+ *   landscape 16:9, an ordinary laptop    68.8 percent
+ *   4:3                                   91.7 percent
+ *
+ * contain shows all of it in every one of those cases. The portrait number is what made this
+ * visible, since being cropped to a band across the middle of your own camera looks like you are
+ * sitting far too close, but the laptop case was quietly throwing away a third of the picture too
+ * and nobody noticed. The cost is letterbox bars against the black background, which is the trade
+ * every video app makes and what people already expect to see.
+ */
+.video-area > video { object-fit: contain; }
+
+.placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 12px;
+  justify-items: center;
+  color: var(--muted);
+  text-align: center;
+  padding: 24px;
+}
+.avatar {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  font-size: 30px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Self view and the two controls that stay out of the drawer, as one top right stack. */
+.self-stack {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  width: 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* The one place a longer language actually broke something rather than merely looking tight.
+   The stack is a fixed 168px wide (108px on an upright phone) and holds two buttons with a level
+   meter wedged between them. In English that is Mute, a meter, and Cam on. In Spanish it is
+   Silenciar and Cámara no, which together are wider than the phone stack, and with nowrap
+   buttons and a flex:1 meter the buttons simply pushed out past the video.
+   Wrapping is what fixes it: the meter has a real basis now, so when the two buttons need the
+   whole row the meter drops to its own line underneath instead of the buttons leaving the
+   screen. The meter STAYS VISIBLE either way, which is the property that matters: it is how you
+   see that you are still hot. */
+.self-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.self-controls .level { flex: 1 1 44px; min-width: 44px; height: 5px; }
+.self-control {
+  padding: 3px 7px;
+  font-size: 11px;
+  /* Room for the accent on a capital A, in Cámara. */
+  line-height: 1.45;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  white-space: nowrap;
+}
+.self-control.off { color: var(--danger); border-color: #4a2a28; }
+.camera-error { padding: 6px 8px; font-size: 10px; line-height: 1.35; margin: 0; }
+
+.self-view {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+}
+.self-view video { transform: scaleX(-1); }
+.self-view .placeholder { font-size: 12px; }
+.self-view .avatar { width: 44px; height: 44px; font-size: 17px; }
+
+/*
+ * The subtitle overlay. Translated line LARGE on top, original SMALL and italic beneath.
+ * The scrim is a gradient rather than a flat box so it stays legible over both a bright and a
+ * dark frame without a hard edge across the picture.
+ */
+.subtitles {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 60px 6% 26px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.82) 12%, rgba(0, 0, 0, 0));
+  pointer-events: none;
+  text-align: left;
+  opacity: 1;
+  /* Slow OUT, instant IN, and the asymmetry is the point: a sentence should retire gently, but
+     the next one has to be readable from its first word rather than arriving through a fade.
+     The transition lives on .faded, not here, because the rule that applies is the one on the
+     state being entered. Putting it here would ease BOTH directions. */
+  transition: none;
+}
+.subtitles.faded {
+  opacity: 0;
+  transition: opacity 600ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .subtitles.faded {
+    transition: none;
+  }
+}
+.subtitles .translated {
+  font-size: clamp(20px, 2.6vw, 32px);
+  font-weight: 600;
+  /* 1.3 was enough for English and not for a line with an inverted question mark opening it and
+     an accented capital in it. Subtitles are the largest text on screen, so a clipped accent
+     here is the most visible possible version of this bug. */
+  line-height: 1.35;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+  margin: 0 0 6px;
+  min-height: 1.3em;
+}
+.subtitles .original {
+  font-size: clamp(13px, 1.4vw, 17px);
+  font-style: italic;
+  color: #c2ccd8;
+  line-height: 1.35;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
+  margin: 0;
+  min-height: 1.35em;
+}
+/* Live, still being spoken: dimmed so a settled line reads as settled. */
+.subtitles .original.live { color: #8f9dad; }
+.subtitles .translated.pending { color: var(--muted); }
+.subtitles .translated.failed { color: var(--muted); font-weight: 400; }
+/* Both overlays, not just the desktop one. Scoped to .subtitles this rule left the mobile marker
+   completely unstyled, which rendered it as bare words butted against the end of the sentence. */
+.subtitles .marker, .conversation .marker {
+  font-size: 11px;
+  font-style: normal;
+  color: var(--warn);
+  border: 1px solid #4a3a1e;
+  border-radius: 999px;
+  padding: 1px 7px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+/* The skip note. Deliberately NOT the marker's styling: a marker is a warning that something
+   failed and comes with a retry button, and every one of these is a line where nothing went
+   wrong. Muted, no border, no warning colour, so it reads as an aside rather than as an alarm.
+   Wherever a caption is rendered, which is both overlays and the transcript panel. */
+.subtitles .note, .conversation .note, .panel .note {
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 400;
+  color: var(--muted);
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.panel {
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+}
+.panel-head {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+/* The title takes what is left after the two export buttons, and ellipses rather than pushing
+   them out of the panel. "Conversación" is longer than "Conversation", and the buttons are the
+   part of this row that must stay reachable. */
+.panel-head > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-head button { padding: 4px 9px; font-size: 12px; flex: 0 0 auto; }
+/* min-height 0 because a grid row will not shrink below its content otherwise, and this row has
+   to shrink: the composer below it grows upward and takes its height from here. */
+.transcript { overflow-y: auto; min-height: 0; padding: 12px 14px; }
+
+.line { margin-bottom: 15px; font-size: 14px; }
+.line .who { font-size: 11px; color: var(--muted); margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
+.line .t { line-height: 1.45; }
+/* Whichever row is still waiting on the model, prominent or quiet. Not tied to the translation
+   being on top, because on your own lines it is not. */
+.line .t.pending, .line .o.pending { color: var(--muted); }
+.line .o { font-size: 12.5px; font-style: italic; color: var(--muted); line-height: 1.4; margin-top: 3px; }
+.line.mine .who { color: var(--accent); }
+.line .fix {
+  font-size: 11px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 2px 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.line .fix:hover { color: var(--accent); }
+
+/*
+ * The composer field is a contenteditable div, not an input, because an input cannot wrap: a long
+ * message scrolled sideways and the writer could not see what they had typed. Everything the base
+ * input rule handed us is restated below, so an empty or one line field is pixel identical to the
+ * input it replaced. The swap should be invisible until the writer passes one line.
+ */
+.composer {
+  border-top: 1px solid var(--line);
+  padding: 10px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.composer button { flex: 0 0 auto; }
+.composer-field-wrap { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
+.composer-field {
+  font: inherit;
+  /* normal, deliberately. It is the same line box the input had, so a one line draft is exactly
+     as tall as it was, and it is the font's own ascent and descent, so accents and inverted
+     punctuation (a with an acute, n with a tilde, inverted question and exclamation marks) have
+     the room the typeface asks for rather than a number picked by hand. */
+  line-height: normal;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  width: 100%;
+  /* pre-wrap keeps the newlines shift plus enter inserts. anywhere keeps a pasted link from
+     pushing the panel sideways, which is the failure this whole change is about. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* Spanish runs about a quarter longer than the same sentence in English, so growing is the
+     normal case here, not the exceptional one. Past this ceiling the field scrolls internally:
+     it grows upward into the transcript, and without a ceiling it would eventually eat it. */
+  max-height: 30vh;
+  overflow-y: auto;
+}
+.composer-field:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+/* Sits exactly where the field's first character goes: 1px border plus the field's own padding. */
+.composer-placeholder {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  right: 12px;
+  color: var(--muted);
+  line-height: normal;
+  pointer-events: none;
+  overflow: hidden;
+  white-space: nowrap;
+}
+/* Once the draft has wrapped, Send takes a row of its own underneath the field. On one line it
+   stays inline to the right, where it has always been. */
+.composer.expanded .composer-field-wrap { flex: 1 1 100%; }
+.composer.expanded button { margin-left: auto; }
+
+.level {
+  width: 54px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+.level > div { height: 100%; background: var(--accent); transition: width 0.1s linear; }
+
+dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 22px;
+  max-width: 440px;
+  width: calc(100% - 40px);
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.62); }
+dialog h2 { margin: 0 0 8px; font-size: 17px; }
+dialog p { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 14px; }
+
+@media (max-width: 860px) {
+  .stage.with-panel { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .panel { border-left: none; border-top: 1px solid var(--line); max-height: 42vh; }
+  .self-view { width: 116px; }
+}
+
+/* An upright box for an upright screen. Note the camera is NO LONGER asked for a portrait frame:
+   videoConstraints stopped dictating shape, because doing so made the browser crop the sender's
+   own track. So this 3/4 box is now the thing doing the cropping rather than the thing avoiding
+   it, and a 16/9 camera loses about 58 percent of its frame here under object-fit: cover.
+   Deliberate: it is a 108px thumbnail of yourself, the crop is one you can see and lean out of,
+   and the alternative was letterbox bars inside a box whose whole job is to look filled. */
+@media (orientation: portrait) and (max-width: 860px) {
+  .self-view { aspect-ratio: 3 / 4; }
+  .self-stack { width: 108px; }
+  .self-control { padding: 2px 5px; font-size: 10px; }
+}
+
+/* Warnings over the video, top left so they clear the self view stack on the right. */
+.alerts {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 130px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  z-index: 3;
+}
+
+/* The invitation, shown only while you are alone and the video area has nothing else to do. */
+.invite { display: grid; gap: 12px; justify-items: center; }
+.invite-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(26px, 8vw, 38px);
+  letter-spacing: 0.16em;
+  color: var(--text);
+}
+.invite-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+
+/* On a narrow screen the placeholder has to centre in the space ABOVE the conversation overlay.
+   Left at inset 0 it centres across the whole video area, which put its text straight through the
+   chat log: two unrelated pieces of writing occupying the same pixels. */
+@media (max-width: 860px) {
+  .video-area > .placeholder { bottom: 42vh; }
+}
+
+/*
+ * The mobile conversation overlay: subtitles and chat as one surface.
+ *
+ * Left aligned throughout, because this is a log and not a single caption. Centred text reads
+ * fine as one line and badly as ten, where every line starting at a different x is exactly what
+ * makes a block of text hard to skim.
+ *
+ * pointer-events are off on the container and back on for the log and composer, so the parts with
+ * nothing in them do not eat taps meant for the video behind.
+ */
+.conversation {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* The right padding is the gear's footprint. Without it the Send button sits underneath the
+     gear and one of the two is unreachable. The bottom inset keeps the composer clear of the home
+     indicator, which is the same "cannot press it" failure by a different route. */
+  padding: 60px 62px calc(12px + env(safe-area-inset-bottom)) 14px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.86) 22%, rgba(0, 0, 0, 0));
+  pointer-events: none;
+  text-align: left;
+}
+.conversation-log {
+  max-height: 30vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.conversation-empty { color: var(--muted); font-size: 13px; margin: 0; }
+
+.past-line {
+  display: flex;
+  gap: 7px;
+  margin: 0 0 5px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.62);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+}
+/* The speaker label is one word in English ("you", "them") and up to three in Spanish. Capped
+   rather than fixed, so a longer label cannot take the log's width away from the thing people
+   are actually reading. */
+.past-line .who { color: var(--muted); flex: 0 1 auto; max-width: 42%; overflow-wrap: anywhere; }
+.past-line .said { min-width: 0; overflow-wrap: anywhere; }
+
+.current-line .translated {
+  font-size: clamp(19px, 5vw, 26px);
+  font-weight: 600;
+  line-height: 1.36;
+  margin: 0 0 3px;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+}
+.current-line .translated .who {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.current-line .original {
+  font-size: 13px;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.72);
+  margin: 0;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
+}
+/* Your outgoing translation, still in flight under your own settled words. */
+.current-line .original.pending { color: var(--muted); }
+/* The peer mid sentence. Dimmer than a settled line, because it is still changing under you and
+   reading it as finished is the mistake to design against. */
+.interim-line {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.6);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
+}
+
+.conversation-composer {
+  display: flex;
+  gap: 7px;
+  pointer-events: auto;
+}
+.conversation-composer input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(3px);
+  /* 16px exactly. Anything smaller and iOS Safari zooms the whole page on focus, which on a video
+     call leaves the picture scaled up and off centre with no obvious way back. */
+  font-size: 16px;
+}
+.conversation-composer button { flex: 0 0 auto; }
+
+/*
+ * The settings drawer. Slid off screen rather than unmounted, so opening it does not remount its
+ * controls, which is what makes the select forget an in progress interaction.
+ */
+.gear-button {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(3px);
+  /* `right`, on the same curve as the drawer beside it. Without this the gear SNAPPED 354 to 14
+     while the transcript took 260ms to close, which looked like the gear jumping away from a
+     panel it is supposed to be riding. */
+  transition: right 260ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.gear-button svg { transition: transform 260ms ease; }
+.gear-button.open svg { transform: rotate(90deg); }
+.gear-button.open { color: var(--accent); border-color: var(--accent); }
+/* Clear the transcript panel when it is open. Keyed off the stage's own class rather than a
+   second copy of the panel state, so the two cannot disagree about whether the panel is there. */
+.stage.with-panel ~ .gear-button { right: 354px; }
+
+.control-drawer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  /* Content height, not a fixed fraction. A fixed 34vh is roughly right on a phone and absurd on
+     a 900px desktop, where it opens a third of the window to hold one row of buttons. The ceiling
+     is dvh so a sheet holding the whole room header still ends on screen rather than running past
+     the bottom of a phone, taking End chat with it. */
+  height: auto;
+  max-height: 80vh;
+  max-height: 80dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -12px 34px rgba(0, 0, 0, 0.55);
+  transform: translateY(101%);
+  transition:
+    transform 260ms ease,
+    right 260ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.control-drawer.open { transform: translateY(0); }
+
+/*
+ * The settings drawer stops where the transcript starts.
+ *
+ * It is positioned on .room, not on .stage, so left 0 / right 0 spans the transcript column too
+ * and the sheet ran underneath it: controls drawn in a strip the panel already owns. Same sibling
+ * selector the gear button uses, and the same 260ms as the transcript drawer, so when both move
+ * they move together rather than one arriving after the other.
+ */
+.stage.with-panel ~ .control-drawer { right: 340px; }
+
+.drawer-body > * { max-width: 100%; }
+.drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* Rows pack to the top so a dragged open drawer fills downward rather than floating its one
+     row in the middle of the space. */
+  align-content: flex-start;
+  gap: 9px;
+  /* Nothing in the drawer may be wider than the drawer. The dialect select sits here at
+     flex: 0 0 auto with option labels it does not control, and the buttons beside it carry the
+     longest strings in the app ("Terminarlo para las dos personas"). */
+  padding-top: 14px;
+  /* The right padding is the gear's footprint, same as the conversation overlay's. The bottom
+     inset keeps the last row, which is End chat, clear of the home indicator. */
+  padding: 4px 62px calc(16px + env(safe-area-inset-bottom)) 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gear-button { transition: none; }
+  .gear-button svg { transition: none; }
+  .control-drawer { transition: none; }
+}

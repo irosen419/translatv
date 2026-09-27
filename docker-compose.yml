@@ -1,0 +1,44 @@
+services:
+  app:
+    build: .
+    ports:
+      # Loopback by default, NOT every interface. The deploy shape this repo documents puts a
+      # Cloudflare Tunnel in front, and the tunnel reaches the container over loopback. A public
+      # bind there is a hole rather than a convenience: with TRUST_PROXY=1 on, anyone who reaches
+      # this port directly bypasses the tunnel AND forges X-Forwarded-For past every per IP limit,
+      # the room code brute force guard included. See DEPLOY.md section 2.
+      #
+      # Overriding this from a second compose file does NOT work: `ports` is one of Compose's
+      # additive options, so an override appends a second mapping and the public one survives.
+      # Set BIND_ADDR instead. BIND_ADDR=0.0.0.0 restores the old behavior for a LAN test on a
+      # trusted network.
+      - "${BIND_ADDR:-127.0.0.1}:8080:8080"
+    environment:
+      PORT: 8080
+      NODE_ENV: production
+      # Must list the real public origin. In production the allowlist is the whole CSRF
+      # defense on the WebSocket upgrade, and the localhost relaxation does not apply.
+      ORIGIN: ${ORIGIN:-http://localhost:8080}
+      # Required. NODE_ENV is production above, and a production server refuses to start
+      # without this rather than come up with the admin gate off, so a deploy that omits it
+      # exits at boot saying so. Deliberately given NO default: a fallback here would be a
+      # published password, which is worse than a container that will not start.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD, the server refuses to start without it}
+      # Set to 1 when anything sits in front of this container: Cloudflare, nginx, a load
+      # balancer. Without it every visitor arrives wearing the proxy's address and every per IP
+      # limit applies to all of them collectively, so one person tripping the join limiter
+      # throttles the other. Off by default because production does not imply a proxy: these
+      # ports map straight through, and trusting the header with nothing in front lets a
+      # forged one walk past every limit.
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_DAILY_CAP_USD: ${ANTHROPIC_DAILY_CAP_USD:-10.00}
+      ROOM_CAP_USD: ${ROOM_CAP_USD:-1.50}
+      TURN_URL: ${TURN_URL:-}
+      TURN_USERNAME: ${TURN_USERNAME:-}
+      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
+    volumes:
+      # Persist the spend ledger across restarts. Without this the container's own copy resets
+      # on every deploy, and the daily cap would reset with it.
+      - ./out:/app/out
+    restart: unless-stopped

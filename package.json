@@ -1,0 +1,38 @@
+{
+  "name": "translatv",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Realtime translated video chat. Two person rooms, WebRTC media, live translated subtitles.",
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "npm run build:shared && (npm run dev --workspace=server & npm run dev --workspace=client)",
+    "lan": "node script/lan.mjs",
+    "build": "npm run build:shared && npm run build --workspace=server && npm run build --workspace=client",
+    "start": "npm run start --workspace=server",
+    "test": "npm run build:shared && npm run test --workspace=shared && npm run test --workspace=server && npm run test --workspace=client && npm run test:script",
+    "test:script": "vitest run --config script/vitest.config.mjs",
+    "test:py": "python3 -m unittest discover -s . -p 'test_*.py' -v",
+    "typecheck": "npm run build:shared && tsc -p server/tsconfig.json --noEmit && tsc -p client/tsconfig.json --noEmit",
+    "check:dashes": "node script/check_dashes.mjs",
+    "check:copy": "node script/check_copy.mjs",
+    "check:secrets": "node script/check_secrets.mjs",
+    "check": "npm run check:dashes && npm run check:copy && npm run check:spend-view && npm run typecheck && npm test && npm run test:py",
+    "e2e": "npm run build && node script/e2e.mjs",
+    "latency": "npm run build && tsx script/latency.mjs",
+    "build:shared": "npm run build --workspace=shared",
+    "check:spend-view": "node script/check_spend_view.mjs",
+    "verify": "tsx script/verify_translation.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

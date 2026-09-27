@@ -1,0 +1,52 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Agent scratch worktrees. Each one is a full nested checkout with its own node_modules, so
+# committing it would put a copy of the repo inside the repo. .claude/skills/ stays tracked.
+.claude/worktrees/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+npm-debug.log*
+dist/
+*.tsbuildinfo
+
+# Local TLS for two machine LAN testing (mkcert output).
+# getUserMedia and SpeechRecognition need a secure context, and http://192.168.x.x is not one.
+certs/
+*.pem
+
+# Media working files
+/output/
+/tmp/
+*.mp4
+*.mov
+*.wav
+*.mp3
+
+# NOTE: out/ is deliberately NOT ignored. out/translatv/spend_log.jsonl is the
+# append only spend ledger and it is tracked on purpose: the dashboard reads it from the
+# working tree, and its history is the record of what this project has cost.
+#
+# Screenshots from script/shots.mjs are the exception. They are a looking tool's output, they are
+# regenerated whenever the layout changes, and committing binaries that turn over that often
+# would bloat the history of a repo whose out/ directory exists to hold one text ledger.
+out/shots/

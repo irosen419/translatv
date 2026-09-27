@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: npm ci
+
+      # One command, not an enumeration of its steps, because the enumeration is what broke.
+      # check:spend-view was added to the check script and never added here, so CI stayed
+      # green while the gate that catches a stale committed spend view only ever ran on a
+      # laptop. The two lists had already drifted in both directions before that was noticed.
+      # Calling the script means a gate added to check runs here automatically, by
+      # construction, and cannot silently stop being checked on a pull request again.
+      - name: Checks
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      # check:secrets stays a separate step, after Build rather than folded into Checks, because
+      # it greps the BUILT client bundle for key prefixes (the VITE_ANTHROPIC_API_KEY trap: Vite
+      # inlines every VITE_* variable into what ships to visitors). It needs dist/ to exist, and
+      # the check script intentionally has no build step of its own.
+      - name: No credentials in the client bundle
+        run: npm run check:secrets
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Two browser end to end run
+        run: npm run e2e
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The image is built but never pushed here. The point is to catch a broken Dockerfile on
+      # the commit that broke it, rather than at deploy time.
+      - name: Build the image
+        run: docker build -t translatv:ci .
+      - name: The image starts and answers its health check
+        run: |
+          # ALLOW_EPHEMERAL_LEDGER because this run has no volume, and the image sets
+          # NODE_ENV=production, so the boot guard would refuse to start and the container would
+          # never answer. That is the guard working: the step below runs WITHOUT the override
+          # precisely to prove it fires. Here the subject is the health check, not the guard.
+          # ADMIN_PASSWORD for the same reason: the image is production, and a production
+          # server with no admin password refuses to start rather than come up ungated. Its own
+          # step below proves that guard fires.
+          docker run -d --name vt -p 8080:8080 -e ORIGIN=http://localhost:8080 \
+            -e ALLOW_EPHEMERAL_LEDGER=1 -e ADMIN_PASSWORD="$(openssl rand -hex 16)" \
+            translatv:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/healthz; then echo; docker rm -f vt; exit 0; fi
+            sleep 1
+          done
+          echo "the container never answered /healthz"
+          docker logs vt
+          docker rm -f vt
+          exit 1
+      # The check that would have caught the ledger being root owned. The health check above
+      # cannot: it passes perfectly well while every spend write fails EACCES, which is exactly
+      # how that shipped. Ask the image's OWN user whether it can append, because that is the
+      # only user whose answer matters.
+      - name: The image's user can append to the spend ledger
+        run: |
+          docker run --rm translatv:ci \
+            node -e "
+              const { openSync, closeSync } = require('node:fs');
+              const path = 'out/translatv/spend_log.jsonl';
+              try {
+                closeSync(openSync(path, 'r+'));
+                console.log('ledger is appendable as ' + process.getuid());
+              } catch (error) {
+                console.error('LEDGER NOT WRITABLE as uid ' + process.getuid() + ': ' + error.message);
+                console.error('Spend would be untracked for the life of the container.');
+                process.exit(1);
+              }
+            "
+      - name: The server refuses to start in production on an ephemeral ledger
+        run: |
+          # The ledger is on the image layer here, with no volume mounted, so a restart would
+          # silently reset the day's spend. Starting anyway is the failure.
+          #
+          # ADMIN_PASSWORD is SET here on purpose. Without it the admin guard refuses first and
+          # this step goes green having proved nothing about the ledger: the same pass, a
+          # different reason, and no way to tell from the exit code. Each guard gets tested with
+          # the other satisfied, and the output is checked for the reason rather than just for a
+          # non zero exit.
+          output=$(docker run --rm -e NODE_ENV=production -e ORIGIN=http://localhost:8080 \
+            -e ADMIN_PASSWORD="$(openssl rand -hex 16)" \
+            translatv:ci timeout 10 node server/dist/index.js 2>&1) && {
+            echo "the server started in production with an ephemeral ledger; it must refuse"
+            exit 1
+          }
+          echo "$output"
+          echo "$output" | grep -q "spend ledger is on the image layer" || {
+            echo "it refused, but not for the ledger reason this step exists to prove"
+            exit 1
+          }
+          echo "refused for the right reason"
+
+      - name: The server refuses to start in production with no admin password
+        run: |
+          # Ungated in production means anyone can start a call on a public deployment. The
+          # ledger override is set so that if this refuses, it refuses for the admin reason and
+          # not the other one.
+          output=$(docker run --rm -e NODE_ENV=production -e ORIGIN=http://localhost:8080 \
+            -e ALLOW_EPHEMERAL_LEDGER=1 \
+            translatv:ci timeout 10 node server/dist/index.js 2>&1) && {
+            echo "the server started in production with no ADMIN_PASSWORD; it must refuse"
+            exit 1
+          }
+          echo "$output"
+          echo "$output" | grep -q "ADMIN_PASSWORD is not set" || {
+            echo "it refused, but not for the admin reason this step exists to prove"
+            exit 1
+          }
+          echo "refused for the right reason"

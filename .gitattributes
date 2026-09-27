@@ -1,0 +1,44 @@
+# The spend ledger is APPEND ONLY, so a merge should keep every line from both sides.
+#
+# CLAUDE.md states the rule already: "On a out/translatv/spend_log.jsonl merge conflict,
+# KEEP BOTH SIDES. Never drop a ledger row to resolve a conflict." This makes git do it instead
+# of a person remembering to at whatever hour the conflict appeared.
+#
+# WHAT THIS DOES NOT DO, because the first version of this comment claimed otherwise. `union`
+# resolves a CONFLICTING HUNK by concatenating both sides. It does nothing about a change that
+# does not conflict, and a deleted row usually does not: verified, base of four rows, one side
+# deletes a row while the other appends far away, the merge is clean and the row is gone. So the
+# CLAUDE.md rule holding any pull request that REMOVES ledger rows is still load bearing and is
+# not made redundant by this file.
+#
+# Within a conflicting hunk, though, the direction is the safe one. Under logging is the harmful
+# failure: a resolution that drops rows understates what the project has cost and hands the cap
+# gate a budget it has already spent. Union can only duplicate instead, which overstates, is
+# visible to `sort | uniq -d`, and is harmless by comparison. Two sides editing the header line
+# also duplicates the rows between them, for the same reason.
+#
+# It is also LOCAL ONLY. GitHub's merge button does not run user defined merge drivers, so a pull
+# request whose ledger conflicts is refused there rather than union merged, and is resolved in a
+# clone. And the very first merge that brings this file in does not get it either, since the
+# attribute has to be present on both sides already: that one is still resolved by hand.
+out/translatv/spend_log.jsonl merge=union
+
+# The view is GENERATED, and is deliberately NOT given an attribute here.
+#
+# `merge=ours` was tried and removed. It does not work: git's built in low level drivers are
+# `text`, `binary` and `union` only. `ours` is a merge STRATEGY (`git merge -s ours`), which is a
+# different thing, and when .gitattributes names a driver git cannot find it falls back to the
+# default text merge SILENTLY. `git check-attr` happily reports `merge: ours` while the merge
+# conflicts exactly as it would with no attribute at all, which is how it survived being
+# "verified" once.
+#
+# It can be made to work with `git config merge.ours.driver true`, but that is per machine and
+# cannot live in this file. A machine that has not run it gets a plain conflict and no sign the
+# attribute was ignored, which is the same "someone has to remember" failure this file exists to
+# remove, with a worse failure mode because it is invisible.
+#
+# So the .md still conflicts when two machines both regenerate it. Resolve it by regenerating
+# rather than by reading the markers:
+#   python3 spend_log.py render translatv --execute
+# `npm run check:spend-view` fails if the committed view disagrees with the ledger, so a wrong
+# resolution here is caught by CI rather than believed.
