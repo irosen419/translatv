@@ -1,0 +1,13 @@
+{
+  "t": "peer.joined",
+  "peer": {
+    "id": "b7e2d4c1-5a6f-4f38-8e2b-91c0d3a4f567",
+    "username": "Ben",
+    "dialect": "en-US",
+    "connection": "connected",
+    "micEnabled": true,
+    "cameraEnabled": true,
+    "wantsTranslation": true,
+    "isAdmin": false
+  }
+}

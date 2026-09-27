@@ -1,0 +1,34 @@
+{
+  "t": "room.created",
+  "code": "7KQ2M9XA",
+  "selfId": "3f1c9a2e-8b4d-4e7a-9c61-2d5f0b7e8a14",
+  "resumeToken": "q3VtZ8xR0nLp4sWc1YhT2g",
+  "you": {
+    "id": "3f1c9a2e-8b4d-4e7a-9c61-2d5f0b7e8a14",
+    "username": "Ana",
+    "dialect": "es-AR",
+    "connection": "connected",
+    "micEnabled": true,
+    "cameraEnabled": true,
+    "wantsTranslation": true,
+    "isAdmin": true
+  },
+  "polite": false,
+  "config": {
+    "graceMs": 60000,
+    "maxMembers": 2
+  },
+  "iceServers": [
+    {
+      "urls": "stun:stun.l.google.com:19302"
+    },
+    {
+      "urls": [
+        "turn:turn.example.com:3478?transport=udp",
+        "turns:turn.example.com:5349"
+      ],
+      "username": "1790467200:fixture",
+      "credential": "fixture-credential-not-real"
+    }
+  ]
+}

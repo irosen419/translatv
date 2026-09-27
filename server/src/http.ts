@@ -6,6 +6,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express } from "express";
+import { PROTOCOL_VERSION } from "@translatv/shared";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
 import { mintAdminToken, passwordMatches } from "./security/adminAuth.js";
@@ -131,6 +132,9 @@ export function createApp(
 
     res.json({
       ok: true,
+      // Which wire format this server speaks, so a separately shipped client (the iOS app) can
+      // check it is compatible before it opens a socket rather than after its first bad frame.
+      protocolVersion: PROTOCOL_VERSION,
       // Whether the admin gate is switched on at all, so the client can tell "you are not the
       // admin" from "this server has no admin". Without it the client has to guess, and a guess
       // either greys out the Start button on an ungated server (nobody can use the app) or

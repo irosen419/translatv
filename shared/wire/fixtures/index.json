@@ -1,0 +1,41 @@
+{
+  "client": [
+    "room.create",
+    "room.join",
+    "room.resume",
+    "room.leave",
+    "room.end",
+    "member.update",
+    "rtc.offer",
+    "rtc.answer",
+    "rtc.ice",
+    "stt.interim",
+    "stt.final",
+    "chat.send",
+    "translation.retry",
+    "glossary.correct",
+    "glossary.import",
+    "ping"
+  ],
+  "server": [
+    "room.created",
+    "room.joined",
+    "peer.joined",
+    "peer.left",
+    "peer.updated",
+    "peer.state",
+    "room.ended",
+    "rtc.offer",
+    "rtc.answer",
+    "rtc.ice",
+    "transcript.interim",
+    "transcript.final",
+    "translation.pending",
+    "translation.skipped",
+    "translation.result",
+    "translation.failed",
+    "glossary.updated",
+    "error",
+    "pong"
+  ]
+}
