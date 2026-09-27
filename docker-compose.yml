@@ -41,4 +41,8 @@ services:
       # Persist the spend ledger across restarts. Without this the container's own copy resets
       # on every deploy, and the daily cap would reset with it.
       - ./out:/app/out
+      # Persist the SQLite database (accounts, tokens, invites from M3 onward). Without this a
+      # redeploy deletes every account, and the server refuses to start in production rather
+      # than let that happen quietly.
+      - ./data:/app/data
     restart: unless-stopped

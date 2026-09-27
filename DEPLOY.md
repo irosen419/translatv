@@ -223,9 +223,15 @@ than a mount, because a restart there silently resets the day's spend and re arm
 be cumulative. Mounting `./out` satisfies it. If your host genuinely keeps the ledger on the root
 device and that is intended, set `ALLOW_EPHEMERAL_LEDGER=1` to say so deliberately.
 
+The database gets the same treatment. `DATA_DIR` (default `data/`, which is `/app/data` in the
+image) holds `translatv.db`, and the compose file mounts `./data` over it. Without that mount a
+redeploy deletes every account, so the server **refuses to start** in production when the data
+directory is on the image layer, printing `the database is on the image layer`. If that is
+genuinely intended, set `ALLOW_EPHEMERAL_DATA=1`.
+
 ## 6. Set ADMIN_PASSWORD, or the server will not start
 
-Starting a call is admin only. One admin, one password, no user accounts and no database.
+Starting a call is admin only. One admin, one password, and no user accounts yet (they arrive with the database, from M3).
 
 ```
 ADMIN_PASSWORD=<a long passphrase, not a short password>
@@ -381,6 +387,8 @@ camera prompt appearing at all confirms the TLS path end to end.
 | `TRUST_PROXY` | **behind a proxy** | off | `1` reads the client address from the NEAREST hop of `X-Forwarded-For`. Required with a reverse proxy, dangerous without one. See section 2. |
 | `BIND_ADDR` | no | `127.0.0.1` | Which interface `docker-compose` publishes 8080 on. Loopback by default. `0.0.0.0` only on a trusted LAN, never behind a tunnel. See section 7. |
 | `ALLOW_EPHEMERAL_LEDGER` | no | off | `1` permits the spend ledger to live on the image layer instead of a mounted volume. See section 5. |
+| `DATA_DIR` | no | `data/` under the repo root | Directory holding the SQLite database `translatv.db`. Relative paths resolve against the repo root. Mount a volume here in production. See section 5. |
+| `ALLOW_EPHEMERAL_DATA` | no | off | `1` permits the database to live on the image layer instead of a mounted volume. See section 5. |
 
 ## What running costs
 

@@ -8,6 +8,7 @@ import { describeConfig, loadConfig } from "./config.js";
 import { createApp } from "./http.js";
 import { log } from "./log.js";
 import { SpendGate } from "./spend/caps.js";
+import { ephemeralDataRefusal, isEphemeralDataDir, openStore, type Store } from "./store/index.js";
 import { flushView, isEphemeralLedger, ledgerWritable } from "./spend/ledger.js";
 import { createAnthropicClient } from "./translate/anthropic.js";
 import { TranslationService } from "./translate/TranslationService.js";
@@ -75,6 +76,18 @@ if (config.isProduction && isEphemeralLedger(repoRoot) && !process.env.ALLOW_EPH
   process.exit(1);
 }
 
+// The database gets the same guard as the ledger, for a harsher reason: an image layer ledger
+// resets a day's spend, an image layer database deletes every account on the next redeploy.
+const dataRefusal = ephemeralDataRefusal({
+  isProduction: config.isProduction,
+  ephemeral: isEphemeralDataDir(config.dataDir),
+  allow: process.env.ALLOW_EPHEMERAL_DATA,
+});
+if (dataRefusal !== null) {
+  log.error("boot", { message: dataRefusal });
+  process.exit(1);
+}
+
 // Without a password nobody can prove they are the admin, so the gate on starting a call is
 // open to everyone. That is fine on a laptop and is the whole point of the feature in
 // production, so a deployment that forgot the variable must not come up quietly serving an
@@ -92,6 +105,22 @@ if (config.isProduction && config.adminPassword === null) {
 // refuse to start announced "listening on port 8080" on its way out. The CI log showed exactly
 // that sequence, which is a confusing thing to hand someone debugging a failed boot.
 for (const line of describeConfig(config)) log.info("boot", { message: line });
+
+// Opened after every guard, so a boot that is going to refuse never creates a database file on
+// its way out. Nothing reads it yet: M3 adds the first tables. A store that cannot open (an
+// unwritable directory, a schema newer than this code) stops the boot, since accounts will live
+// here and a server that cannot reach them has nothing correct to serve.
+let store: Store;
+try {
+  store = openStore({ path: config.databasePath });
+} catch (error) {
+  log.error("boot", {
+    message: "refusing to start: the database could not be opened",
+    reason: error instanceof Error ? error.message : "unknown",
+  });
+  process.exit(1);
+}
+log.info("boot", { message: "database open", schemaVersion: store.schemaVersion() });
 
 const llm = writable.ok && config.anthropicApiKey ? createAnthropicClient(config.anthropicApiKey) : null;
 const translation = new TranslationService(llm, gate, repoRoot);
@@ -131,6 +160,12 @@ server.on("error", (error: NodeJS.ErrnoException) => {
   process.exit(1);
 });
 
+// Closing checkpoints the WAL back into the main file, so a stopped server leaves one file rather
+// than three. Guarded because both shutdown paths below can reach it.
+function closeStore(): void {
+  if (store.db.isOpen) store.close();
+}
+
 function shutdown(signal: string): void {
   log.info("shutdown", { signal, rooms: signaling.roomCount });
   // Last chance to leave the view agreeing with the ledger. This is what makes a local test run
@@ -138,10 +173,16 @@ function shutdown(signal: string): void {
   clearInterval(viewTimer);
   flushView(repoRoot);
   signaling.close();
-  server.close(() => process.exit(0));
+  server.close(() => {
+    closeStore();
+    process.exit(0);
+  });
   // Do not wait forever on a socket that will not close. Rooms are in memory and die with the
   // process anyway, so there is nothing to flush.
-  setTimeout(() => process.exit(0), 3_000).unref();
+  setTimeout(() => {
+    closeStore();
+    process.exit(0);
+  }, 3_000).unref();
 }
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));

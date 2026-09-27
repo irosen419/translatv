@@ -32,7 +32,7 @@ plan of record for the multi-user server and the iOS app.
 
 ## Stack and layout
 
-- Node 20+ and npm workspaces: `shared` (wire protocol), `server` (Express plus ws), `client`
+- Node 22.13+ (22 LTS; the store uses the built in `node:sqlite`) and npm workspaces: `shared` (wire protocol), `server` (Express plus ws), `client`
   (React 18 plus Vite). TypeScript strict everywhere.
 - `shared/src/protocol.ts` is the SINGLE source of truth for the WebSocket wire format. Both sides
   derive their types from its zod schemas, and those same schemas are the server's input validation
@@ -41,8 +41,12 @@ plan of record for the multi-user server and the iOS app.
 - Each browser transcribes its OWN microphone and sends text. Nobody transcribes the remote stream.
 - Speech to text sits behind the `SttAdapter` interface in `client/src/stt/types.ts`. The Web Speech implementation is the
   default; a paid engine is a config change, not a rewrite.
-- Room state is in memory only. There is no database, and a server restart legitimately destroys
-  every room.
+- Room state is in memory only, and a server restart legitimately destroys every room.
+- Durable state (accounts and tokens from M3) lives in SQLite through Node's built in
+  `node:sqlite`, under `server/src/store/`, in `DATA_DIR/translatv.db`. No native npm dependency.
+  Migrations in `server/src/store/migrations.ts` are APPEND ONLY. Tests use `":memory:"`. In
+  production the data directory must be a mounted volume: the server refuses to start on the
+  image layer unless `ALLOW_EPHEMERAL_DATA=1`.
 
 ## Spend tracking
 

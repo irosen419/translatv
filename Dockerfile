@@ -3,7 +3,7 @@
 # The client is built into static files the server serves, so this is one image and one process
 # rather than two services that have to find each other.
 
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json tsconfig.base.json ./
@@ -32,7 +32,7 @@ RUN npm run build --workspace=shared \
 # non-zero exit here already fails the build; the script's own output says which failure it was.
 RUN node script/check_secrets.mjs
 
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
@@ -54,6 +54,13 @@ COPY --from=build /app/client/dist client/dist
 # allowing calls. Spend continued, permanently untracked, behind one warning line per call. The
 # server now refuses to translate when it cannot append, and this is what stops it having to.
 COPY --chown=node:node out/ out/
+
+# The SQLite database directory (DATA_DIR defaults to /app/data here). Created and handed to node
+# for the same reason the ledger is: the store creates translatv.db and its WAL files at first
+# boot, and a root owned directory would make that fail EACCES for USER node. In production a
+# volume is mounted over it (docker-compose.yml), and the boot guard refuses to start without
+# one unless ALLOW_EPHEMERAL_DATA=1, because a database on the image layer dies with each deploy.
+RUN mkdir -p data && chown node:node data
 
 # Run as a non root user. Nothing here needs privileges.
 USER node

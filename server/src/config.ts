@@ -6,7 +6,7 @@
 // warning and a documented degraded mode rather than a refusal to start.
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { RTCIceServerConfig } from "@translatv/shared";
 
 function num(name: string, fallback: number): number {
@@ -76,7 +76,18 @@ export interface Config {
    * including the join limiter that is the only real defense on room codes.
    */
   trustProxy: boolean;
+  /**
+   * Where the SQLite database lives (DATA_DIR, default data/ under the repo root). In production
+   * this must be a mounted volume: the boot guard refuses an image layer directory, because a
+   * redeploy would delete every account in it.
+   */
+  dataDir: string;
+  /** The database file inside dataDir. */
+  databasePath: string;
 }
+
+/** The database file's name inside DATA_DIR. */
+export const DATABASE_FILE = "translatv.db";
 
 export function loadConfig(repoRoot: string): Config {
   loadDotEnv(repoRoot);
@@ -135,6 +146,11 @@ export function loadConfig(repoRoot: string): Config {
     iceServers.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
   }
 
+  // Relative paths resolve against the repo root, not the working directory, so `npm start` from
+  // the root and `npm start --workspace=server` agree on which database they open.
+  const dataDirRaw = (process.env["DATA_DIR"] ?? "").trim();
+  const dataDir = resolve(repoRoot, dataDirRaw === "" ? "data" : dataDirRaw);
+
   return {
     port: num("PORT", 8080),
     repoRoot,
@@ -146,6 +162,8 @@ export function loadConfig(repoRoot: string): Config {
     iceServers,
     isProduction: process.env["NODE_ENV"] === "production",
     trustProxy: (process.env["TRUST_PROXY"] ?? "").trim() === "1",
+    dataDir,
+    databasePath: join(dataDir, DATABASE_FILE),
   };
 }
 

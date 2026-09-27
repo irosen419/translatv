@@ -34,6 +34,10 @@ dist/
 certs/
 *.pem
 
+# The SQLite database (DATA_DIR default). Accounts and hashed tokens: never committed, and this
+# repo is public.
+data/
+
 # Media working files
 /output/
 /tmp/

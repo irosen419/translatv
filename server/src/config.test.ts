@@ -124,3 +124,38 @@ describe("TURN configuration", () => {
     expect(message).toContain("TURN_CREDENTIAL");
   });
 });
+
+describe("DATA_DIR", () => {
+  let savedDataDir: string | undefined;
+  beforeEach(() => {
+    savedDataDir = process.env["DATA_DIR"];
+    delete process.env["DATA_DIR"];
+  });
+  afterEach(() => {
+    if (savedDataDir === undefined) delete process.env["DATA_DIR"];
+    else process.env["DATA_DIR"] = savedDataDir;
+  });
+
+  it("defaults to data/ under the repo root, holding translatv.db", () => {
+    const config = loadConfig(root);
+    expect(config.dataDir).toBe(join(root, "data"));
+    expect(config.databasePath).toBe(join(root, "data", "translatv.db"));
+  });
+
+  it("takes an absolute DATA_DIR as given", () => {
+    process.env["DATA_DIR"] = "/srv/translatv";
+    const config = loadConfig(root);
+    expect(config.dataDir).toBe("/srv/translatv");
+    expect(config.databasePath).toBe("/srv/translatv/translatv.db");
+  });
+
+  it("resolves a relative DATA_DIR against the repo root, not the working directory", () => {
+    process.env["DATA_DIR"] = "state";
+    expect(loadConfig(root).dataDir).toBe(join(root, "state"));
+  });
+
+  it("treats a blank DATA_DIR as unset", () => {
+    process.env["DATA_DIR"] = "  ";
+    expect(loadConfig(root).dataDir).toBe(join(root, "data"));
+  });
+});
