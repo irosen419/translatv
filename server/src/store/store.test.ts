@@ -139,8 +139,10 @@ describe("openStore", () => {
       expect(performance.now() - started).toBeLessThan(1000);
       // It got as far as the rewrite, whose pages wait in the WAL: the second checkpoint answered,
       // not the first. Were the first ever to turn this reader away, this test would stop reaching
-      // what it is here for, and say so.
-      expect(statSync(`${path}-wal`).size).toBeGreaterThan(0);
+      // what it is here for, and say so. A rewrite puts every page there, so at least the whole
+      // file: a stray write before the first checkpoint left two pages and passed a bare "not
+      // empty", with the second checkpoint's answer ignored as well (measured in review).
+      expect(statSync(`${path}-wal`).size).toBeGreaterThanOrEqual(statSync(path).size);
       reader.exec("COMMIT");
       expect(store.erase()).toBe(true);
     } finally {
@@ -153,9 +155,9 @@ describe("openStore", () => {
     // through every attempt), and closing the database empties the WAL without rewriting the
     // file. What keeps a deleted account unreadable then is secure_delete. Rows here fill whole
     // pages, which a delete frees outright: FAST zeroes a row inside a page but leaves a freed page
-    // as it was, and OFF leaves both. Each passed every other test once the rewrite was added, and
-    // left the deleted account's email and name in translatv.db (250 and 445 copies, measured in
-    // review). No erase here.
+    // as it was, and OFF leaves both. Each passed every other test once the rewrite was added. In
+    // translatv.db, OFF left 445 copies of the deleted account's words (its email, its name and its
+    // glossary), and FAST 250 (its glossary), measured in review. No erase here.
     const path = join(tempDir(), "t.db");
     const store = open({ path });
     const marker = `DELETED-${randomBytes(6).toString("hex")}`;

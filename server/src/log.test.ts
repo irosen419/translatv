@@ -108,31 +108,40 @@ describe("scrub", () => {
   });
 });
 
+/**
+ * Every line the logger writes, whichever console method it writes with. A test watching some of
+ * them passed with nothing to read once the logger moved to another: warnings to console.error,
+ * and info to console.info, where a leak on an info line then went unseen (both measured in
+ * review). Required to hold what the test looks for, so it cannot pass empty.
+ */
+function written(): () => string[] {
+  const spies = (["log", "info", "debug", "warn", "error"] as const).map((method) =>
+    vi.spyOn(console, method).mockImplementation(() => {}),
+  );
+  return () => spies.flatMap((spy) => spy.mock.calls.map((call) => String(call[0])));
+}
+
 describe("the emitted line", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("never contains the raw content, at any level", () => {
-    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const lines = written();
     log.info("transcript.final", {
       room: "A1B2C3D4",
       line: { id: "l1", text: "esto es privado" },
     });
-    const line = String(spy.mock.calls[0]?.[0]);
+    expect(lines()).toHaveLength(1);
+    const [line] = lines() as [string];
     expect(line).not.toContain("esto es privado");
     expect(line).toContain("A1B2C3D4");
     expect(JSON.parse(line).event).toBe("transcript.final");
   });
 
   it("scrubs warnings and errors too, not only info", () => {
-    // Read from every console method, and require both lines: watching console.warn alone, the
-    // test passed with nothing to read once warnings went to console.error (measured in review).
-    const spies = (["log", "warn", "error"] as const).map((level) =>
-      vi.spyOn(console, level).mockImplementation(() => {}),
-    );
+    const lines = written();
     log.warn("stt.retry", { text: "leaked?" });
     log.error("translate.failed", { original: "leaked?" });
-    const lines = spies.flatMap((spy) => spy.mock.calls.map((call) => String(call[0])));
-    expect(lines.map((line) => JSON.parse(line).event).sort()).toEqual(["stt.retry", "translate.failed"]);
-    expect(lines.join("\n")).not.toContain("leaked?");
+    expect(lines().map((line) => JSON.parse(line).event).sort()).toEqual(["stt.retry", "translate.failed"]);
+    expect(lines().join("\n")).not.toContain("leaked?");
   });
 });

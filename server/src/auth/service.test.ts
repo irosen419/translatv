@@ -560,13 +560,14 @@ describe("deleteAccount", () => {
     // The named id comes from the client, so it can be anything, an email included, and the
     // logger drops an email only under the key "email": logged as the named id, one went through
     // verbatim (measured in review). The line names the account the bearer is for. Read from
-    // every console method: a second line at another level leaked past a test watching one, and
-    // moving warnings to another method failed it (both measured in review).
+    // every console method a logger writes with: a second line at another level leaked past a
+    // test watching one, moving warnings to another method failed it, and with info on
+    // console.info a leak there went unseen (each measured in review).
     const auth = service();
     const ben = await signedUp(auth, "ben@example.test");
     const named = "someone.else@example.test";
-    const spies = (["log", "warn", "error"] as const).map((level) =>
-      vi.spyOn(console, level).mockImplementation(() => {}),
+    const spies = (["log", "info", "debug", "warn", "error"] as const).map((method) =>
+      vi.spyOn(console, method).mockImplementation(() => {}),
     );
     try {
       expect(await auth.deleteAccount(ben.user.id, { password: PASSWORD, userId: named }, NOW)).toEqual({
