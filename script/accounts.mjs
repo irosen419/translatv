@@ -12,8 +12,9 @@ import { join } from "node:path";
 /** The environment a harness server needs for accounts, beside its own settings. */
 export function accountsEnv(root) {
   return {
-    // Open signup, so the harness can make the accounts it needs. Invite only signup is covered
-    // by the server's own suites (server/src/auth/).
+    // Open signup, so the harness can make the accounts it needs. Invite only signup, the
+    // production default, gets a server of its own in the last sections of e2e.mjs, and the
+    // rules behind it are tested in server/src/auth/.
     SIGNUP_MODE: "open",
     // A throwaway database beside the throwaway ledger, never the repo's data/.
     DATA_DIR: join(root, "data"),

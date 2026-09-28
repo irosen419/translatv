@@ -21,7 +21,7 @@
 //
 // Run with: node script/e2e.mjs
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -124,6 +124,42 @@ async function signUpViaScreen(page, name) {
   await page.getByRole("button", { name: "Start a new chat" }).waitFor();
 }
 
+/** Open the sign up form, as a person arriving at the app would. */
+async function openSignUp(page, base) {
+  await page.goto(base);
+  await page.getByRole("button", { name: en("auth.switch.toSignUp") }).click();
+}
+
+/** Fill in the sign up form on an invite only server and submit it. The outcome is the caller's. */
+async function submitSignUp(page, name, invite) {
+  await page.getByLabel(en("auth.displayName"), { exact: true }).fill(name);
+  await page.getByLabel(en("auth.email")).fill(emailFor(name));
+  await page.getByLabel(en("auth.password")).fill(PASSWORD);
+  await page.getByLabel(en("auth.invite")).fill(invite);
+  await page.getByRole("button", { name: en("auth.submit.signUp") }).click();
+}
+
+/**
+ * An access token for `name`, from a sign in of its own. A new token family, so no page's session
+ * moves: refreshing the token a page holds from here would rotate it out from under that page.
+ */
+async function apiAccessToken(base, name) {
+  const response = await fetch(`${base}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: emailFor(name), password: PASSWORD }),
+  });
+  if (!response.ok) throw new Error(`sign in for ${name} answered ${response.status}`);
+  return (await response.json()).accessToken;
+}
+
+/** Resolves true once the locator shows up, false if it never does. */
+const reached = (locator) =>
+  locator
+    .waitFor()
+    .then(() => true)
+    .catch(() => false);
+
 // A ledger root the server can write to without touching the repo's real one.
 const root = mkdtempSync(join(tmpdir(), "e2e-"));
 mkdirSync(join(root, "out", "translatv"), { recursive: true });
@@ -151,6 +187,8 @@ server.stdout.on("data", (d) => serverLog.push(String(d)));
 server.stderr.on("data", (d) => serverLog.push(String(d)));
 
 let browser;
+/** The second server, for the invite only section. Killed in finally if a step before it throws. */
+let inviteServer = null;
 const pages = {};
 /** Set to a page's name for the one step that expects the server to answer 401. */
 let expectRefusal = null;
@@ -885,11 +923,38 @@ try {
   check("the code is dead after ending", Boolean(dead));
 
   // ---------------------------------------------------------------------
+  section("The call is on the host's account");
+  // Read through the API, as the iOS app will. The per user data service reaches the signaling
+  // server only through index.ts, and dropping it there silently turned off call history and the
+  // stored glossary with every other check green.
+  const anaToken = await apiAccessToken(BASE, "Ana");
+  const history = await fetch(`${BASE}/api/me/calls`, { headers: { authorization: `Bearer ${anaToken}` } })
+    .then((r) => r.json())
+    .catch(() => null);
+  check(
+    "the host's call history names the person who joined",
+    Array.isArray(history?.calls) && history.calls.some((call) => call.peer?.displayName === "Ben"),
+    JSON.stringify(history)?.slice(0, 200),
+  );
+
+  // ---------------------------------------------------------------------
   section("Deleting an account");
   // A page of its own, outside the console error watch above: the wrong password below answers
   // 401 on purpose, and so does the sign in attempt after the account is gone.
   const eve = await (await browser.newContext()).newPage();
   await signUpViaScreen(eve, "Eve");
+  // Opening swaps the focused button for a form, and cancelling swaps it back. Focus left behind in
+  // a node that is gone falls to <body>, which drops a keyboard user at the top of the page.
+  await eve.getByRole("button", { name: en("account.delete.open") }).click();
+  check(
+    "opening it puts focus in the password field",
+    (await eve.evaluate(() => document.activeElement?.id)) === "delete-password",
+  );
+  await eve.getByRole("button", { name: en("account.delete.cancel") }).click();
+  check(
+    "cancelling puts focus back on the button that opened it",
+    (await eve.evaluate(() => document.activeElement?.textContent)) === en("account.delete.open"),
+  );
   await eve.getByRole("button", { name: en("account.delete.open") }).click();
   await eve.getByLabel(en("account.delete.password")).fill("not the password");
   await eve.getByRole("button", { name: en("account.delete.confirm") }).click();
@@ -924,6 +989,110 @@ try {
   );
 
   // ---------------------------------------------------------------------
+  section("Invite only signup, the default a real deployment runs");
+  // Everything above runs with open signup so the harness can make accounts freely, which left
+  // the production default untested end to end: the client could stop sending the code, or the
+  // owner lose the control that mints one, and every check above still passed. A server and a
+  // database of its own, so no account from above exists here.
+  const inviteRoot = join(root, "invite-only");
+  inviteServer = spawn("npx", ["tsx", "server/src/index.ts"], {
+    env: {
+      ...process.env,
+      PORT: "0",
+      NODE_ENV: "development",
+      ANTHROPIC_API_KEY: "",
+      ...accountsEnv(inviteRoot),
+      SIGNUP_MODE: "invite",
+      OWNER_EMAIL: emailFor("Olga"),
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const inviteLog = [];
+  inviteServer.stdout.on("data", (d) => inviteLog.push(String(d)));
+  inviteServer.stderr.on("data", (d) => inviteLog.push(String(d)));
+  const invitePort = await waitFor(
+    async () => inviteLog.join("").match(/"event":"listening","port":(\d+)/)?.[1] ?? null,
+    "the invite only server to report its port",
+  );
+  const INVITE_BASE = `http://localhost:${invitePort}`;
+
+  // The first code the way DEPLOY.md tells the owner to mint it: the BUILT CLI, which is what the
+  // image ships, run on the host against the database the live server has open.
+  const cli = spawnSync(process.execPath, ["server/dist/cli/invite.js"], {
+    encoding: "utf8",
+    env: { ...process.env, DATA_DIR: join(inviteRoot, "data"), OWNER_EMAIL: "" },
+  });
+  const INVITE_CODE = /^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){2}$/;
+  const firstCode = (cli.stdout ?? "").split("\n")[0]?.trim() ?? "";
+  check("the invite CLI prints a code", INVITE_CODE.test(firstCode), (cli.stderr ?? "").slice(0, 200));
+
+  const olga = await (await browser.newContext()).newPage();
+  await openSignUp(olga, INVITE_BASE);
+  check("an invite only server asks for an invite code", await olga.getByLabel(en("auth.invite")).isVisible());
+  await submitSignUp(olga, "Olga", firstCode);
+  check(
+    "the owner signs up with the code from the CLI",
+    await reached(olga.getByRole("button", { name: "Start a new chat" })),
+  );
+
+  await olga.getByRole("button", { name: en("account.invite.create") }).click();
+  const minted = await waitFor(
+    async () => (await olga.locator(".owner-invite-code").textContent().catch(() => null))?.trim() || null,
+    "the owner's new invite code",
+  );
+  check("the owner mints an invite in the app", INVITE_CODE.test(minted), minted);
+
+  const pat = await (await browser.newContext({ permissions: ["microphone"] })).newPage();
+  await openSignUp(pat, INVITE_BASE);
+  await submitSignUp(pat, "Pat", minted);
+  check(
+    "someone invited signs up with the code the owner sent",
+    await reached(pat.getByRole("button", { name: "Start a new chat" })),
+  );
+
+  const quin = await (await browser.newContext()).newPage();
+  await openSignUp(quin, INVITE_BASE);
+  await submitSignUp(quin, "Quin", minted);
+  check("a code already used is refused with a sentence", await reached(quin.getByText(en("auth.error.INVITE_INVALID"))));
+
+  // A returning visitor's first frame is the start page, restoring, never the sign in form. The
+  // session state used to be set after the first paint, so the form showed for a frame each load.
+  await pat.addInitScript(() => {
+    window.__sawSignInForm = false;
+    new MutationObserver(() => {
+      if (document.querySelector(".auth-title")) window.__sawSignInForm = true;
+    }).observe(document, { childList: true, subtree: true });
+  });
+  await pat.reload();
+  await pat.getByRole("button", { name: "Start a new chat" }).waitFor();
+  check(
+    "a returning visitor never sees the sign in form, not even for a frame",
+    (await pat.evaluate(() => window.__sawSignInForm)) === false,
+  );
+
+  // Deleted from somewhere else mid call: the tab has to notice on its own and go to the sign in
+  // screen, not sit in a room its account no longer exists for. It hears through the socket the
+  // server closes, then a refresh the server refuses (App.tsx, onSignedOut).
+  await pat.getByRole("button", { name: "Start a new chat" }).click();
+  await pat.getByLabel("Your name, just for this chat").fill("Pat");
+  await pat.getByLabel("Your language and region").selectOption("en-US");
+  await pat.getByRole("button", { name: /Create and allow microphone/ }).click();
+  await pat.locator(".room").waitFor();
+  const patToken = await apiAccessToken(INVITE_BASE, "Pat");
+  const deletedElsewhere = await fetch(`${INVITE_BASE}/api/account`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json", authorization: `Bearer ${patToken}` },
+    body: JSON.stringify({ password: PASSWORD }),
+  });
+  check("the account is deleted from somewhere else", deletedElsewhere.status === 204, String(deletedElsewhere.status));
+  check(
+    "the tab that was in a call goes to the sign in screen on its own",
+    await reached(pat.getByRole("button", { name: en("auth.submit.signIn") })),
+  );
+  inviteServer.kill("SIGTERM");
+  inviteServer = null;
+
+  // ---------------------------------------------------------------------
   section("Credentials stay out of URLs");
   check(
     "the socket was opened, and no socket URL carries a token",
@@ -952,6 +1121,7 @@ try {
   console.error(`\n--- server tail ---\n${serverLog.slice(-15).join("")}`);
 } finally {
   await browser?.close();
+  inviteServer?.kill("SIGTERM");
   server.kill("SIGTERM");
   rmSync(root, { recursive: true, force: true });
 }
