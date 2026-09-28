@@ -2,6 +2,5 @@
   "t": "room.create",
   "username": "Ana",
   "dialect": "es-AR",
-  "wantsVideo": true,
-  "adminToken": "eyJleHAiOjE3OTA0NjcyMDAwMDB9.Zml4dHVyZSBvbmx5LCBub3QgYSByZWFsIHNpZ25hdHVyZQ"
+  "wantsVideo": true
 }

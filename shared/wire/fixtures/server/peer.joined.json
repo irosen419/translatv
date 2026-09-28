@@ -8,6 +8,6 @@
     "micEnabled": true,
     "cameraEnabled": true,
     "wantsTranslation": true,
-    "isAdmin": false
+    "isHost": false
   }
 }

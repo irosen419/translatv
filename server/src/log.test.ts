@@ -34,6 +34,31 @@ describe("scrub", () => {
     }
   });
 
+  // Accounts arrived in M3, and with them a second kind of thing that must never reach a log:
+  // credentials and the address that identifies a person. An email in a log file outlives the
+  // account it belonged to, and a token in one is a session for whoever reads it.
+  it("withholds an email address", () => {
+    const scrubbed = scrub({ event: "auth.login", email: "ana@example.test" }) as Record<string, unknown>;
+    expect(scrubbed["email"]).toBe("[withheld 16 chars]");
+    expect(JSON.stringify(scrubbed)).not.toContain("ana@example.test");
+  });
+
+  it("withholds every key that can carry a credential or identify an account holder", () => {
+    for (const key of [
+      "email",
+      "password",
+      "accessToken",
+      "refreshToken",
+      "token",
+      "invite",
+      "displayName",
+      "authorization",
+    ]) {
+      const scrubbed = scrub({ nested: { [key]: "secret words" } }) as { nested: Record<string, unknown> };
+      expect(scrubbed.nested[key], `${key} reached the log intact`).toBe("[withheld 12 chars]");
+    }
+  });
+
   it("records the length rather than deleting the key", () => {
     // log.ts's stated reason, and it is the difference between two facts a reader needs to tell
     // apart: an event that HAD no text, and an event whose text was withheld.

@@ -23,8 +23,10 @@ plan of record for the multi-user server and the iOS app.
   Untracked spend is the specific failure this repo was set up to avoid.
 - There is no autopilot in this repo yet. If one is added, arming a step that spends is owner only,
   always, and no automation ever flips an `"armed"` flag.
-- Never log transcript text, chat text, usernames, or glossary content. The logger takes counts,
-  identifiers, and durations only. There is a unit test asserting it drops a `text` field.
+- Never log transcript text, chat text, usernames, or glossary content, and never emails,
+  passwords, access or refresh tokens, or invite codes. The logger takes counts, identifiers
+  (an opaque user id, never an email), and durations only. Unit tests assert it drops a `text`
+  field and an `email` field.
 - Never put a secret behind a `VITE_` prefix. Vite inlines every `VITE_*` variable into the client
   bundle, so a `VITE_ANTHROPIC_API_KEY` would ship the key to every visitor. `npm run check:secrets`
   greps the built client for key prefixes and fails on a hit.
@@ -47,6 +49,12 @@ plan of record for the multi-user server and the iOS app.
   Migrations in `server/src/store/migrations.ts` are APPEND ONLY. Tests use `":memory:"`. In
   production the data directory must be a mounted volume: the server refuses to start on the
   image layer unless `ALLOW_EPHEMERAL_DATA=1`.
+- Accounts (M3) live in `server/src/auth/`: scrypt passwords, 15 minute HMAC access tokens keyed
+  from `AUTH_SECRET` (production refuses to start without it), 30 day refresh tokens stored hashed
+  and rotated on every use, with reuse revoking the whole family. Every WebSocket upgrade needs a
+  valid access token (`Authorization: Bearer` for native clients, the `bearer.<token>` subprotocol
+  for browsers, never the URL); a browser's Origin must still match the allowlist. The HTTP account
+  API's schemas and error codes are in `shared/src/auth.ts`. `ADMIN_PASSWORD` is retired.
 
 ## Spend tracking
 

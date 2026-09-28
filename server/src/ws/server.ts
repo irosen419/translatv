@@ -25,7 +25,7 @@ import {
 import type { Config } from "../config.js";
 import { log } from "../log.js";
 import { GRACE_MS, MAX_MEMBERS, RoomManager, type Member } from "../rooms/RoomManager.js";
-import { verifyAdminToken } from "../security/adminAuth.js";
+import { bearerFromUpgrade, selectSubprotocol } from "../auth/bearer.js";
 import { roomHash } from "../spend/caps.js";
 import {
   LIMITS as RATE,
@@ -171,6 +171,12 @@ interface Connection {
    */
   id: string;
   ip: string;
+  /**
+   * The account this socket was opened by, proved by the access token on the upgrade. Fixed for
+   * the life of the socket: a token that expires mid call does not end the call, and the next
+   * reconnect has to present a fresh one.
+   */
+  userId: string | null;
   /** Set once the connection is in a room. */
   roomCode: string | null;
   memberId: string | null;
@@ -181,6 +187,15 @@ interface Connection {
    * missing entirely.
    */
   alive: boolean;
+}
+
+/**
+ * What the socket layer needs from accounts: turn an access token into a user id, or refuse it.
+ * An interface rather than AuthService itself, so the room tests can hand in a stub without a
+ * database behind it.
+ */
+export interface AccessVerifier {
+  verifyAccess(token: string, now: number): string | null;
 }
 
 export class SignalingServer {
@@ -195,6 +210,15 @@ export class SignalingServer {
 
   private readonly createLimiter = new TokenBuckets(RATE.createPerIp);
   private readonly joinLimiter = new TokenBuckets(RATE.joinPerIp);
+  /**
+   * The same two limits again, keyed by ACCOUNT. The IP buckets alone let one account spread its
+   * attempts across addresses; the account buckets alone let one address spread them across
+   * accounts it signed up. Both have to pass.
+   */
+  private readonly createUserLimiter = new TokenBuckets(RATE.createPerUser);
+  private readonly joinUserLimiter = new TokenBuckets(RATE.joinPerUser);
+  /** The account each accepted upgrade proved, handed from verifyClient to onConnection. */
+  private readonly upgradeUsers = new WeakMap<IncomingMessage, string>();
   private readonly messageLimiter = new TokenBuckets(RATE.messagesPerConnection);
   private readonly translationLimiter = new TokenBuckets(RATE.translationsPerRoom);
 
@@ -207,6 +231,7 @@ export class SignalingServer {
     server: HttpServer,
     private readonly config: Config,
     private readonly translation: TranslationService,
+    private readonly auth: AccessVerifier,
   ) {
     this.wss = new WebSocketServer({
       server,
@@ -216,7 +241,10 @@ export class SignalingServer {
       // the contracted path makes a mismatch fail identically in both modes.
       path: WS_PATH,
       maxPayload: LIMITS.maxPayloadBytes,
-      verifyClient: (info, done) => this.verifyOrigin(info.req, done),
+      verifyClient: (info, done) => this.verifyUpgrade(info.req, done),
+      // A browser offers ["translatv.v1", "bearer.<token>"]; the answer is the app protocol only,
+      // so the token is never echoed back in the response.
+      handleProtocols: (offered) => selectSubprotocol(offered),
     });
 
     this.wss.on("connection", (socket, req) => this.onConnection(socket, req));
@@ -229,24 +257,28 @@ export class SignalingServer {
   }
 
   /**
-   * Origin check on the upgrade.
+   * The gate on the upgrade: Origin, then account, then the per address cap.
    *
-   * Browsers always send Origin on a WebSocket upgrade, and there is no cookie auth here for
-   * SameSite to protect, so this is the CSRF equivalent: it stops a page on another origin from
-   * opening a socket against this server with the user's network position.
+   * ORIGIN. Browsers always send it on a WebSocket upgrade and a page cannot forge it, so for a
+   * browser the allowlist is the CSRF defense: it stops a page on another origin from opening a
+   * socket with the user's credentials and network position. That stays exactly as it was, and a
+   * valid token does NOT buy a bad Origin past it: a hostile page that somehow held a token is
+   * still a hostile page.
+   *
+   * A MISSING Origin is a native client (the iOS app, a test harness), which sends none. It used
+   * to be refused outright in production; it is now admitted ONLY with a valid access token,
+   * which is the proof a browser's Origin cannot give (docs/PLAN.md, D9).
+   *
+   * ACCOUNT. Every upgrade must carry a valid access token, in `Authorization: Bearer` (native)
+   * or as the "bearer." subprotocol (browser). No token, or a bad or expired one, is refused with
+   * 401 here, before a socket exists: room.create and room.join both need an account, and a
+   * socket that can do nothing else has no reason to be held open.
    */
-  private verifyOrigin(
+  private verifyUpgrade(
     req: IncomingMessage,
     done: (ok: boolean, code?: number, message?: string) => void,
   ): void {
     const origin = req.headers.origin;
-    // A missing Origin is a non browser client (curl, a test harness). Allowed outside
-    // production, refused in it, because in production every legitimate client is a browser.
-    if (!origin) {
-      done(!this.config.isProduction, 403, "origin required");
-      return;
-    }
-
     // In development, any localhost or private LAN origin is allowed regardless of port. Vite,
     // the built client, and a test harness on an OS assigned port all differ only by port
     // number, and pinning one turns an ordinary setup into a confusing 403 with no clue
@@ -254,13 +286,23 @@ export class SignalingServer {
     // laptop's address, which is the only way to test a real two device call.
     //
     // Production stays strict: there, the allowlist is the whole CSRF defense.
-    const allowed =
-      this.config.allowedOrigins.includes(origin) ||
-      (!this.config.isProduction && isDevelopmentOrigin(origin));
+    if (origin !== undefined) {
+      const allowed =
+        this.config.allowedOrigins.includes(origin) ||
+        (!this.config.isProduction && isDevelopmentOrigin(origin));
 
-    if (!allowed) {
-      log.warn("ws.origin_refused", { origin });
-      done(false, 403, "origin not allowed");
+      if (!allowed) {
+        log.warn("ws.origin_refused", { origin });
+        done(false, 403, "origin not allowed");
+        return;
+      }
+    }
+
+    const bearer = bearerFromUpgrade(req.headers);
+    const userId = bearer === null ? null : this.auth.verifyAccess(bearer, Date.now());
+    if (userId === null) {
+      log.warn("ws.unauthenticated", { native: origin === undefined, presented: bearer !== null });
+      done(false, 401, "sign in required");
       return;
     }
 
@@ -290,6 +332,7 @@ export class SignalingServer {
       return;
     }
 
+    this.upgradeUsers.set(req, userId);
     done(true);
   }
 
@@ -299,6 +342,7 @@ export class SignalingServer {
       socket,
       id: randomUUID(),
       ip,
+      userId: this.upgradeUsers.get(req) ?? null,
       roomCode: null,
       memberId: null,
       alive: true,
@@ -454,34 +498,23 @@ export class SignalingServer {
   }
 
   /**
-   * Is the admin gate switched on at all?
+   * The account behind this connection, or null after telling it why not.
    *
-   * Falsy rather than strictly null, on purpose. "No password configured" arrives as null from
-   * loadConfig, as undefined from an object predating the field, and as "" from an
-   * ADMIN_PASSWORD set to nothing. All three mean the same thing and must not be allowed to
-   * mean different ones.
-   *
-   * Off means every admin rule below is off: anyone may start a call, anyone may join, and
-   * nobody's departure ends a room. That is the app exactly as it behaved before any of this
-   * existed, which is what makes it a safe development default. It is impossible in production,
-   * where index.ts refuses to boot without a password.
+   * Null is unreachable through an ordinary upgrade, which refuses a socket with no valid token
+   * before it exists. Checked anyway because create and join are the two places an anonymous
+   * socket would matter, and the check is one comparison.
    */
-  private get adminGateEnabled(): boolean {
-    return Boolean(this.config.adminPassword);
+  private requireUser(connection: Connection): string | null {
+    if (connection.userId !== null) return connection.userId;
+    this.fail(connection.socket, "UNAUTHENTICATED", true);
+    return null;
   }
 
-  /**
-   * Did the bearer of this token PROVE they are the admin?
-   *
-   * Strictly about proof, and deliberately false when no password is configured: with the gate
-   * off nobody has proved anything, so nobody is marked admin and no room hangs its life on
-   * their departure. Keeping this separate from the gate is what stops "the gate is off" from
-   * quietly meaning "everyone is the admin", which would make every leave end a room.
-   */
-  private isAdminToken(token: string | undefined, now: number): boolean {
-    const password = this.config.adminPassword;
-    if (!password || token === undefined) return false;
-    return verifyAdminToken(token, password, now);
+  /** Both buckets, the address's and the account's. Both are always charged. */
+  private takeBoth(ipLimiter: TokenBuckets, userLimiter: TokenBuckets, connection: Connection, userId: string, now: number): boolean {
+    const byIp = ipLimiter.take(connection.ip, now);
+    const byUser = userLimiter.take(userId, now);
+    return byIp && byUser;
   }
 
   private handleCreate(
@@ -490,25 +523,20 @@ export class SignalingServer {
     now: number,
   ): void {
     if (this.alreadyInRoom(connection)) return;
-    if (!this.createLimiter.take(connection.ip, now)) {
+    const userId = this.requireUser(connection);
+    if (userId === null) return;
+    if (!this.takeBoth(this.createLimiter, this.createUserLimiter, connection, userId, now)) {
       this.fail(connection.socket, "RATE_LIMITED");
       return;
     }
 
-    // Starting a call is admin only, full stop. Checked HERE rather than in the client, which
-    // can be edited by anyone who opens devtools, so the greyed out button is a courtesy and
-    // this is the actual gate.
-    const creatorIsAdmin = this.isAdminToken(message.adminToken, now);
-    if (this.adminGateEnabled && !creatorIsAdmin) {
-      this.fail(connection.socket, "ADMIN_REQUIRED", true);
-      return;
-    }
-
+    // Any signed in account may start a call (docs/PLAN.md, D9), bounded by the limits above and
+    // by the spend caps. The creator is the room's host.
     const { room, member, resumeToken } = this.rooms.create(
       message.username,
       message.dialect,
       now,
-      creatorIsAdmin,
+      userId,
     );
     this.sessions.set(room.code, new RoomSession());
     this.bind(connection, room.code, member.id);
@@ -532,29 +560,32 @@ export class SignalingServer {
     now: number,
   ): void {
     if (this.alreadyInRoom(connection)) return;
+    const userId = this.requireUser(connection);
+    if (userId === null) return;
     // The brute force guard on room codes. This is the only real attack surface on room access.
-    if (!this.joinLimiter.take(connection.ip, now)) {
+    if (!this.takeBoth(this.joinLimiter, this.joinUserLimiter, connection, userId, now)) {
       this.fail(connection.socket, "RATE_LIMITED");
       return;
     }
 
-    // Two ways in, and only two. You are the admin, or the admin is already sitting in the
-    // room you are trying to enter. Since only the admin can create a room, the second case is
-    // really "they started this call and have not left it".
-    //
-    // Order matters: the admin check runs BEFORE the room is looked up, so an admin is never
-    // told a room is guest-blocked, and a guest is never told anything about a room until it
-    // is established that an admin is in it.
-    const joinerIsAdmin = this.isAdminToken(message.adminToken, now);
     // Sweep through the path that NOTIFIES before asking who is in the room. Expired seats have
-    // to be released and acted on (an expired admin ends the room) before "is an admin present"
+    // to be released and acted on (an expired host ends the room) before "is the host present"
     // can mean anything. Asking first, or asking something that sweeps silently, loses the
     // release: the room would be left with a guest in it, unendable and unjoinable.
-    if (this.adminGateEnabled) this.sweepAt(now);
-    if (this.adminGateEnabled && !joinerIsAdmin && !this.rooms.hasAdminPresent(message.code)) {
-      // Not ROOM_NOT_FOUND. The room may well exist; what it lacks is its host. Someone who
-      // arrived early on a real invite needs to be told to wait, not that their link is wrong.
-      this.fail(connection.socket, "ADMIN_NOT_PRESENT", true);
+    this.sweepAt(now);
+
+    // A guest gets in only while the host is sitting in the room. Since the host leaving ends the
+    // room, that is really "they started this call and have not left it".
+    //
+    // An ENDED code is told so, because the person holding it is owed "it ended" rather than
+    // "wait for them". Every other absence, a code that never existed included, is
+    // HOST_NOT_PRESENT, so a code guesser learns nothing about which codes are live.
+    if (!this.rooms.hasHostPresent(message.code)) {
+      this.fail(
+        connection.socket,
+        this.rooms.hasEnded(message.code) ? "ROOM_ENDED" : "HOST_NOT_PRESENT",
+        true,
+      );
       return;
     }
 
@@ -563,7 +594,7 @@ export class SignalingServer {
       message.username,
       message.dialect,
       now,
-      joinerIsAdmin,
+      userId,
     );
     if (!result.ok) {
       this.fail(connection.socket, result.error, true);
@@ -599,7 +630,14 @@ export class SignalingServer {
     now: number,
   ): void {
     if (this.alreadyInRoom(connection)) return;
-    const result = this.rooms.resume(message.code, message.resumeToken, now);
+    // Tied to the account as well as the token: a resume token lifted from someone's browser is
+    // useless to anyone signed in as somebody else. Refused as INVALID_RESUME, like a wrong token.
+    const result = this.rooms.resume(
+      message.code,
+      message.resumeToken,
+      now,
+      connection.userId ?? undefined,
+    );
     if (!result.ok) {
       this.fail(connection.socket, result.error, true);
       return;
@@ -661,18 +699,18 @@ export class SignalingServer {
     // Read BEFORE the seat is freed: after leave() the member is gone and there is nothing left
     // to ask about.
     const leaver = this.rooms.peek(roomCode)?.members.find((m) => m.id === memberId);
-    const adminLeft = leaver?.isAdmin === true;
+    const hostLeft = leaver?.isHost === true;
 
     const room = this.rooms.leave(roomCode, memberId, now);
     this.unbind(connection);
     connection.socket.close(CLOSE.normal, "left");
 
-    if (adminLeft) {
-      // No calls without the admin, by owner decision. An explicit leave is a DECISION, not a
+    if (hostLeft) {
+      // No calls without the host, by owner decision. An explicit leave is a DECISION, not a
       // dropped connection, so it ends the room immediately rather than holding the guest in a
       // call that cannot be rejoined and can never gain a second person.
       this.endRoom(roomCode, memberId, leaver?.username ?? "someone", now);
-      log.info("room.left", { room: roomHash(roomCode), endedByAdmin: true });
+      log.info("room.left", { room: roomHash(roomCode), endedByHost: true });
       return;
     }
 
@@ -693,7 +731,7 @@ export class SignalingServer {
   /**
    * Destroy a room and tell whoever is still in it, by name.
    *
-   * Shared by the End button and by the admin leaving, because those are the same event as far
+   * Shared by the End button and by the host leaving, because those are the same event as far
    * as everyone else in the room is concerned. Keeping one implementation is what stops the two
    * drifting into "ended" meaning something subtly different depending on how it happened.
    */
@@ -1160,7 +1198,7 @@ export class SignalingServer {
    *
    * `now` is a parameter rather than a Date.now() inside, so a test can run a sweep at a chosen
    * moment. The grace window is a minute and no test is going to wait one, which is why the
-   * admin timeout path had no coverage at all until it did.
+   * host timeout path had no coverage at all until it did.
    */
   sweepAt(now: number): void {
     this.rooms.sweep(now);
@@ -1171,8 +1209,8 @@ export class SignalingServer {
 
     for (const { room, member } of released) {
       this.byMember.delete(member.id);
-      if (member.isAdmin) {
-        // The admin's grace window ran out, so they are gone rather than blinking. This is the
+      if (member.isHost) {
+        // The host's grace window ran out, so they are gone rather than blinking. This is the
         // other end of the same rule as handleLeave: a transient drop keeps the call alive for
         // the whole grace window and does NOT land here, which is the distinction that stops a
         // wifi hop killing a conversation.
@@ -1192,6 +1230,8 @@ export class SignalingServer {
 
     this.createLimiter.sweep(now);
     this.joinLimiter.sweep(now);
+    this.createUserLimiter.sweep(now);
+    this.joinUserLimiter.sweep(now);
     this.messageLimiter.sweep(now);
     this.translationLimiter.sweep(now);
   }
@@ -1278,7 +1318,7 @@ function toWire(member: Member): WireMember {
     micEnabled: member.micEnabled,
     cameraEnabled: member.cameraEnabled,
     wantsTranslation: member.wantsTranslation,
-    isAdmin: member.isAdmin,
+    isHost: member.isHost,
   };
 }
 

@@ -24,9 +24,13 @@ function config(): Config {
     dailyCapUsd: 10,
     roomCapUsd: 1.5,
     iceServers: [],
-    adminPassword: null,
+    authSecret: null,
+    signupMode: "invite",
+    ownerEmail: null,
     isProduction: false,
     trustProxy: false,
+    dataDir: tmpdir(),
+    databasePath: ":memory:",
   };
 }
 
@@ -51,6 +55,13 @@ describe("GET /healthz", () => {
     // undefined and this test would pass while proving nothing.
     expect(typeof body.protocolVersion).toBe("number");
     expect(body.protocolVersion).toBe(PROTOCOL_VERSION);
+  });
+
+  it("says whether signup needs an invite, and nothing about any account", async () => {
+    const body = (await (await fetch(`${base}/healthz`)).json()) as Record<string, unknown>;
+    expect(body.signup).toBe("invite");
+    // The retired admin gate is not reported any more: every server now requires signing in.
+    expect("adminRequired" in body).toBe(false);
   });
 
   it("still reports translation as not configured when there is no key", async () => {

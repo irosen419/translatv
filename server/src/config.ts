@@ -7,7 +7,7 @@
 
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { RTCIceServerConfig } from "@translatv/shared";
+import { signupMode as signupModeSchema, type RTCIceServerConfig, type SignupMode } from "@translatv/shared";
 
 function num(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -53,16 +53,23 @@ export interface Config {
   allowedOrigins: string[];
   anthropicApiKey: string | null;
   /**
-   * The one admin password, or null when none is configured.
+   * The key access tokens are signed under (AUTH_SECRET), or null when none is configured.
    *
-   * Null means NOBODY can prove they are the admin, so every gate that asks for it refuses.
-   * That is why production refuses to boot without one rather than defaulting to open: a
-   * deployment that forgot the variable would otherwise let anyone start a call.
+   * Null is refused in production by the boot guard in index.ts (auth/secret.ts). In development
+   * index.ts generates a random one per process instead and says it did, without printing it.
    *
-   * Deliberately NOT exposed to the client under any name, and never VITE_ prefixed, which
-   * would inline it into the bundle for every visitor. `npm run check:secrets` enforces that.
+   * Never VITE_ prefixed and never sent to the client under any name: anyone holding it can mint
+   * a session for any account. `npm run check:secrets` enforces the bundle half of that.
    */
-  adminPassword: string | null;
+  authSecret: string | null;
+  /**
+   * Who may create an account. "invite" (the default) needs a single use code from the owner;
+   * "open" lets anyone. Invite only by default because the daily spend cap is shared, so open
+   * signup lets a stranger spend the owner's money down to the cap (docs/PLAN.md, D9).
+   */
+  signupMode: SignupMode;
+  /** The account with this email (normalized) is the owner, who mints invites. Null: no owner. */
+  ownerEmail: string | null;
   dailyCapUsd: number;
   roomCapUsd: number;
   iceServers: RTCIceServerConfig[];
@@ -93,9 +100,22 @@ export function loadConfig(repoRoot: string): Config {
   loadDotEnv(repoRoot);
 
   const key = (process.env["ANTHROPIC_API_KEY"] ?? "").trim();
-  // NOT trimmed the way the API key is. A password is whatever the owner typed, and silently
-  // eating a leading or trailing space would make a correct password fail with no way to see why.
-  const adminPassword = process.env["ADMIN_PASSWORD"] ?? "";
+  // Trimmed: a secret is machine generated, so surrounding whitespace is always a paste artifact.
+  const authSecret = (process.env["AUTH_SECRET"] ?? "").trim();
+
+  // Refused rather than defaulted when it is set to something unknown. The failure a fallback
+  // would hide is the expensive one: a typo read as "open" hands the shared spend cap to anyone.
+  const signupRaw = (process.env["SIGNUP_MODE"] ?? "").trim().toLowerCase();
+  const signup = signupModeSchema.safeParse(signupRaw === "" ? "invite" : signupRaw);
+  if (!signup.success) {
+    throw new Error(
+      `SIGNUP_MODE must be "invite" or "open", got ${JSON.stringify(process.env["SIGNUP_MODE"])}.`,
+    );
+  }
+
+  // Normalized exactly as signup normalizes an email, or the owner would never match their own
+  // account because of a capital letter.
+  const ownerEmail = (process.env["OWNER_EMAIL"] ?? "").trim().toLowerCase();
 
   const origins = (process.env["ORIGIN"] ?? "http://localhost:5173,http://localhost:8080")
     .split(",")
@@ -156,7 +176,9 @@ export function loadConfig(repoRoot: string): Config {
     repoRoot,
     allowedOrigins: origins,
     anthropicApiKey: key.length > 0 ? key : null,
-    adminPassword: adminPassword.length > 0 ? adminPassword : null,
+    authSecret: authSecret.length > 0 ? authSecret : null,
+    signupMode: signup.data,
+    ownerEmail: ownerEmail.length > 0 ? ownerEmail : null,
     dailyCapUsd: num("ANTHROPIC_DAILY_CAP_USD", 10),
     roomCapUsd: num("ROOM_CAP_USD", 1.5),
     iceServers,
@@ -182,14 +204,16 @@ export function describeConfig(config: Config): string[] {
     );
   }
 
-  if (config.adminPassword === null) {
-    lines.push(
-      "ADMIN_PASSWORD is NOT set: admin gating is OFF and ANYONE can start a call.",
-      "  Acceptable on a development machine, refused in production. Set it before going live.",
-    );
-  } else {
-    lines.push("admin gating is on: starting a call requires the admin password");
-  }
+  lines.push(
+    config.signupMode === "open"
+      ? "signup is OPEN: anyone who can reach this server can create an account and start calls"
+      : "signup is invite only: mint invites with `npm run invite` or as the owner",
+  );
+  lines.push(
+    config.ownerEmail === null
+      ? "OWNER_EMAIL is not set: no account is the owner, so only `npm run invite` can mint invites"
+      : "an owner account is configured (OWNER_EMAIL)",
+  );
 
   if (config.anthropicApiKey === null) {
     lines.push(

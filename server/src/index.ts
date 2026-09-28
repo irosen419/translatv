@@ -4,6 +4,8 @@ import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { authSecretRefusal, resolveAuthSecret } from "./auth/secret.js";
+import { AuthService } from "./auth/service.js";
 import { describeConfig, loadConfig } from "./config.js";
 import { createApp } from "./http.js";
 import { log } from "./log.js";
@@ -88,16 +90,13 @@ if (dataRefusal !== null) {
   process.exit(1);
 }
 
-// Without a password nobody can prove they are the admin, so the gate on starting a call is
-// open to everyone. That is fine on a laptop and is the whole point of the feature in
-// production, so a deployment that forgot the variable must not come up quietly serving an
-// unguarded app. Same shape as the ledger guards above: refuse loudly, say what to set.
-if (config.isProduction && config.adminPassword === null) {
-  log.error("boot", {
-    message:
-      "refusing to start: ADMIN_PASSWORD is not set, so admin gating would be off and anyone " +
-      "could start a call. Set ADMIN_PASSWORD in the environment.",
-  });
+// Every session is an access token signed under AUTH_SECRET, so production without one has no
+// honest way to sign anybody in: a guessable key lets anyone mint a session for any account, and a
+// random one per boot signs everyone out on every restart. Same shape as the guards above: refuse
+// loudly, say what to set. CI asserts on the "AUTH_SECRET is not set" wording.
+const secretRefusal = authSecretRefusal({ isProduction: config.isProduction, secret: config.authSecret });
+if (secretRefusal !== null) {
+  log.error("boot", { message: secretRefusal });
   process.exit(1);
 }
 
@@ -107,9 +106,9 @@ if (config.isProduction && config.adminPassword === null) {
 for (const line of describeConfig(config)) log.info("boot", { message: line });
 
 // Opened after every guard, so a boot that is going to refuse never creates a database file on
-// its way out. Nothing reads it yet: M3 adds the first tables. A store that cannot open (an
-// unwritable directory, a schema newer than this code) stops the boot, since accounts will live
-// here and a server that cannot reach them has nothing correct to serve.
+// its way out. A store that cannot open (an unwritable directory, a schema newer than this code)
+// stops the boot, since accounts live here and a server that cannot reach them has nothing
+// correct to serve.
 let store: Store;
 try {
   store = openStore({ path: config.databasePath });
@@ -121,6 +120,23 @@ try {
   process.exit(1);
 }
 log.info("boot", { message: "database open", schemaVersion: store.schemaVersion() });
+
+// Development only, since production refused above without one. Said out loud because it has a
+// visible consequence (restarting signs everyone out), and said WITHOUT the value, which would
+// let anyone reading the log mint a session for any account.
+const { secret: authSecret, generated } = resolveAuthSecret(config.authSecret);
+if (generated) {
+  log.warn("boot", {
+    message:
+      "AUTH_SECRET is not set, so a random one was generated for this process. Every sign in " +
+      "ends when the server restarts. Set AUTH_SECRET to keep sessions across restarts.",
+  });
+}
+const auth = new AuthService(store, {
+  secret: authSecret,
+  signupMode: config.signupMode,
+  ownerEmail: config.ownerEmail,
+});
 
 const llm = writable.ok && config.anthropicApiKey ? createAnthropicClient(config.anthropicApiKey) : null;
 const translation = new TranslationService(llm, gate, repoRoot);
@@ -134,9 +150,9 @@ const VIEW_FLUSH_MS = 60_000;
 const viewTimer = setInterval(() => flushView(repoRoot), VIEW_FLUSH_MS);
 viewTimer.unref();
 
-const app = createApp(config, clientDist, translation);
+const app = createApp(config, clientDist, translation, auth);
 const server = createServer(app);
-const signaling = new SignalingServer(server, config, translation);
+const signaling = new SignalingServer(server, config, translation, auth);
 
 server.listen(config.port, () => {
   // Report the port actually bound, not the one requested. With PORT=0 the OS picks one, and

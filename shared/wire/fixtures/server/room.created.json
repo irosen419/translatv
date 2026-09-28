@@ -11,7 +11,7 @@
     "micEnabled": true,
     "cameraEnabled": true,
     "wantsTranslation": true,
-    "isAdmin": true
+    "isHost": true
   },
   "polite": false,
   "config": {

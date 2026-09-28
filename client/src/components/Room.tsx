@@ -96,7 +96,7 @@ export function Room(props: Props) {
   // Same shape as the Start button on the landing page, and for the same reason: an ungated
   // server has no admins, so gating a feature on BEING one would hide it from everybody. Off
   // means the app behaves exactly as it did before any of this existed.
-  const canExport = !adminRequired || me?.isAdmin === true;
+  const canExport = !adminRequired || me?.isHost === true;
 
   const localVideo = useRef<HTMLVideoElement>(null);
   const remoteVideo = useRef<HTMLVideoElement>(null);
@@ -448,7 +448,7 @@ export function Room(props: Props) {
       {confirmEnd && (
         <EndDialog
           copy={copy}
-          isHost={me?.isAdmin === true}
+          isHost={me?.isHost === true}
           onCancel={() => setConfirmEnd(false)}
           onConfirm={() => {
             setConfirmEnd(false);

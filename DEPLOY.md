@@ -188,9 +188,9 @@ credentials exist precisely to bound that. What they cost is either an `apiKey` 
 bundle, which is strictly worse, or a proxy endpoint on this server, which is modest work the
 server is already shaped for.
 
-So: static for an admin gated two person app, where the people who can read the credential are
-people you invited, and the worst case is relay traffic on your quota until you rotate. Revisit
-it if the admin gate ever comes off.
+So: static for an invite only two person app, where the people who can read the credential are
+signed in people you invited, and the worst case is relay traffic on your quota until you rotate.
+Revisit it if signup is ever opened (`SIGNUP_MODE=open`).
 
 The array also offers `stun:stun.relay.metered.ca:80`. There is no need for it: this app already
 configures a STUN server, and `TURN_URL` is only about the relay.
@@ -229,39 +229,56 @@ redeploy deletes every account, so the server **refuses to start** in production
 directory is on the image layer, printing `the database is on the image layer`. If that is
 genuinely intended, set `ALLOW_EPHEMERAL_DATA=1`.
 
-## 6. Set ADMIN_PASSWORD, or the server will not start
+## 6. Accounts: set AUTH_SECRET, or the server will not start
 
-Starting a call is admin only. One admin, one password, and no user accounts yet (they arrive with the database, from M3).
+Every call needs a signed in account. Accounts live in the SQLite database (section 5), and a
+session is two tokens: a 15 minute access token signed with `AUTH_SECRET`, and a 30 day refresh
+token that is stored only as a hash and rotated on every use.
 
 ```
-ADMIN_PASSWORD=<a long passphrase, not a short password>
+AUTH_SECRET=<the output of: openssl rand -hex 32>
 ```
 
 In production the server **refuses to start** without it, the same way it refuses on an ephemeral
-ledger, because coming up with the gate silently off would mean anyone who found the URL could
-start a call. A production boot without it prints `refusing to start: ADMIN_PASSWORD is not set`
-and exits. The capitalised `ADMIN_PASSWORD is NOT set` line is the DEVELOPMENT boot report, where
-the server does come up with the gate off; in production the process is already gone before that
-report runs, so grepping a failed production boot for it finds nothing.
+ledger, printing `refusing to start: AUTH_SECRET is not set`. A secret under 32 characters is
+refused too (`AUTH_SECRET is too short`). In development an unset secret is replaced by a random
+one per process, with a warning; restarting then signs everyone out.
 
-Make it LONG. The key that signs admin tokens is derived with scrypt, but its salt is fixed
-across every install of this app, so a precomputed table could be amortised across installs
-rather than paid for per guess. Length is what defeats that, not complexity.
+Changing `AUTH_SECRET` invalidates every access token at once. Refresh tokens survive it, so
+signed in browsers quietly get a new access token on their next refresh. To end every session
+outright, delete the rows in `refresh_tokens` as well.
 
-Changing the password invalidates every token already issued, which is the lever to pull if you
-think one has leaked. There is no reset flow and nowhere to put one: losing it means editing the
-environment and restarting.
+**Signup.** `SIGNUP_MODE=invite` (the default) needs a single use invite code, valid for 7 days.
+`SIGNUP_MODE=open` lets anyone who can reach the server make an account, and with it spend
+against the shared daily cap, so leave it on invite unless you mean that.
+
+**The first account.** On a fresh invite only server nobody is signed in to ask for an invite, so
+mint the first one from a shell on the machine that holds the database:
+
+```bash
+docker compose exec app node server/dist/cli/invite.js         # in the container
+npm run invite                                                 # from a checkout
+```
+
+It prints the code and nothing else stores it: only a hash reaches the database.
+
+**The owner.** `OWNER_EMAIL=<your email>` makes the account with that address the owner, re
+checked on every boot. The owner can mint invites from the app (`POST /api/invites`). Nothing else
+about the owner is special yet.
 
 The rules it buys you:
 
-- Only the admin can start a call.
-- A guest can join only while the admin is actually in that room. A guest with a valid code who
-  arrives before the admin is told to wait rather than that the code is wrong.
-- The admin leaving ends the call. A dropped connection inside the reconnect grace window does
+- Any signed in account can start a call, bounded by the per account and per address limits and
+  by the spend caps. The creator is the room's host.
+- Joining needs an account too. A guest can join only while the host is in that room; a code
+  with no live room behind it is answered the same way, so guessing codes teaches nothing.
+- The host leaving ends the call. A dropped connection inside the reconnect grace window does
   not, so a wifi hop will not kill a conversation.
-- The transcript download is shown only to the admin. This is a UI affordance and NOT access
-  control: the guest's browser already holds every line, because it needs them to render their
-  own subtitles.
+- Ten failed logins for one email lock that email for 15 minutes, whether or not it has an
+  account, so the lock cannot be used to find out which addresses do.
+- Native clients (the iOS app) connect with `Authorization: Bearer <access token>` and no Origin
+  header. A browser sends its token as a WebSocket subprotocol instead, and its Origin must still
+  match `ORIGIN` exactly: a valid token does not get a page on another site past that check.
 
 ## 7. Cloudflare Tunnel, end to end
 
@@ -360,8 +377,9 @@ that guard exists for.
 - The DNS record is created by `tunnel route dns` and is proxied (orange cloud) by definition.
   A tunnel has no origin IP to expose, so there is nothing to grey out.
 - WebSockets are on by default. Confirm under Network if a call connects but never gets media.
-- Rate limiting rules on `/auth` are worth adding before the admin gate is ever removed. The gate
-  is doing that job today: nobody who cannot pass it can start a room.
+- Rate limiting rules on `/api/auth` are worth adding at the edge as well. The server limits
+  signup, login and refresh per address and locks an account after repeated failed logins, but
+  an edge rule stops a flood before it reaches the container at all.
 
 ### Verify
 
@@ -383,7 +401,9 @@ camera prompt appearing at all confirms the TLS path end to end.
 | `ANTHROPIC_DAILY_CAP_USD` | no | `10.00` | Hard ceiling. On breach, translation degrades and the call continues. |
 | `ROOM_CAP_USD` | no | `1.50` | About three hours of continuous conversation. |
 | `TURN_URL` / `TURN_USERNAME` / `TURN_CREDENTIAL` | no | none | See section 4. |
-| `ADMIN_PASSWORD` | **in production** | none | The one admin login. The server REFUSES TO START in production without it. See section 6. |
+| `AUTH_SECRET` | **in production** | random per process in development | Signs every access token. At least 32 characters; `openssl rand -hex 32`. The server REFUSES TO START in production without it. See section 6. |
+| `SIGNUP_MODE` | no | `invite` | `invite` or `open`. Anything else is refused at boot. See section 6. |
+| `OWNER_EMAIL` | no | none | The account with this email is the owner and can mint invites from the app. See section 6. |
 | `TRUST_PROXY` | **behind a proxy** | off | `1` reads the client address from the NEAREST hop of `X-Forwarded-For`. Required with a reverse proxy, dangerous without one. See section 2. |
 | `BIND_ADDR` | no | `127.0.0.1` | Which interface `docker-compose` publishes 8080 on. Loopback by default. `0.0.0.0` only on a trusted LAN, never behind a tunnel. See section 7. |
 | `ALLOW_EPHEMERAL_LEDGER` | no | off | `1` permits the spend ledger to live on the image layer instead of a mounted volume. See section 5. |

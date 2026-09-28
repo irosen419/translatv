@@ -16,6 +16,7 @@
     "lan": "node script/lan.mjs",
     "build": "npm run build:shared && npm run build --workspace=server && npm run build --workspace=client",
     "start": "npm run start --workspace=server",
+    "invite": "npm run build:shared && tsx server/src/cli/invite.ts",
     "test": "npm run build:shared && npm run test --workspace=shared && npm run test --workspace=server && npm run test --workspace=client && npm run test:script",
     "test:script": "vitest run --config script/vitest.config.mjs",
     "test:py": "python3 -m unittest discover -s . -p 'test_*.py' -v",

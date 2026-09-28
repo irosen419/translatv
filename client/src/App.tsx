@@ -67,18 +67,6 @@ async function adminLogin(password: string): Promise<boolean> {
   return true;
 }
 
-/**
- * The stored admin token, shaped for spreading into a room.create or room.join frame.
- *
- * Read at send time rather than captured once, so logging in or out takes effect on the very
- * next attempt without the component having to re-render first. An empty object when there is
- * no token, which is a guest: the server decides what that means, not this.
- */
-function adminTokenField(): { adminToken?: string } {
-  const token = readToken(browserStore());
-  return token ? { adminToken: token } : {};
-}
-
 export function App() {
   const store = useStore();
   // Ask the server whether it gates anything, once. Until it answers the store assumes it does,
@@ -301,17 +289,6 @@ export function App() {
           return;
 
         case "error":
-          // The server refused an admin action, so whatever token this browser is holding is
-          // not good any more: expired, or minted under a password that has since changed.
-          // ADMIN_NOT_PRESENT counts, because there is exactly one admin: a token that still
-          // worked would have got its bearer in as that admin rather than being told none was
-          // there. For a guest, who holds nothing, both calls are no ops.
-          // Dropping it here is what keeps the interface honest. Leaving it would show an
-          // enabled Start button that fails every time it is pressed, with nothing saying why.
-          if (message.code === "ADMIN_REQUIRED" || message.code === "ADMIN_NOT_PRESENT") {
-            clearToken(browserStore());
-            useStore.getState().setAdminToken(null);
-          }
           // A stale resume token must not strand someone outside a room that is still there.
           // It happens routinely: the grace window expired while the tab was closed, or the
           // other person ended and restarted. Drop the token and try as a newcomer, once.
@@ -328,7 +305,6 @@ export function App() {
                 code: pending,
                 username: credentials.username,
                 dialect: credentials.dialect,
-                ...adminTokenField(),
               });
             }
           }
@@ -430,7 +406,6 @@ export function App() {
             code: pending,
             username: input.username,
             dialect: input.dialect,
-            ...adminTokenField(),
           });
         } else {
           socket.current?.send({
@@ -438,7 +413,6 @@ export function App() {
             username: input.username,
             dialect: input.dialect,
             wantsVideo: input.wantsVideo,
-            ...adminTokenField(),
           });
         }
       });
@@ -461,7 +435,7 @@ export function App() {
     // Read BEFORE teardown, which clears `me`. The notice differs because the OUTCOME differs:
     // a guest leaving frees a seat and the room stays open, the admin leaving ends the call.
     // Telling everyone the room stays open would be a promise the server no longer keeps.
-    const hosting = useStore.getState().me?.isAdmin === true;
+    const hosting = useStore.getState().me?.isHost === true;
     socket.current?.send({ t: "room.leave" });
     socket.current?.close();
     teardown();

@@ -20,10 +20,14 @@ services:
       # defense on the WebSocket upgrade, and the localhost relaxation does not apply.
       ORIGIN: ${ORIGIN:-http://localhost:8080}
       # Required. NODE_ENV is production above, and a production server refuses to start
-      # without this rather than come up with the admin gate off, so a deploy that omits it
-      # exits at boot saying so. Deliberately given NO default: a fallback here would be a
-      # published password, which is worse than a container that will not start.
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD, the server refuses to start without it}
+      # without this, since it is the key every sign in is signed with. Deliberately given NO
+      # default: a fallback here would be a published key that mints a session for anyone.
+      # Generate it with `openssl rand -hex 32`.
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET, the server refuses to start without it}
+      # "invite" (default) or "open". See .env.example.
+      SIGNUP_MODE: ${SIGNUP_MODE:-}
+      # The owner account, who mints invites from the app.
+      OWNER_EMAIL: ${OWNER_EMAIL:-}
       # Set to 1 when anything sits in front of this container: Cloudflare, nginx, a load
       # balancer. Without it every visitor arrives wearing the proxy's address and every per IP
       # limit applies to all of them collectively, so one person tripping the join limiter

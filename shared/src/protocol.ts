@@ -34,7 +34,7 @@ export const WS_PATH = "/ws";
  * field, a new required field, or a changed meaning. Adding an optional field or a new message
  * type an old client can ignore does not need a bump.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** Room codes are 8 Crockford base32 characters. The alphabet excludes I, L, O, and U. */
 export const ROOM_CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{8}$/;
@@ -99,21 +99,16 @@ export const clientMessage = z.discriminatedUnion("t", [
     username,
     dialect: dialectCode,
     wantsVideo: z.boolean(),
-    // Proof the person starting this call is the admin. Optional on the WIRE and required by
-    // the SERVER, which is deliberate: a client that omits it must get the same refusal as one
-    // that sends a forged one, rather than a parse error that tells an attacker which of the
-    // two mistakes they made. Length capped so a huge value cannot be used to burn CPU on
-    // signature checks.
-    adminToken: z.string().max(512).optional(),
+    // No credential here. WHO is starting the call was settled when the socket was opened: the
+    // upgrade carries an access token (Authorization: Bearer, or the "bearer." subprotocol from a
+    // browser) and an unauthenticated upgrade is refused before any frame is read. The admin
+    // token that used to ride on this message is retired with the admin password (M3).
   }),
   z.object({
     t: z.literal("room.join"),
     code: roomCode,
     username,
     dialect: dialectCode,
-    // Present when the joiner is the admin. A guest legitimately has none: they are allowed in
-    // only while the admin is actually sitting in the room, which is the server's call to make.
-    adminToken: z.string().max(512).optional(),
   }),
   z.object({
     t: z.literal("room.resume"),
@@ -200,17 +195,20 @@ export const errorCode = z.enum([
   "MALFORMED",
   "NOT_IN_ROOM",
   "ALREADY_IN_ROOM",
-  /** Starting a call is admin only, and this connection did not prove it was the admin. */
-  "ADMIN_REQUIRED",
   /**
-   * The room exists, but its admin is not in it, so there is nobody to be a guest OF.
+   * The room's host is not in it, so there is nobody to be a guest OF. Also the answer for a code
+   * with no live room behind it, so a guesser learns nothing about which codes exist.
    *
-   * Deliberately distinct from ROOM_NOT_FOUND. Collapsing the two would be kinder to a room
-   * code guesser, who would learn nothing, but it would lie to the ordinary case: someone
-   * holding a real invite who arrived early, and who needs to be told to wait rather than that
-   * their link is wrong.
+   * Deliberately distinct from ROOM_ENDED, which a code that WAS a room still gets: someone who
+   * arrives after the host ended the call is owed "it ended", not "wait for them".
    */
-  "ADMIN_NOT_PRESENT",
+  "HOST_NOT_PRESENT",
+  /**
+   * This connection is not signed in. Unreachable through an ordinary upgrade, which refuses an
+   * unauthenticated socket with 401 before any frame is read; kept so that if a socket ever did
+   * arrive at create or join without an account, the refusal would say so rather than guess.
+   */
+  "UNAUTHENTICATED",
 ]);
 export const ERROR_CODES = errorCode.options;
 export type ErrorCode = z.infer<typeof errorCode>;
@@ -307,14 +305,14 @@ export const member = z.object({
    *  which is what saves the API call, and says nothing about the other direction. */
   wantsTranslation: z.boolean(),
   /**
-   * This member proved they were the admin when they entered.
+   * This member CREATED the room, which makes them its host: the room ends when they leave, and a
+   * guest can join only while they are in it.
    *
-   * Decided by the SERVER at create and join time and never sent by the client, so it is a fact
-   * about what was proved rather than a claim. The client reads it off `me` to decide what to
-   * show, which keeps one authority for the answer instead of the client also deciding from
-   * whether it happens to be holding a token.
+   * Decided by the SERVER and never sent by the client, so it is a fact rather than a claim. The
+   * client reads it off `me` to decide what to show, which keeps one authority for the answer.
+   * Renamed from isAdmin (protocol version 2): with accounts, every signed in person can host.
    */
-  isAdmin: z.boolean(),
+  isHost: z.boolean(),
 });
 export type Member = z.infer<typeof member>;
 

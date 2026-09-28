@@ -159,3 +159,56 @@ describe("DATA_DIR", () => {
     expect(loadConfig(root).dataDir).toBe(join(root, "data"));
   });
 });
+
+describe("accounts configuration", () => {
+  const NAMES = ["AUTH_SECRET", "SIGNUP_MODE", "OWNER_EMAIL"] as const;
+  let savedAccounts: Record<string, string | undefined>;
+  beforeEach(() => {
+    savedAccounts = {};
+    for (const name of NAMES) {
+      savedAccounts[name] = process.env[name];
+      delete process.env[name];
+    }
+  });
+  afterEach(() => {
+    for (const name of NAMES) {
+      if (savedAccounts[name] === undefined) delete process.env[name];
+      else process.env[name] = savedAccounts[name];
+    }
+  });
+
+  it("defaults to invite only signup, no owner, and no secret", () => {
+    const config = loadConfig(root);
+    expect(config.signupMode).toBe("invite");
+    expect(config.ownerEmail).toBe(null);
+    expect(config.authSecret).toBe(null);
+  });
+
+  it("reads open signup", () => {
+    process.env["SIGNUP_MODE"] = "open";
+    expect(loadConfig(root).signupMode).toBe("open");
+  });
+
+  it("refuses a SIGNUP_MODE it does not know rather than guessing which one was meant", () => {
+    // A typo that fell back to "open" would hand the owner's spend cap to strangers.
+    process.env["SIGNUP_MODE"] = "opne";
+    expect(thrownMessage()).toContain("SIGNUP_MODE");
+  });
+
+  it("normalizes OWNER_EMAIL the way signup normalizes an email", () => {
+    process.env["OWNER_EMAIL"] = "  Owner@Example.TEST ";
+    expect(loadConfig(root).ownerEmail).toBe("owner@example.test");
+  });
+
+  it("carries AUTH_SECRET, and says so without printing it", () => {
+    const secret = "f".repeat(64);
+    process.env["AUTH_SECRET"] = secret;
+    const config = loadConfig(root);
+    expect(config.authSecret).toBe(secret);
+    expect(describeConfig(config).join("\n")).not.toContain(secret);
+  });
+
+  it("no longer reads ADMIN_PASSWORD at all", () => {
+    expect("adminPassword" in loadConfig(root)).toBe(false);
+  });
+});

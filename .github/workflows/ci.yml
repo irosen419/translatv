@@ -69,13 +69,13 @@ jobs:
           # NODE_ENV=production, so the boot guard would refuse to start and the container would
           # never answer. That is the guard working: the step below runs WITHOUT the override
           # precisely to prove it fires. Here the subject is the health check, not the guard.
-          # ADMIN_PASSWORD for the same reason: the image is production, and a production
-          # server with no admin password refuses to start rather than come up ungated. Its own
+          # AUTH_SECRET for the same reason: the image is production, and a production server
+          # with no AUTH_SECRET has no key to sign sessions with, so it refuses to start. Its own
           # step below proves that guard fires. ALLOW_EPHEMERAL_DATA likewise: no volume means
           # the database is on the image layer too, and that guard has its own step.
           docker run -d --name vt -p 8080:8080 -e ORIGIN=http://localhost:8080 \
             -e ALLOW_EPHEMERAL_LEDGER=1 -e ALLOW_EPHEMERAL_DATA=1 \
-            -e ADMIN_PASSWORD="$(openssl rand -hex 16)" \
+            -e AUTH_SECRET="$(openssl rand -hex 32)" \
             translatv:ci
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8080/healthz; then echo; docker rm -f vt; exit 0; fi
@@ -109,14 +109,14 @@ jobs:
           # The ledger is on the image layer here, with no volume mounted, so a restart would
           # silently reset the day's spend. Starting anyway is the failure.
           #
-          # ADMIN_PASSWORD is SET here on purpose. Without it the admin guard refuses first and
-          # this step goes green having proved nothing about the ledger: the same pass, a
+          # AUTH_SECRET is SET here on purpose. Without it the secret guard could refuse and this
+          # step would go green having proved nothing about the ledger: the same pass, a
           # different reason, and no way to tell from the exit code. Each guard gets tested with
           # the other satisfied, and the output is checked for the reason rather than just for a
           # non zero exit. ALLOW_EPHEMERAL_DATA for the same reason: the database guard would
           # otherwise be a second way to refuse.
           output=$(docker run --rm -e NODE_ENV=production -e ORIGIN=http://localhost:8080 \
-            -e ADMIN_PASSWORD="$(openssl rand -hex 16)" -e ALLOW_EPHEMERAL_DATA=1 \
+            -e AUTH_SECRET="$(openssl rand -hex 32)" -e ALLOW_EPHEMERAL_DATA=1 \
             translatv:ci timeout 10 node server/dist/index.js 2>&1) && {
             echo "the server started in production with an ephemeral ledger; it must refuse"
             exit 1
@@ -128,20 +128,21 @@ jobs:
           }
           echo "refused for the right reason"
 
-      - name: The server refuses to start in production with no admin password
+      - name: The server refuses to start in production with no AUTH_SECRET
         run: |
-          # Ungated in production means anyone can start a call on a public deployment. The
-          # ledger override is set so that if this refuses, it refuses for the admin reason and
-          # not the other one. The database override likewise.
+          # With no AUTH_SECRET there is no key to sign sessions with: a guessable one would let
+          # anyone mint a session for any account, and a random one per boot would sign everyone
+          # out on every restart. The ledger and database overrides are set so that if this
+          # refuses, it refuses for the secret reason and not one of the others.
           output=$(docker run --rm -e NODE_ENV=production -e ORIGIN=http://localhost:8080 \
             -e ALLOW_EPHEMERAL_LEDGER=1 -e ALLOW_EPHEMERAL_DATA=1 \
             translatv:ci timeout 10 node server/dist/index.js 2>&1) && {
-            echo "the server started in production with no ADMIN_PASSWORD; it must refuse"
+            echo "the server started in production with no AUTH_SECRET; it must refuse"
             exit 1
           }
           echo "$output"
-          echo "$output" | grep -q "ADMIN_PASSWORD is not set" || {
-            echo "it refused, but not for the admin reason this step exists to prove"
+          echo "$output" | grep -q "AUTH_SECRET is not set" || {
+            echo "it refused, but not for the AUTH_SECRET reason this step exists to prove"
             exit 1
           }
           echo "refused for the right reason"
@@ -150,10 +151,10 @@ jobs:
         run: |
           # No volume is mounted over /app/data, so the database is on the image layer and the
           # next deploy would delete every account in it. Starting anyway is the failure. The
-          # ledger override and an admin password are set so that if this refuses, it refuses for
-          # the database reason and not one of the others.
+          # ledger override and an AUTH_SECRET are set so that if this refuses, it refuses for the
+          # database reason and not one of the others.
           output=$(docker run --rm -e NODE_ENV=production -e ORIGIN=http://localhost:8080 \
-            -e ALLOW_EPHEMERAL_LEDGER=1 -e ADMIN_PASSWORD="$(openssl rand -hex 16)" \
+            -e ALLOW_EPHEMERAL_LEDGER=1 -e AUTH_SECRET="$(openssl rand -hex 32)" \
             translatv:ci timeout 10 node server/dist/index.js 2>&1) && {
             echo "the server started in production with an ephemeral database; it must refuse"
             exit 1

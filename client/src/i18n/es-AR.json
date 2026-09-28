@@ -43,7 +43,8 @@
   "failure.PROVIDER_ERROR": "Falló la traducción. Intentá esta línea de nuevo.",
   "failure.UNRESOLVED_DIALECT": "Este servidor no reconoce alguno de los idiomas de esta llamada. Elegí tu idioma de nuevo de la lista.",
   "landing.adminOnly": "Tenés que ser administrador para empezar un chat nuevo",
-  "error.ADMIN_NOT_PRESENT": "Ese chat todavía no empezó, o la persona que lo organiza ya salió. Pedile que lo empiece y volvé a intentarlo.",
+  "error.HOST_NOT_PRESENT": "Ese chat todavía no empezó, o la persona que lo organiza ya salió. Pedile que lo empiece y volvé a intentarlo.",
+  "error.UNAUTHENTICATED": "Primero iniciá sesión y volvé a intentarlo.",
   "landing.adminUnavailable": "No se pudo contactar con el servidor. Volvé a intentarlo.",
   "app.ended.left.admin": "Saliste, así que el chat terminó para todos. Vos lo organizás, y la sala no puede seguir abierta sin vos.",
   "room.end.admin.note": "Vos organizás este chat, así que si salís también termina para la otra persona."

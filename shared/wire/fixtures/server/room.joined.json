@@ -11,7 +11,7 @@
     "micEnabled": true,
     "cameraEnabled": true,
     "wantsTranslation": true,
-    "isAdmin": false
+    "isHost": false
   },
   "peer": {
     "id": "3f1c9a2e-8b4d-4e7a-9c61-2d5f0b7e8a14",
@@ -21,7 +21,7 @@
     "micEnabled": true,
     "cameraEnabled": true,
     "wantsTranslation": true,
-    "isAdmin": true
+    "isHost": true
   },
   "polite": true,
   "config": {

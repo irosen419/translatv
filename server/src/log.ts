@@ -8,7 +8,7 @@
 // What is safe to log: identifiers, counts, durations, outcomes. What is not: anything a human
 // said or typed.
 
-/** Keys that carry conversation content and are dropped, at any depth. */
+/** Keys that carry conversation content or credentials and are dropped, at any depth. */
 const FORBIDDEN_KEYS = new Set([
   "text",
   "original",
@@ -22,6 +22,17 @@ const FORBIDDEN_KEYS = new Set([
   "candidate",
   "note",
   "resumeToken",
+  // Accounts (M3). Credentials, and the things that identify the person holding one. A user id
+  // is the identifier to log instead: opaque and random, it names an account without naming
+  // anyone once the account is gone.
+  "email",
+  "password",
+  "accessToken",
+  "refreshToken",
+  "token",
+  "invite",
+  "displayName",
+  "authorization",
 ]);
 
 export type LogFields = Record<string, unknown>;

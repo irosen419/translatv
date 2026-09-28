@@ -18,7 +18,7 @@ const PEER: Member = {
   dialect: "es-AR",
   connection: "connected",
   // A guest. Admin is the server's answer about what was proved, so the ordinary peer is not one.
-  isAdmin: false,
+  isHost: false,
   micEnabled: true,
   cameraEnabled: true,
   wantsTranslation: true,
