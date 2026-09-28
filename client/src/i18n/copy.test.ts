@@ -143,25 +143,24 @@ function sweep(dialect: string, forbidden: string[]): void {
 }
 
 /**
- * Keys whose "vuelve a" is the third person ("la llamada vuelve a conectarse"), which is right in
- * every register. None today. Anywhere else, "vuelve a" plus a verb is the tú imperative, and two
- * slips only this sweep sees read it in the wrong register: a new base line with no regional
- * override, and an override edited back to it (both went green once the sweep was removed,
- * measured in review). A correct third person line fails it until its key is listed here, which is
- * the decision a reviewer should see.
+ * Keys whose "vuelve" is the third person ("la llamada vuelve a conectarse", or usted in es-CO),
+ * which is right in these registers. None today. Anywhere else here, "vuelve" is the tú
+ * imperative ("vuelve a intentarlo", "vuelve al inicio", "vuelve más tarde"). Two slips only this
+ * sweep sees read it in the wrong register: a new base line with no regional override, and an
+ * override edited back to it. Both went green with no sweep, and a new "vuelve al inicio" or
+ * "vuelve más tarde" line went green with a sweep for "vuelve a" alone (measured in review). A
+ * correct third person line fails it until its key is listed here, which is the decision a reviewer
+ * should see, and the failure says so.
  */
-const THIRD_PERSON_VUELVE_A = new Set<string>([]);
+const THIRD_PERSON_VUELVE = new Set<string>([]);
 
-function vuelveASweep(dialect: string): void {
+function vuelveSweep(dialect: string): void {
   const found: string[] = [];
   for (const [key, text] of copyFor(dialect).all()) {
-    if (key.startsWith(QUOTES_OTHER_DIALECTS) || THIRD_PERSON_VUELVE_A.has(key)) continue;
-    const said = words(text);
-    for (let i = 0; i + 1 < said.length; i += 1) {
-      if (said[i] === "vuelve" && said[i + 1] === "a") found.push(key);
-    }
+    if (key.startsWith(QUOTES_OTHER_DIALECTS) || THIRD_PERSON_VUELVE.has(key)) continue;
+    if (words(text).includes("vuelve")) found.push(key);
   }
-  expect(found).toEqual([]);
+  expect(found, "a third person vuelve is right: list its key in THIRD_PERSON_VUELVE").toEqual([]);
 }
 
 /**
@@ -241,8 +240,8 @@ describe("Argentine Spanish (es-AR)", () => {
     expect(copy.t("composer.placeholder")).toContain("Escribí");
     expect(copy.t("panel.empty")).toContain("Decí");
     expect(copy.t("room.dialect.title")).toContain("Cambiá");
-    // Pinned by key rather than swept: "vuelve" is also the third person ("it comes back"), which
-    // a legitimate es-AR line may say, while here it would be the tú imperative.
+    // Pinned by key as well as swept: the sweep below says what this line must not say, and this
+    // says what it says instead.
     expect(copy.t("account.delete.expired")).toContain("Volvé");
   });
 
@@ -256,8 +255,8 @@ describe("Argentine Spanish (es-AR)", () => {
     sweep("es-AR", ["tú", "tienes", "puedes", "quieres", "eres", "vienes"]);
   });
 
-  it("says volvé a, never the tú imperative vuelve a", () => {
-    vuelveASweep("es-AR");
+  it("says volvé, never the tú imperative vuelve", () => {
+    vuelveSweep("es-AR");
   });
 
   it("uses ustedes for plural you, never vosotros", () => {
@@ -300,8 +299,8 @@ describe("Colombian Spanish (es-CO)", () => {
     sweep("es-CO", ["tú", "tu", "vos", "tienes", "puedes", "tenés", "quieres", "escribe", "recarga"]);
   });
 
-  it("says vuelva a, never the tú imperative vuelve a", () => {
-    vuelveASweep("es-CO");
+  it("says vuelva, never the tú imperative vuelve", () => {
+    vuelveSweep("es-CO");
   });
 
   it("still uses ustedes for plural you, not vosotros", () => {
