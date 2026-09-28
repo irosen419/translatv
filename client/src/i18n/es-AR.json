@@ -59,5 +59,6 @@
   "auth.error.RATE_LIMITED": "Demasiados intentos desde acá. Esperá un minuto y volvé a intentarlo.",
   "account.invite.lead": "Enviá este código a la persona que invitás. Sirve una sola vez, durante 7 días.",
   "account.invite.failed": "No se pudo crear la invitación. Volvé a intentarlo.",
-  "account.delete.password": "Escribí tu contraseña para confirmar"
+  "account.delete.password": "Escribí tu contraseña para confirmar",
+  "account.delete.expired": "Tu sesión había expirado. Volvé a intentarlo."
 }

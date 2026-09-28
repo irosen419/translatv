@@ -78,5 +78,6 @@
   "account.invite.failed": "No se pudo crear la invitación. Vuelva a intentarlo.",
   "account.delete.title": "Eliminar su cuenta",
   "account.delete.lead": "Esto elimina su cuenta, su idioma guardado, su glosario guardado y su historial de llamadas. No se puede deshacer. Las personas con quienes habló conservan su propio registro de cada llamada, sin su nombre.",
-  "account.delete.password": "Escriba su contraseña para confirmar"
+  "account.delete.password": "Escriba su contraseña para confirmar",
+  "account.delete.expired": "Su sesión había expirado. Vuelva a intentarlo."
 }

@@ -173,7 +173,7 @@ function stopServer(child) {
 /** Whether the server at base answers its health check right now. */
 async function answers(base) {
   try {
-    return (await fetch(`${base}/healthz`)).ok;
+    return (await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(1000) })).ok;
   } catch {
     return false;
   }
@@ -249,7 +249,8 @@ let inviteServer = null;
 // a terminal's Ctrl-C or a closed terminal sends, no longer reaches them, and Node exits on these
 // signals without running the finally below. So they are stopped here too, the scratch root is
 // removed, and the run exits as a shell expects, 128 plus the signal's number. A SIGKILL cannot
-// be caught, and after one both servers are still running.
+// be caught: after one, both servers are still running, and the scratch root and the browser's
+// profile directory stay on disk.
 for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     stopServer(inviteServer);
@@ -1062,8 +1063,16 @@ try {
       return field?.getAttribute("aria-invalid") === "true" && reason?.getAttribute("role") === "alert";
     }),
   );
-  // Every other refusal the same way, not just a wrong password. Faked in this browser, so neither
-  // touches the server's real limits, which the rest of the run signs in through.
+  // Every other refusal the same way, not just a wrong password: focused and selected, tied to its
+  // sentence, and NOT marked invalid, since the password may well be right. Faked in this browser,
+  // so none touches the server's real limits, which the rest of the run signs in through. The
+  // expired sign in is answered for real by the refresh that follows it, so the tab stays signed in.
+  const tiedNotInvalid = () =>
+    eve.evaluate(() => {
+      const field = document.getElementById("delete-password");
+      const reason = document.getElementById(field?.getAttribute("aria-describedby") ?? "");
+      return !field?.hasAttribute("aria-invalid") && reason?.getAttribute("role") === "alert";
+    });
   for (const [what, sentence, answer] of [
     [
       "a rate limit",
@@ -1071,11 +1080,17 @@ try {
       (route) => route.fulfill({ status: 429, contentType: "application/json", body: '{"error":"RATE_LIMITED"}' }),
     ],
     ["a request that never got an answer", en("auth.error.unavailable"), (route) => route.abort()],
+    [
+      "an expired sign in",
+      en("account.delete.expired"),
+      (route) => route.fulfill({ status: 401, contentType: "application/json", body: '{"error":"UNAUTHENTICATED"}' }),
+    ],
   ]) {
     await eve.route("**/api/account", answer);
     await eve.getByRole("button", { name: en("account.delete.confirm") }).click();
     await eve.getByText(sentence).waitFor();
     check(`after ${what}, focus is back in the password field, selected`, await retypeReady());
+    check(`after ${what}, the refusal is tied to the field, which is not marked invalid`, await tiedNotInvalid());
     await eve.unroute("**/api/account");
   }
   await eve.getByLabel(en("account.delete.password")).fill(PASSWORD);
@@ -1233,6 +1248,7 @@ try {
   section("Page health");
   check("no uncaught page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 } catch (error) {
+  checks += 1;
   failures += 1;
   console.error(`\nFATAL: ${error.message}`);
   // Dump what each page was actually showing. A timeout with no context turns a five minute

@@ -46,6 +46,7 @@
   "account.delete.confirm": "Delete my account",
   "account.delete.cancel": "Keep my account",
   "account.delete.wrongPassword": "That password is not right.",
+  "account.delete.expired": "Your sign in had expired. Try again.",
   "auth.error.unavailable": "Could not reach the server. Try again.",
   "prejoin.title.create": "Set up your chat",
   "prejoin.title.join": "Join the chat",
