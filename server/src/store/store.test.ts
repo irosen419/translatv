@@ -75,8 +75,8 @@ describe("openStore", () => {
     // transaction() decides whether to roll back by reading db.isTransaction. Where it is
     // undefined, every callback that throws leaves its transaction open: each later call fails
     // "cannot start a transaction within a transaction", and the writes inside never commit.
-    // (openStore calls this on every open; a supported Node cannot be made to lack the property,
-    // so the call itself is exercised only by every other test here passing.)
+    // That openStore calls this is proved in oldSqlite.test.ts, which hands it a working
+    // connection without the property.
     expect(() => assertSupportedSqlite({})).toThrow(/Node 22\.16/);
     expect(() => assertSupportedSqlite({ isTransaction: false })).not.toThrow();
   });
