@@ -155,7 +155,7 @@ describe("Argentine Spanish (es-AR)", () => {
 
   // The catalog's instruction, verbatim: NEVER use tu or tienes or puedes.
   it("never addresses the reader as tu", () => {
-    sweep("es-AR", ["tú", "tienes", "puedes", "quieres", "eres", "vienes"]);
+    sweep("es-AR", ["tú", "tienes", "puedes", "quieres", "eres", "vienes", "vuelve"]);
   });
 
   it("uses ustedes for plural you, never vosotros", () => {
@@ -192,7 +192,9 @@ describe("Colombian Spanish (es-CO)", () => {
   });
 
   it("never addresses the reader as tu or vos", () => {
-    sweep("es-CO", ["tú", "vos", "tienes", "puedes", "tenés", "quieres", "escribe", "recarga"]);
+    // "tu" too: the possessive of tú. Usted's is "su", and a key es-CO forgets to override
+    // inherits base Spanish's "tu" (review reverted an es-CO override with every gate green).
+    sweep("es-CO", ["tú", "tu", "vos", "tienes", "puedes", "tenés", "quieres", "escribe", "recarga", "vuelve"]);
   });
 
   it("still uses ustedes for plural you, not vosotros", () => {

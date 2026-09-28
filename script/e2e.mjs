@@ -140,17 +140,28 @@ async function submitSignUp(page, name, invite) {
 }
 
 /**
- * An access token for `name`, from a sign in of its own. A new token family, so no page's session
- * moves: refreshing the token a page holds from here would rotate it out from under that page.
+ * A session for `name` (its access token and user), from a sign in of its own. A new token family,
+ * so no page's session moves: refreshing the token a page holds from here would rotate it out from
+ * under that page.
  */
-async function apiAccessToken(base, name) {
+async function apiSignIn(base, name) {
   const response = await fetch(`${base}/api/auth/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: emailFor(name), password: PASSWORD }),
   });
   if (!response.ok) throw new Error(`sign in for ${name} answered ${response.status}`);
-  return (await response.json()).accessToken;
+  return response.json();
+}
+
+/** Delete `session`'s account through the API, as another device would. Resolves the status. */
+async function apiDeleteAccount(base, session) {
+  const response = await fetch(`${base}/api/account`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json", authorization: `Bearer ${session.accessToken}` },
+    body: JSON.stringify({ password: PASSWORD, userId: session.user.id }),
+  });
+  return response.status;
 }
 
 /**
@@ -998,7 +1009,7 @@ try {
   // Read through the API, as the iOS app will. The per user data service reaches the signaling
   // server only through index.ts, and dropping it there silently turned off call history and the
   // stored glossary with every other check green.
-  const anaToken = await apiAccessToken(BASE, "Ana");
+  const anaToken = (await apiSignIn(BASE, "Ana")).accessToken;
   const history = await fetch(`${BASE}/api/me/calls`, { headers: { authorization: `Bearer ${anaToken}` } })
     .then((r) => r.json())
     .catch(() => null);
@@ -1067,11 +1078,13 @@ try {
   // sentence, and NOT marked invalid, since the password may well be right. Faked in this browser,
   // so none touches the server's real limits, which the rest of the run signs in through. The
   // expired sign in is answered for real by the refresh that follows it, so the tab stays signed in.
+  // "Not invalid" is anything but aria-invalid="true": an absent attribute and "false" mean the
+  // same to assistive technology, and either is a correct way to write it.
   const tiedNotInvalid = () =>
     eve.evaluate(() => {
       const field = document.getElementById("delete-password");
       const reason = document.getElementById(field?.getAttribute("aria-describedby") ?? "");
-      return !field?.hasAttribute("aria-invalid") && reason?.getAttribute("role") === "alert";
+      return field !== null && field.getAttribute("aria-invalid") !== "true" && reason?.getAttribute("role") === "alert";
     });
   for (const [what, sentence, answer] of [
     [
@@ -1220,17 +1233,81 @@ try {
   await pat.getByLabel("Your language and region").selectOption("en-US");
   await pat.getByRole("button", { name: /Create and allow microphone/ }).click();
   await pat.locator(".room").waitFor();
-  const patToken = await apiAccessToken(INVITE_BASE, "Pat");
-  const deletedElsewhere = await fetch(`${INVITE_BASE}/api/account`, {
-    method: "DELETE",
-    headers: { "content-type": "application/json", authorization: `Bearer ${patToken}` },
-    body: JSON.stringify({ password: PASSWORD }),
-  });
-  check("the account is deleted from somewhere else", deletedElsewhere.status === 204, String(deletedElsewhere.status));
+  const deletedElsewhere = await apiDeleteAccount(INVITE_BASE, await apiSignIn(INVITE_BASE, "Pat"));
+  check("the account is deleted from somewhere else", deletedElsewhere === 204, String(deletedElsewhere));
   check(
     "the tab that was in a call goes to the sign in screen on its own",
     await reached(pat.getByRole("button", { name: en("auth.submit.signIn") })),
   );
+
+  // ---------------------------------------------------------------------
+  section("Two tabs of one browser share one sign in");
+  // Tabs share the stored refresh token, so signing in as someone else in one tab moves every
+  // other tab to that account at its next refresh. A deletion confirmed in the tab left behind
+  // must never delete the account it was moved to. Measured in review: the tab's bearer was
+  // refused (its account deleted elsewhere), its refresh read the other account's token, the form
+  // said to try again, and one Enter with the password the two shared (as every account here
+  // does) deleted the other account. On this server so its two accounts do not spend the main
+  // server's signup limit, with invites the owner mints through the API.
+  const olgaSession = await apiSignIn(INVITE_BASE, "Olga");
+  const household = [];
+  for (const name of ["Fay", "Gus"]) {
+    const invite = await fetch(`${INVITE_BASE}/api/invites`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${olgaSession.accessToken}` },
+    }).then((response) => response.json());
+    const made = await fetch(`${INVITE_BASE}/api/auth/signup`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: emailFor(name), password: PASSWORD, displayName: name, invite: invite.code }),
+    });
+    if (made.status !== 201) throw new Error(`signup for ${name} answered ${made.status}`);
+    household.push(await made.json());
+  }
+  const sharedBrowser = await browser.newContext({
+    storageState: {
+      cookies: [],
+      origins: [{ origin: INVITE_BASE, localStorage: [{ name: "translatv.refresh", value: household[0].refreshToken }] }],
+    },
+  });
+  const tabA = await sharedBrowser.newPage();
+  await tabA.goto(INVITE_BASE);
+  await tabA.locator(".account-state", { hasText: "Fay" }).waitFor();
+  const tabB = await sharedBrowser.newPage();
+  await tabB.goto(INVITE_BASE);
+  await tabB.getByRole("button", { name: en("account.signOut") }).click();
+  await tabB.getByLabel(en("auth.email")).fill(emailFor("Gus"));
+  await tabB.getByLabel(en("auth.password")).fill(PASSWORD);
+  await tabB.getByRole("button", { name: en("auth.submit.signIn") }).click();
+  await tabB.locator(".account-state", { hasText: "Gus" }).waitFor();
+  const fayGone = await apiDeleteAccount(INVITE_BASE, await apiSignIn(INVITE_BASE, "Fay"));
+  check(
+    "an account is deleted on another device while a tab still shows it",
+    fayGone === 204 && (await tabA.locator(".account-state").innerText()).includes("Fay"),
+    String(fayGone),
+  );
+  await tabA.bringToFront();
+  await tabA.getByRole("button", { name: en("account.delete.open") }).click();
+  await tabA.getByLabel(en("account.delete.password")).fill(PASSWORD);
+  await tabA.getByRole("button", { name: en("account.delete.confirm") }).click();
+  check(
+    "the tab left behind moves to the account the other tab signed in to",
+    await reached(tabA.locator(".account-state", { hasText: "Gus" })),
+  );
+  check(
+    "and the deletion form opened for the old account goes with it, typed password and all",
+    (await tabA.locator("#delete-password").count()) === 0,
+  );
+  // What "try again" had them do. Given a moment to land, in case it sent anything.
+  await tabA.keyboard.press("Enter");
+  await tabA.getByRole("button", { name: en("auth.submit.signIn") }).waitFor({ timeout: 3000 }).catch(() => null);
+  const gusAfter = await fetch(`${INVITE_BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: emailFor("Gus"), password: PASSWORD }),
+  });
+  check("the account the tab was moved to is not deleted", gusAfter.status === 200, String(gusAfter.status));
+  await sharedBrowser.close();
   check("the invite only server answers until it is stopped", await answers(INVITE_BASE));
   stopServer(inviteServer);
   inviteServer = null;

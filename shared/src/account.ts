@@ -126,8 +126,14 @@ export type ContactsResponse = z.infer<typeof contactsResponse>;
 /**
  * DELETE /api/account. The password again, because an access token alone proves only that this
  * device was signed in within the last fifteen minutes, and deletion cannot be undone.
+ *
+ * And the id of the account the person is deleting (PublicUser.id), which the server compares
+ * with the bearer's. Tabs of one browser share a sign in, so a tab can be showing an account it
+ * is no longer signed in as; without the id, a deletion confirmed for one account deleted another
+ * (measured in review, with a password the two accounts shared). A mismatch is ACCOUNT_MISMATCH.
  */
 export const deleteAccountRequest = z.object({
   password: z.string().min(1).max(MAX_PASSWORD_LENGTH),
+  userId: z.string().min(1).max(128),
 });
 export type DeleteAccountRequest = z.input<typeof deleteAccountRequest>;

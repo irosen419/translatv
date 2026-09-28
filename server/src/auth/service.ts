@@ -348,6 +348,12 @@ export class AuthService {
   async deleteAccount(userId: string, body: unknown, now: number): Promise<AuthResult<null>> {
     const parsed = deleteAccountRequest.safeParse(body);
     if (!parsed.success) return refuse("INVALID_INPUT");
+    // Only the account the person confirmed, and refused before the password is checked, so a
+    // tab holding another account's bearer costs that account no lockout strike.
+    if (parsed.data.userId !== userId) {
+      log.warn("account.delete_mismatch", { user: userId });
+      return refuse("ACCOUNT_MISMATCH");
+    }
     const user = findUserById(this.store, userId);
     if (!user) return refuse("UNAUTHENTICATED");
 

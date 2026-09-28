@@ -70,8 +70,13 @@ describe("callsQuery", () => {
 
 describe("deleteAccountRequest", () => {
   it("needs a password", () => {
-    expect(deleteAccountRequest.safeParse({ password: "long enough" }).success).toBe(true);
-    expect(deleteAccountRequest.safeParse({ password: "" }).success).toBe(false);
+    expect(deleteAccountRequest.safeParse({ password: "long enough", userId: "u1" }).success).toBe(true);
+    expect(deleteAccountRequest.safeParse({ password: "", userId: "u1" }).success).toBe(false);
     expect(deleteAccountRequest.safeParse({}).success).toBe(false);
+  });
+
+  it("needs the id of the account it deletes", () => {
+    expect(deleteAccountRequest.safeParse({ password: "long enough" }).success).toBe(false);
+    expect(deleteAccountRequest.safeParse({ password: "long enough", userId: "" }).success).toBe(false);
   });
 });

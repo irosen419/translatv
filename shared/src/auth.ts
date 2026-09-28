@@ -92,6 +92,12 @@ export const authErrorCode = z.enum([
   "UNAUTHENTICATED",
   /** Signed in, but this is for the owner only. */
   "FORBIDDEN",
+  /**
+   * DELETE /api/account named a different account than the one this access token is for. The
+   * tab is showing an account it is no longer signed in as (another tab signed in to another
+   * one). Nothing was deleted, and the password was not checked.
+   */
+  "ACCOUNT_MISMATCH",
   "RATE_LIMITED",
 ]);
 export const AUTH_ERROR_CODES = authErrorCode.options;

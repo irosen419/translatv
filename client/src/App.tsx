@@ -726,7 +726,7 @@ export function App() {
       user={store.session.user}
       onSignOut={() => void session.signOut()}
       onCreateInvite={createInvite}
-      onDeleteAccount={(password) => session.deleteAccount(password)}
+      onDeleteAccount={(password, userId) => session.deleteAccount(password, userId)}
       onCreate={() => {
         setMode("create");
         useStore.getState().setError(null);

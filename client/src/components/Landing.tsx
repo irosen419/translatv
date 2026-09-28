@@ -24,8 +24,8 @@ interface Props {
   onSignOut(): void;
   /** Owner only. Resolves the new code, or null when it could not be made. */
   onCreateInvite(): Promise<string | null>;
-  /** Delete the signed in account after the password is typed again. */
-  onDeleteAccount(password: string): Promise<AuthOutcome>;
+  /** Delete the account `userId` (the one shown) after the password is typed again. */
+  onDeleteAccount(password: string, userId: string): Promise<AuthOutcome>;
 }
 
 export function Landing({
@@ -125,7 +125,11 @@ export function Landing({
             </div>
           )}
           {invite && "failed" in invite && <p className="hint bad">{copy.t("account.invite.failed")}</p>}
-          {user && <DeleteAccount onDelete={onDeleteAccount} />}
+          {/* Keyed by the account, so a form opened for one account never outlives it. Tabs share
+              one sign in, and when another tab moves this one to another account, the form, its
+              typed password and any refusal go with the old account. The deletion names the
+              account the form was opened for, which the server checks against the bearer. */}
+          {user && <DeleteAccount key={user.id} onDelete={(password) => onDeleteAccount(password, user.id)} />}
         </div>
       </div>
     </div>

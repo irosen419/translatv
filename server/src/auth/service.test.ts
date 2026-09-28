@@ -536,7 +536,7 @@ describe("deleteAccount", () => {
   it("refuses the wrong password and leaves the account exactly as it was", async () => {
     const auth = service();
     const session = await signedUp(auth);
-    const result = await auth.deleteAccount(session.user.id, { password: "not the password" }, NOW);
+    const result = await auth.deleteAccount(session.user.id, { password: "not the password", userId: session.user.id }, NOW);
     expect(result).toEqual({ ok: false, error: "INVALID_CREDENTIALS" });
     expect(auth.userFor(session.user.id)).not.toBeNull();
     expect(auth.refresh({ refreshToken: session.refreshToken }, NOW).ok).toBe(true);
@@ -548,13 +548,52 @@ describe("deleteAccount", () => {
     expect(await auth.deleteAccount(session.user.id, {}, NOW)).toEqual({ ok: false, error: "INVALID_INPUT" });
   });
 
+  it("refuses a request that does not name the account it deletes", async () => {
+    const auth = service();
+    const session = await signedUp(auth);
+    expect(await auth.deleteAccount(session.user.id, { password: PASSWORD }, NOW)).toEqual({
+      ok: false,
+      error: "INVALID_INPUT",
+    });
+    expect(auth.userFor(session.user.id)).not.toBeNull();
+  });
+
+  it("deletes only the account the request names, and refuses any other before checking the password", async () => {
+    // Tabs of one browser share a sign in, so a tab can show an account it is no longer signed in
+    // as. Review deleted the wrong account that way: the tab's bearer had moved to Ben, its form
+    // was still Ana's, and the two shared a password. The request names the account the person
+    // confirmed, and a bearer for any other is refused before the password is checked, so it
+    // costs that account no lockout strike either.
+    const auth = service();
+    const ana = await signedUp(auth, "ana@example.test");
+    const ben = await signedUp(auth, "ben@example.test");
+    for (const password of [PASSWORD, "not the password"]) {
+      expect(await auth.deleteAccount(ben.user.id, { password, userId: ana.user.id }, NOW)).toEqual({
+        ok: false,
+        error: "ACCOUNT_MISMATCH",
+      });
+    }
+    expect(auth.userFor(ana.user.id)).not.toBeNull();
+    expect(auth.userFor(ben.user.id)).not.toBeNull();
+    expect(store.db.prepare("SELECT COUNT(*) AS n FROM login_lockouts").get()?.["n"]).toBe(0);
+    // Before the lock check too, which comes before the password: whatever state the bearer's
+    // account is in, the answer is about the account the request named.
+    for (let i = 0; i < MAX_FAILURES; i += 1) {
+      await auth.login({ email: "ben@example.test", password: `wrong ${i} wrong` }, NOW);
+    }
+    expect(await auth.deleteAccount(ben.user.id, { password: PASSWORD, userId: ana.user.id }, NOW)).toEqual({
+      ok: false,
+      error: "ACCOUNT_MISMATCH",
+    });
+  });
+
   it("counts wrong passwords toward the lockout, so a stolen access token cannot guess freely", async () => {
     const auth = service();
     const session = await signedUp(auth);
     for (let i = 0; i < MAX_FAILURES; i += 1) {
-      await auth.deleteAccount(session.user.id, { password: `wrong ${i} wrong` }, NOW);
+      await auth.deleteAccount(session.user.id, { password: `wrong ${i} wrong`, userId: session.user.id }, NOW);
     }
-    expect(await auth.deleteAccount(session.user.id, { password: PASSWORD }, NOW)).toEqual({
+    expect(await auth.deleteAccount(session.user.id, { password: PASSWORD, userId: session.user.id }, NOW)).toEqual({
       ok: false,
       error: "LOCKED",
     });
@@ -567,10 +606,10 @@ describe("deleteAccount", () => {
     const session = await signedUp(auth);
     await Promise.all(
       Array.from({ length: 2 * MAX_FAILURES - 1 }, (_, i) =>
-        auth.deleteAccount(session.user.id, { password: `wrong ${i} wrong` }, NOW),
+        auth.deleteAccount(session.user.id, { password: `wrong ${i} wrong`, userId: session.user.id }, NOW),
       ),
     );
-    expect(await auth.deleteAccount(session.user.id, { password: PASSWORD }, NOW + 1)).toEqual({
+    expect(await auth.deleteAccount(session.user.id, { password: PASSWORD, userId: session.user.id }, NOW + 1)).toEqual({
       ok: false,
       error: "LOCKED",
     });
@@ -580,10 +619,10 @@ describe("deleteAccount", () => {
   it("refuses the right password when the lock lands while that password is being checked", async () => {
     const auth = service();
     const session = await signedUp(auth);
-    await auth.deleteAccount(session.user.id, { password: "wrong wrong" }, NOW);
+    await auth.deleteAccount(session.user.id, { password: "wrong wrong", userId: session.user.id }, NOW);
     const key = String(store.db.prepare("SELECT email_hash FROM login_lockouts").get()?.["email_hash"]);
 
-    const inFlight = auth.deleteAccount(session.user.id, { password: PASSWORD }, NOW);
+    const inFlight = auth.deleteAccount(session.user.id, { password: PASSWORD, userId: session.user.id }, NOW);
     saveLockout(store, key, { failures: 0, lastFailureAt: NOW, lockedUntil: NOW + LOCK_MS });
 
     expect(await inFlight).toEqual({ ok: false, error: "LOCKED" });
@@ -609,7 +648,7 @@ describe("deleteAccount", () => {
 
     const deleted: string[] = [];
     auth.onAccountDeleted((userId) => deleted.push(userId));
-    const result = await auth.deleteAccount(id, { password: PASSWORD }, NOW + 1);
+    const result = await auth.deleteAccount(id, { password: PASSWORD, userId: id }, NOW + 1);
 
     expect(result).toEqual({ ok: true, value: null });
     expect(tablesHolding(id)).toEqual([]);
@@ -630,7 +669,7 @@ describe("deleteAccount", () => {
       .prepare("INSERT INTO call_history (id, user_id, room_hash, peer_user_id, started_at, ended_at) VALUES ('b1', ?, 'h', ?, ?, ?)")
       .run(ben.user.id, ana.user.id, NOW, NOW + 60_000);
 
-    expect((await auth.deleteAccount(ana.user.id, { password: PASSWORD }, NOW)).ok).toBe(true);
+    expect((await auth.deleteAccount(ana.user.id, { password: PASSWORD, userId: ana.user.id }, NOW)).ok).toBe(true);
 
     expect(store.db.prepare("SELECT user_id, room_hash, peer_user_id, started_at, ended_at FROM call_history").all()).toEqual([
       { user_id: ben.user.id, room_hash: "h", peer_user_id: null, started_at: NOW, ended_at: NOW + 60_000 },
@@ -639,7 +678,7 @@ describe("deleteAccount", () => {
 
   it("refuses an account that no longer exists", async () => {
     const auth = service();
-    expect(await auth.deleteAccount("gone", { password: PASSWORD }, NOW)).toEqual({
+    expect(await auth.deleteAccount("gone", { password: PASSWORD, userId: "gone" }, NOW)).toEqual({
       ok: false,
       error: "UNAUTHENTICATED",
     });
@@ -681,7 +720,7 @@ describe("deleteAccount", () => {
       // something.
       expect(readable().length).toBeGreaterThan(0);
 
-      expect((await auth.deleteAccount(signup.value.user.id, { password: PASSWORD }, NOW + 1)).ok).toBe(true);
+      expect((await auth.deleteAccount(signup.value.user.id, { password: PASSWORD, userId: signup.value.user.id }, NOW + 1)).ok).toBe(true);
       expect(readable()).toEqual([]);
       expect(onDisk.db.prepare("PRAGMA freelist_count").get()).toEqual({ freelist_count: 0 });
     } finally {
@@ -715,7 +754,7 @@ describe("deleteAccount", () => {
       reader.prepare("SELECT count(*) AS n FROM users").get();
 
       const started = performance.now();
-      expect((await auth.deleteAccount(signup.value.user.id, { password: PASSWORD }, NOW + 1)).ok).toBe(true);
+      expect((await auth.deleteAccount(signup.value.user.id, { password: PASSWORD, userId: signup.value.user.id }, NOW + 1)).ok).toBe(true);
       expect(performance.now() - started).toBeLessThan(2500);
       expect(later).toHaveLength(1);
 
@@ -743,7 +782,7 @@ describe("deleteAccount", () => {
     const account = await signedUp(auth);
     const deleted: string[] = [];
     auth.onAccountDeleted((userId) => deleted.push(userId));
-    expect(await auth.deleteAccount(account.user.id, { password: PASSWORD }, NOW)).toEqual({ ok: true, value: null });
+    expect(await auth.deleteAccount(account.user.id, { password: PASSWORD, userId: account.user.id }, NOW)).toEqual({ ok: true, value: null });
     expect(deleted).toEqual([account.user.id]);
   });
 });
