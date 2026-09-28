@@ -143,6 +143,28 @@ function sweep(dialect: string, forbidden: string[]): void {
 }
 
 /**
+ * Keys whose "vuelve a" is the third person ("la llamada vuelve a conectarse"), which is right in
+ * every register. None today. Anywhere else, "vuelve a" plus a verb is the tú imperative, and two
+ * slips only this sweep sees read it in the wrong register: a new base line with no regional
+ * override, and an override edited back to it (both went green once the sweep was removed,
+ * measured in review). A correct third person line fails it until its key is listed here, which is
+ * the decision a reviewer should see.
+ */
+const THIRD_PERSON_VUELVE_A = new Set<string>([]);
+
+function vuelveASweep(dialect: string): void {
+  const found: string[] = [];
+  for (const [key, text] of copyFor(dialect).all()) {
+    if (key.startsWith(QUOTES_OTHER_DIALECTS) || THIRD_PERSON_VUELVE_A.has(key)) continue;
+    const said = words(text);
+    for (let i = 0; i + 1 < said.length; i += 1) {
+      if (said[i] === "vuelve" && said[i + 1] === "a") found.push(key);
+    }
+  }
+  expect(found).toEqual([]);
+}
+
+/**
  * Every override each regional file carries, by name.
  *
  * A regional file that loses an override reads that line in base Spanish, which addresses the
@@ -234,6 +256,10 @@ describe("Argentine Spanish (es-AR)", () => {
     sweep("es-AR", ["tú", "tienes", "puedes", "quieres", "eres", "vienes"]);
   });
 
+  it("says volvé a, never the tú imperative vuelve a", () => {
+    vuelveASweep("es-AR");
+  });
+
   it("uses ustedes for plural you, never vosotros", () => {
     sweep("es-AR", ["vosotros", "vuestro", "vuestra", "vuestros", "vuestras", "habláis"]);
     expect(copy.t("landing.sub")).toMatch(/ustedes/i);
@@ -272,6 +298,10 @@ describe("Colombian Spanish (es-CO)", () => {
     // "tu" too: the possessive of tú. Usted's is "su", and a key es-CO forgets to override
     // inherits base Spanish's "tu" (review reverted an es-CO override with every gate green).
     sweep("es-CO", ["tú", "tu", "vos", "tienes", "puedes", "tenés", "quieres", "escribe", "recarga"]);
+  });
+
+  it("says vuelva a, never the tú imperative vuelve a", () => {
+    vuelveASweep("es-CO");
   });
 
   it("still uses ustedes for plural you, not vosotros", () => {

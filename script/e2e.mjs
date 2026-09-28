@@ -212,6 +212,7 @@ async function closedPort() {
 function socketOutageSwitch(deadUrl) {
   const Real = window.WebSocket;
   window.__sockets = [];
+  window.__protocols = [];
   window.__offline = false;
   window.__failedWhileOffline = 0;
   window.WebSocket = class extends Real {
@@ -220,9 +221,28 @@ function socketOutageSwitch(deadUrl) {
       super(offline ? deadUrl : url, protocols);
       if (offline) this.addEventListener("close", () => (window.__failedWhileOffline += 1));
       window.__sockets.push(this);
+      window.__protocols.push([protocols ?? []].flat());
     }
   };
 }
+
+/**
+ * The account a socket's subprotocols speak for, or null: the bearer is `<payload>.<signature>`,
+ * and the payload is base64url JSON naming the user (server/src/auth/accessTokens.ts).
+ */
+function accountOfSocket(protocols) {
+  const bearer = protocols.find((protocol) => protocol.startsWith("bearer."));
+  if (!bearer) return null;
+  try {
+    const payload = bearer.slice("bearer.".length).split(".")[0];
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")).sub ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** A notice a screen reader is told about: an alert, or a polite status. */
+const announced = (page, text) => page.locator('[role="alert"], [role="status"]').filter({ hasText: text });
 
 /**
  * Start `npx tsx server/src/index.ts` as a process group of its own, and stop it as one. npx does
@@ -1301,10 +1321,7 @@ try {
   );
   // Saying it was signed out, not that another account took the tab: the call's end tells the two
   // apart, and counting every end as a move put the wrong sentence here (measured in review).
-  check(
-    "and says why, as a sign out",
-    await reached(pat.getByRole("alert").filter({ hasText: en("error.UNAUTHENTICATED") })),
-  );
+  check("and says why, as a sign out", await reached(announced(pat, en("error.UNAUTHENTICATED"))));
 
   // ---------------------------------------------------------------------
   section("A call in a tab moved to another account ends, and says why");
@@ -1318,7 +1335,7 @@ try {
   // one tab, and in another tab of the same browser she signs out and Jon signs in.
   const olgaHosting = await apiSignIn(INVITE_BASE, "Olga");
   const ivy = await apiInviteSignUp(INVITE_BASE, olgaHosting, "Ivy");
-  await apiInviteSignUp(INVITE_BASE, olgaHosting, "Jon");
+  const jon = await apiInviteSignUp(INVITE_BASE, olgaHosting, "Jon");
   const hostContext = await contextSignedInWith(INVITE_BASE, olgaHosting.refreshToken, { permissions: ["microphone"] });
   const host = await hostContext.newPage();
   host.on("pageerror", (e) => errors.push(`host: ${e.message}`));
@@ -1362,6 +1379,11 @@ try {
     "a tab is in a call while another tab of its browser signs in as someone else",
     (await inCall.locator(".room").count()) === 1,
   );
+  // The control for the socket check below: the call's own sockets are read as Ivy's.
+  check(
+    "the call's socket speaks for the account it was joined as",
+    (await inCall.evaluate(() => window.__protocols)).map(accountOfSocket).includes(ivy.user.id),
+  );
   // A few seconds of outage: the socket drops, a reconnect fails, and the network comes back.
   await inCall.evaluate(() => {
     window.__offline = true;
@@ -1374,14 +1396,31 @@ try {
   });
   check(
     "when the network comes back, the call ends and says the tab is on another account now",
-    await reached(inCall.getByRole("alert").filter({ hasText: en("error.ACCOUNT_CHANGED") })),
+    await reached(announced(inCall, en("error.ACCOUNT_CHANGED"))),
   );
   check("and the tab has left the call", (await inCall.locator(".room").count()) === 0);
   // The property itself, not only its notice: the old token source opened one as Jon here, and
-  // was refused only because Ivy's seat was still held (measured in review).
+  // was refused only because Ivy's seat was still held (measured in review). Read from each
+  // socket's own bearer, so a design that reconnected as Ivy would pass.
   check(
-    "and no socket reached the server once the tab was on another account",
-    (await inCall.evaluate((before) => window.__sockets.length - before, socketsBefore)) === 0,
+    "and no socket reached the server as the account the tab moved to",
+    !(await inCall.evaluate((before) => window.__protocols.slice(before), socketsBefore))
+      .map(accountOfSocket)
+      .includes(jon.user.id),
+  );
+  // And the tab can call again, as the account it holds now: a call object kept for the page's
+  // life, rather than made for each call, ended every later call at once as a move, with every
+  // check above green (measured in review).
+  await inCall.getByRole("button", { name: "Start a new chat" }).click();
+  await inCall.getByLabel("Your name, just for this chat").fill("Jon");
+  await inCall.getByLabel("Your language and region").selectOption("en-US");
+  await inCall.getByRole("button", { name: /Create and allow microphone/ }).click();
+  check(
+    "and it can start a new call, as the account it holds now",
+    await waitFor(
+      async () => ((await inCall.locator(".code-badge").textContent().catch(() => null)) ?? "").trim().length === 8,
+      "a room code in the moved tab",
+    ).catch(() => false),
   );
   await ivyBrowser.close();
   await hostContext.close();
