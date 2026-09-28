@@ -84,8 +84,9 @@ plan of record for the multi-user server and the iOS app.
 - Rows carry `user_id` (M6, D10): the opaque account id of the room's HOST, who pays whoever
   spoke. Never an email or a name. Rows from before the field have no key, and an absent key and
   a null both mean "unattributed", which totals as its own bucket and is never an error. A paid
-  call needs the global daily cap, the room cap AND the per user daily cap (`USER_DAILY_CAP_USD`)
-  to pass, so the per user cap can only tighten the other two.
+  call in a room needs the global daily cap, the room cap AND the per user daily cap
+  (`USER_DAILY_CAP_USD`) to pass, so the per user cap can only tighten the other two. Spend that
+  belongs to no account (verification) has no user to cap and is bound by the other two.
 - Money is rounded to 6 decimals everywhere, matching the dashboard's Ruby reader and awws's
   `spend_log.py`, so a figure on the cockpit and one from the CLI cannot differ in the tail.
 
