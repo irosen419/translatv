@@ -34,6 +34,31 @@ describe("scrub", () => {
     }
   });
 
+  // Accounts arrived in M3, and with them a second kind of thing that must never reach a log:
+  // credentials and the address that identifies a person. An email in a log file outlives the
+  // account it belonged to, and a token in one is a session for whoever reads it.
+  it("withholds an email address", () => {
+    const scrubbed = scrub({ event: "auth.login", email: "ana@example.test" }) as Record<string, unknown>;
+    expect(scrubbed["email"]).toBe("[withheld 16 chars]");
+    expect(JSON.stringify(scrubbed)).not.toContain("ana@example.test");
+  });
+
+  it("withholds every key that can carry a credential or identify an account holder", () => {
+    for (const key of [
+      "email",
+      "password",
+      "accessToken",
+      "refreshToken",
+      "token",
+      "invite",
+      "displayName",
+      "authorization",
+    ]) {
+      const scrubbed = scrub({ nested: { [key]: "secret words" } }) as { nested: Record<string, unknown> };
+      expect(scrubbed.nested[key], `${key} reached the log intact`).toBe("[withheld 12 chars]");
+    }
+  });
+
   it("records the length rather than deleting the key", () => {
     // log.ts's stated reason, and it is the difference between two facts a reader needs to tell
     // apart: an event that HAD no text, and an event whose text was withheld.
@@ -83,27 +108,40 @@ describe("scrub", () => {
   });
 });
 
+/**
+ * Every line the logger writes, whichever console method it writes with. A test watching some of
+ * them passed with nothing to read once the logger moved to another: warnings to console.error,
+ * and info to console.info, where a leak on an info line then went unseen (both measured in
+ * review). Required to hold what the test looks for, so it cannot pass empty.
+ */
+function written(): () => string[] {
+  const spies = (["log", "info", "debug", "warn", "error"] as const).map((method) =>
+    vi.spyOn(console, method).mockImplementation(() => {}),
+  );
+  return () => spies.flatMap((spy) => spy.mock.calls.map((call) => String(call[0])));
+}
+
 describe("the emitted line", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("never contains the raw content, at any level", () => {
-    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const lines = written();
     log.info("transcript.final", {
       room: "A1B2C3D4",
       line: { id: "l1", text: "esto es privado" },
     });
-    const line = String(spy.mock.calls[0]?.[0]);
+    expect(lines()).toHaveLength(1);
+    const [line] = lines() as [string];
     expect(line).not.toContain("esto es privado");
     expect(line).toContain("A1B2C3D4");
     expect(JSON.parse(line).event).toBe("transcript.final");
   });
 
   it("scrubs warnings and errors too, not only info", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const lines = written();
     log.warn("stt.retry", { text: "leaked?" });
     log.error("translate.failed", { original: "leaked?" });
-    expect(String(warn.mock.calls[0]?.[0])).not.toContain("leaked?");
-    expect(String(error.mock.calls[0]?.[0])).not.toContain("leaked?");
+    expect(lines().map((line) => JSON.parse(line).event).sort()).toEqual(["stt.retry", "translate.failed"]);
+    expect(lines().join("\n")).not.toContain("leaked?");
   });
 });

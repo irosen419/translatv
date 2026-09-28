@@ -88,6 +88,14 @@ export const LIMITS = {
   createPerIp: { ratePerSecond: 5 / 60, burst: 5 },
   /** Join attempts, per IP. THE brute force defense on room codes. */
   joinPerIp: { ratePerSecond: 10 / 60, burst: 10 },
+  /**
+   * The same two, per ACCOUNT, checked beside the IP buckets rather than instead of them. Same
+   * numbers: one person needs no more than one household does, and the point is that moving to a
+   * new address (a phone hopping from wifi to cellular, or a script rotating proxies) does not
+   * buy a fresh budget.
+   */
+  createPerUser: { ratePerSecond: 5 / 60, burst: 5 },
+  joinPerUser: { ratePerSecond: 10 / 60, burst: 10 },
   /** Any WebSocket frame, per connection. Generous: interim results arrive at about 5 per second. */
   messagesPerConnection: { ratePerSecond: 60, burst: 120 },
   /** Translations, per room. The bill runaway guard. About 8 turns a minute is normal speech. */

@@ -37,7 +37,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { accountsEnv, signedInContext } from "./accounts.mjs";
 import { chromiumLaunchOptions, chromiumSource } from "./chromium.mjs";
+import { copyFor } from "./copy.mjs";
 import { floorSummary, measured, percentile, renderTable, unmeasured } from "./latency_stats.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -398,8 +400,9 @@ function isolatedServerTree() {
  * The probe, installed before any application script runs.
  *
  * Wraps window.WebSocket and watches the transcript. Entirely harness side:
- * client/src/net/socket.ts calls the bare global `new WebSocket(url)`, so subclassing the global
- * here intercepts every frame without one line of production code knowing about it.
+ * client/src/net/socket.ts calls the bare global `new WebSocket(url, protocols)`, so subclassing
+ * the global here (passing every argument through, the access token subprotocol included)
+ * intercepts every frame without one line of production code knowing about it.
  *
  * It records a message TYPE, a lineId, and the harness's own marker token. Never the text of a
  * line, which is the same rule server/src/log.ts enforces on the server.
@@ -485,7 +488,10 @@ async function enterRoom(page, base, name, dialect, action) {
   }
   await page.getByLabel("Your name, just for this chat").fill(name);
   await page.getByLabel("Your language and region").selectOption(dialect);
-  await page.getByRole("button", { name: /allow microphone/ }).click();
+  // Looked up in the chosen dialect: the form switches language the moment the picker moves, so
+  // an English pattern here never matched Ben, who joins in Argentine Spanish.
+  const submit = copyFor(dialect)(action.kind === "create" ? "prejoin.submit.create" : "prejoin.submit.join");
+  await page.getByRole("button", { name: submit }).click();
 }
 
 async function pingRoundTrips(page, count) {
@@ -548,6 +554,8 @@ async function planeA(stubDelayMs) {
       http_proxy: "",
       https_proxy: "",
       NO_PROXY: "127.0.0.1,localhost",
+      // Every call needs an account: open signup and a throwaway database (script/accounts.mjs).
+      ...accountsEnv(root),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -575,8 +583,8 @@ async function planeA(stubDelayMs) {
   const browser = await chromium.launch(chromiumLaunchOptions());
   onCleanup(() => browser.close());
 
-  const contextA = await browser.newContext({ permissions: ["microphone", "camera"] });
-  const contextB = await browser.newContext({ permissions: ["microphone", "camera"] });
+  const contextA = await signedInContext(browser, base, "Ana", { permissions: ["microphone", "camera"] });
+  const contextB = await signedInContext(browser, base, "Ben", { permissions: ["microphone", "camera"] });
   const ana = await contextA.newPage();
   const ben = await contextB.newPage();
   for (const page of [ana, ben]) {

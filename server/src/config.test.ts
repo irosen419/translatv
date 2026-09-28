@@ -124,3 +124,91 @@ describe("TURN configuration", () => {
     expect(message).toContain("TURN_CREDENTIAL");
   });
 });
+
+describe("DATA_DIR", () => {
+  let savedDataDir: string | undefined;
+  beforeEach(() => {
+    savedDataDir = process.env["DATA_DIR"];
+    delete process.env["DATA_DIR"];
+  });
+  afterEach(() => {
+    if (savedDataDir === undefined) delete process.env["DATA_DIR"];
+    else process.env["DATA_DIR"] = savedDataDir;
+  });
+
+  it("defaults to data/ under the repo root, holding translatv.db", () => {
+    const config = loadConfig(root);
+    expect(config.dataDir).toBe(join(root, "data"));
+    expect(config.databasePath).toBe(join(root, "data", "translatv.db"));
+  });
+
+  it("takes an absolute DATA_DIR as given", () => {
+    process.env["DATA_DIR"] = "/srv/translatv";
+    const config = loadConfig(root);
+    expect(config.dataDir).toBe("/srv/translatv");
+    expect(config.databasePath).toBe("/srv/translatv/translatv.db");
+  });
+
+  it("resolves a relative DATA_DIR against the repo root, not the working directory", () => {
+    process.env["DATA_DIR"] = "state";
+    expect(loadConfig(root).dataDir).toBe(join(root, "state"));
+  });
+
+  it("treats a blank DATA_DIR as unset", () => {
+    process.env["DATA_DIR"] = "  ";
+    expect(loadConfig(root).dataDir).toBe(join(root, "data"));
+  });
+});
+
+describe("accounts configuration", () => {
+  const NAMES = ["AUTH_SECRET", "SIGNUP_MODE", "OWNER_EMAIL"] as const;
+  let savedAccounts: Record<string, string | undefined>;
+  beforeEach(() => {
+    savedAccounts = {};
+    for (const name of NAMES) {
+      savedAccounts[name] = process.env[name];
+      delete process.env[name];
+    }
+  });
+  afterEach(() => {
+    for (const name of NAMES) {
+      if (savedAccounts[name] === undefined) delete process.env[name];
+      else process.env[name] = savedAccounts[name];
+    }
+  });
+
+  it("defaults to invite only signup, no owner, and no secret", () => {
+    const config = loadConfig(root);
+    expect(config.signupMode).toBe("invite");
+    expect(config.ownerEmail).toBe(null);
+    expect(config.authSecret).toBe(null);
+  });
+
+  it("reads open signup", () => {
+    process.env["SIGNUP_MODE"] = "open";
+    expect(loadConfig(root).signupMode).toBe("open");
+  });
+
+  it("refuses a SIGNUP_MODE it does not know rather than guessing which one was meant", () => {
+    // A typo that fell back to "open" would hand the owner's spend cap to strangers.
+    process.env["SIGNUP_MODE"] = "opne";
+    expect(thrownMessage()).toContain("SIGNUP_MODE");
+  });
+
+  it("normalizes OWNER_EMAIL the way signup normalizes an email", () => {
+    process.env["OWNER_EMAIL"] = "  Owner@Example.TEST ";
+    expect(loadConfig(root).ownerEmail).toBe("owner@example.test");
+  });
+
+  it("carries AUTH_SECRET, and says so without printing it", () => {
+    const secret = "f".repeat(64);
+    process.env["AUTH_SECRET"] = secret;
+    const config = loadConfig(root);
+    expect(config.authSecret).toBe(secret);
+    expect(describeConfig(config).join("\n")).not.toContain(secret);
+  });
+
+  it("no longer reads ADMIN_PASSWORD at all", () => {
+    expect("adminPassword" in loadConfig(root)).toBe(false);
+  });
+});
