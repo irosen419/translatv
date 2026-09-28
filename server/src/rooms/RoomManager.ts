@@ -46,13 +46,18 @@ export interface Member {
   /** Perfect negotiation role. The first member in a room is impolite. */
   polite: boolean;
   /**
-   * This member proved they were the admin when they entered.
-   *
-   * Set from a verified token at create and join time, never from anything the client asserts
-   * about itself. The room needs it for two decisions: whether a guest may join at all, and
-   * whether the room dies when this member leaves.
+   * The account this seat belongs to. Recorded server side only: the peer is sent the opaque
+   * member id and never this, so being in a call with someone does not hand you their account id.
    */
-  isAdmin: boolean;
+  userId: string;
+  /**
+   * This member CREATED the room, which makes them its host.
+   *
+   * Set by the server at create time, never from anything the client asserts. The room needs it
+   * for two decisions: whether a guest may join at all (only while the host is present), and
+   * whether the room dies when this member leaves (it does).
+   */
+  isHost: boolean;
   /** Their microphone is live. */
   micEnabled: boolean;
   /** They are sending live video right now, which is not the same as owning a camera. */
@@ -145,32 +150,36 @@ export class RoomManager {
   }
 
   /**
-   * Is an admin sitting in this room right now?
+   * Is the host sitting in this room right now?
    *
-   * Reads, and deliberately does NOT sweep. It used to, and swallowing the result was a bug
-   * with teeth: this call would delete the admin's own expired seat, the caller's sweep would
-   * then find nothing released, and the room would never be ended. The guest was left in a room
-   * that could not end, was never told the admin had gone, and that nobody could join.
+   * Reads, and deliberately does NOT sweep. It used to, and swallowing the result was a bug with
+   * teeth: this call would delete the host's own expired seat, the caller's sweep would then find
+   * nothing released, and the room would never be ended. The guest was left in a room that could
+   * not end, was never told the host had gone, and that nobody could join.
    *
-   * So the CALLER sweeps, through the path that also notifies, before asking. There is one
-   * caller and it does exactly that.
+   * So the CALLER sweeps, through the path that also notifies, before asking. There is one caller
+   * and it does exactly that.
    *
-   * A RECONNECTING admin counts as present: they still hold their seat, and a guest arriving
-   * during a thirty second wifi hop should not be turned away from a call that is still very
-   * much happening.
-   *
-   * Takes no view on WHO is asking. The caller decides whether the asker needs an admin here.
+   * A RECONNECTING host counts as present: they still hold their seat, and a guest arriving during
+   * a thirty second wifi hop should not be turned away from a call that is still very much
+   * happening.
    */
-  hasAdminPresent(code: string): boolean {
+  hasHostPresent(code: string): boolean {
     const room = this.rooms.get(normalizeCode(code));
-    return room?.members.some((m) => m.isAdmin) ?? false;
+    return room?.members.some((m) => m.isHost) ?? false;
   }
 
+  /** Was this code ended (or destroyed) recently enough to still be refused as ROOM_ENDED? */
+  hasEnded(code: string): boolean {
+    return this.tombstones.has(normalizeCode(code));
+  }
+
+  /** The creator is the host, always: that is what host means. */
   create(
     username: string,
     dialect: string,
     now: number,
-    isAdmin: boolean,
+    userId = "",
   ): { room: Room; member: Member; resumeToken: string } {
     const code = this.allocateCode();
     const resumeToken = generateResumeToken();
@@ -184,7 +193,8 @@ export class RoomManager {
       // The creator is impolite: it initiates and wins offer collisions. Fixing the role at
       // creation is what stops both peers being polite and deadlocking on renegotiation.
       polite: false,
-      isAdmin,
+      userId,
+      isHost: true,
       ...MEMBER_DEFAULTS,
     };
     const room: Room = { code, members: [member], destroyDeadline: null, createdAt: now };
@@ -197,7 +207,7 @@ export class RoomManager {
     username: string,
     dialect: string,
     now: number,
-    isAdmin: boolean,
+    userId = "",
   ): JoinResult {
     const code = normalizeCode(rawCode);
     if (code.length !== 8) return { ok: false, error: "BAD_CODE" };
@@ -222,7 +232,8 @@ export class RoomManager {
       connected: true,
       reconnectDeadline: null,
       polite: true,
-      isAdmin,
+      userId,
+      isHost: false,
       ...MEMBER_DEFAULTS,
     };
     room.members.push(member);
@@ -237,7 +248,12 @@ export class RoomManager {
    * fallback would look friendlier and would be a seat stealing bug: anyone who knew the code
    * could send a junk token and be quietly seated as a new member.
    */
-  resume(rawCode: string, token: string, now: number): ResumeResult {
+  /**
+   * `userId`, when given, must be the account the seat belongs to. A resume token is a bearer
+   * credential for a seat; tying it to the account as well means a token lifted from one person's
+   * browser storage is useless to anyone signed in as somebody else.
+   */
+  resume(rawCode: string, token: string, now: number, userId?: string): ResumeResult {
     const code = normalizeCode(rawCode);
     if (code.length !== 8) return { ok: false, error: "BAD_CODE" };
 
@@ -251,6 +267,9 @@ export class RoomManager {
     const hash = hashToken(token);
     const member = room.members.find((m) => tokensMatch(m.resumeTokenHash, hash));
     if (!member) return { ok: false, error: "INVALID_RESUME" };
+    // Refused with the same code as a wrong token, and BEFORE anything is rotated or evicted, so
+    // the rightful owner's live seat is untouched by the attempt.
+    if (userId !== undefined && member.userId !== userId) return { ok: false, error: "INVALID_RESUME" };
 
     // Last writer wins. A second tab claiming the same token evicts the first, so a zombie tab
     // cannot hold a seat that its owner is trying to reclaim.
@@ -326,9 +345,9 @@ export class RoomManager {
    * Everything swept since the last call, and clears it.
    *
    * Exists because sweep() is called from several places that only want its SIDE EFFECT:
-   * join, resume, and the admin presence check all sweep so they do not read stale state, and
+   * join, resume, and the host presence check all sweep so they do not read stale state, and
    * all of them discard what it returns. That was survivable while a released seat only meant
-   * "tell the peer", and became a silent failure the moment an expiring ADMIN had to end the
+   * "tell the peer", and became a silent failure the moment an expiring HOST had to end the
    * room: whichever of those happened to sweep first consumed the expiry, the socket layer's
    * own sweep found nothing, and the room was left with a guest in it, unendable and
    * unjoinable. Security review reproduced exactly that over real sockets.

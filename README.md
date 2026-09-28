@@ -5,8 +5,8 @@ subtitles: the translation large on top, the original small and italic beneath i
 Spanish for the MVP, with regional dialect support, so an Argentine speaker reads voseo rather than
 textbook Spanish.
 
-Status: **working MVP**. Create a room, share the code, talk. 281 unit and integration tests plus
-a 36 check two browser end to end run, and CI builds the Docker image and curls its health check
+Status: **working MVP**. Sign in, create a room, share the code, talk. Several hundred unit and
+integration tests plus a two browser end to end run of about sixty checks, and CI builds the Docker image and curls its health check
 on every push.
 
 Two things are built but **not yet verified against reality**, each because this build environment
@@ -29,8 +29,12 @@ accounts, per user spend and the iOS app.
 ```bash
 npm install
 npm run build
-npm start          # http://localhost:8080
+SIGNUP_MODE=open npm start   # http://localhost:8080, then create an account
 ```
+
+Every call needs an account. Signup is invite only unless `SIGNUP_MODE=open`; `npm run invite`
+prints a single use code. DEPLOY.md section 6 covers accounts in production, including the
+`AUTH_SECRET` the server refuses to start without.
 
 `TESTING.md` walks through getting this running on a laptop and checking it by hand, including
 what a single machine can and cannot prove.

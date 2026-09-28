@@ -16,6 +16,7 @@ import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
+import { accountsEnv, signedInContext } from "./accounts.mjs";
 import { chromiumLaunchOptions } from "./chromium.mjs";
 import { copyFor } from "./copy.mjs";
 
@@ -41,7 +42,8 @@ mkdirSync(OUT, { recursive: true });
 
 const serverLog = [];
 const server = spawn("npx", ["tsx", "server/src/index.ts"], {
-  env: { ...process.env, PORT: "0", NODE_ENV: "development", ANTHROPIC_API_KEY: "" },
+  // Every call needs an account: open signup and a throwaway database (script/accounts.mjs).
+  env: { ...process.env, PORT: "0", NODE_ENV: "development", ANTHROPIC_API_KEY: "", ...accountsEnv(root) },
   stdio: ["ignore", "pipe", "pipe"],
 });
 server.stdout.on("data", (d) => serverLog.push(String(d)));
@@ -87,8 +89,12 @@ try {
 
   for (const [label, viewport] of [["phone", PHONE], ["desktop", DESKTOP]]) {
     console.log(`--- ${label}`);
-    const ctxA = await browser.newContext({ viewport, permissions: ["microphone", "camera"] });
-    const ctxB = await browser.newContext({
+    // One account per person per pass: an email can only sign up once.
+    const ctxA = await signedInContext(browser, base, `Ana-${label}`, {
+      viewport,
+      permissions: ["microphone", "camera"],
+    });
+    const ctxB = await signedInContext(browser, base, `Ben-${label}`, {
       viewport: DESKTOP,
       permissions: ["microphone", "camera"],
     });

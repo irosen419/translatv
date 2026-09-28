@@ -1,0 +1,464 @@
+// The signed in session: who this browser is, and a valid access token when something needs one.
+//
+// Two tokens, kept in two different places on purpose:
+//
+//   access   15 minutes, IN MEMORY ONLY. Sent on the WebSocket upgrade and on /api calls. Losing
+//            it costs nothing: a reload just refreshes for a new one.
+//   refresh  30 days, in localStorage under "translatv.refresh", so a reload (which this app
+//            already survives mid call) does not sign anyone out. The server rotates it on every
+//            use and revokes the whole chain if a spent one is ever presented again.
+//
+// localStorage is readable by any script on this origin, so an XSS bug would leak the refresh
+// token. That is the SAME exposure the retired admin token had (it lived in localStorage too),
+// and the strict CSP (no inline or third party script) is what stands in front of it. The
+// follow up is an httpOnly, SameSite=Strict cookie scoped to /api/auth/refresh, which script
+// cannot read at all; it needs the refresh endpoint to accept a cookie and a CSRF story for it,
+// so it is a separate change rather than a quiet part of this one.
+//
+// The refresh token is a bearer credential and is treated as one: never logged, never put in a
+// URL, dropped from storage the moment the server says it is no longer good.
+
+import type { AuthErrorCode, AuthSession, PublicUser } from "@translatv/shared";
+
+/** Where the refresh token lives between page loads. */
+export const REFRESH_KEY = "translatv.refresh";
+
+/** Refresh this long before the access token expires, so a request never races the expiry. */
+export const REFRESH_MARGIN_MS = 60_000;
+
+/**
+ * The soonest a scheduled refresh may run. Expiries come from the SERVER's clock and "now" from
+ * this browser's, so on a device running fourteen minutes or more fast every expiry is already
+ * past: floored at 0, each refresh scheduled the next one immediately, and the page rotated
+ * tokens in a loop until the server's per address limit refused it. A minute apart instead, the
+ * token (fifteen minutes on the server's clock) stays valid, and a clock running slow is caught
+ * by the 401 and forced refresh that already handle an expired token.
+ */
+export const MIN_REFRESH_DELAY_MS = 60_000;
+
+/** The slice of Storage this needs. An interface so a test can hand it something that throws. */
+export interface TokenStore {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+/**
+ * The browser's localStorage, or null when it cannot be used.
+ *
+ * Probed rather than assumed: merely READING the property throws in some configurations (Safari
+ * private mode, blocked site data), so a bare `window.localStorage` is itself what can break.
+ */
+export function browserStore(): TokenStore | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function readRefresh(store: TokenStore | null): string | null {
+  if (!store) return null;
+  try {
+    const value = store.getItem(REFRESH_KEY);
+    // An empty string is not a credential. A cleared key can read back as "".
+    return value && value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRefresh(store: TokenStore | null, token: string): void {
+  try {
+    store?.setItem(REFRESH_KEY, token);
+  } catch {
+    // The session still works for this page; it just will not survive a reload.
+  }
+}
+
+function clearRefresh(store: TokenStore | null): void {
+  try {
+    store?.removeItem(REFRESH_KEY);
+  } catch {
+    // A clear that fails leaves a credential behind, which is why memory is ALSO cleared and
+    // nothing trusts this to have worked.
+  }
+}
+
+export type SessionStatus =
+  /** No refresh token: show the sign in screen. */
+  | "signedOut"
+  /** A refresh token is stored and is being exchanged. Render as signed in, optimistically. */
+  | "restoring"
+  | "signedIn";
+
+export interface SessionState {
+  status: SessionStatus;
+  user: PublicUser | null;
+}
+
+/** Why a sign in or sign up did not work. NETWORK is "never reached a verdict". */
+export type AuthFailure = AuthErrorCode | "NETWORK";
+export type AuthOutcome = { ok: true } | { ok: false; error: AuthFailure };
+
+/** Thrown by accessToken() when the server could not be reached, as distinct from signed out. */
+export class SessionUnavailable extends Error {}
+
+export interface SessionDeps {
+  fetch: typeof fetch;
+  storage: TokenStore | null;
+  now: () => number;
+  /**
+   * Run fn holding a lock shared by every tab of this origin (navigator.locks). Two tabs
+   * refreshing at once with the SAME stored token would look exactly like theft to the server,
+   * which revokes the family and signs both out; the lock makes the second tab read the token the
+   * first one just stored. Without it (an old browser) that race is possible, and costs a sign in.
+   */
+  lock?: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
+  /** Schedules the refresh ahead of expiry. Omitted in tests that drive time by hand. */
+  setTimer?: (fn: () => void, ms: number) => unknown;
+  clearTimer?: (handle: unknown) => void;
+}
+
+/** navigator.locks, when this browser has it. */
+export function browserLock(): SessionDeps["lock"] {
+  const locks = typeof navigator === "undefined" ? undefined : (navigator as Navigator & { locks?: LockManager }).locks;
+  if (!locks) return undefined;
+  return (name, fn) => locks.request(name, fn) as ReturnType<typeof fn>;
+}
+
+async function errorCode(response: Response): Promise<AuthFailure> {
+  try {
+    const body: unknown = await response.json();
+    const error = typeof body === "object" && body !== null ? (body as { error?: unknown }).error : undefined;
+    if (typeof error === "string") return error as AuthErrorCode;
+  } catch {
+    // Not JSON: a proxy's error page, most likely. That is not a verdict about the credentials.
+  }
+  return "NETWORK";
+}
+
+export class SessionManager {
+  private access: { token: string; expiresAt: number } | null = null;
+  private user: PublicUser | null = null;
+  private inflight: Promise<string | null> | null = null;
+  /**
+   * Moves on whenever this tab's session is replaced or forgotten, so a refresh already on the
+   * wire cannot bring back the session it began from. Measured in review: a sign out clicked while
+   * the page's restore was out was undone when the refresh answered, and the tab went on as the
+   * account just signed out of, able to start a call, until its access token ran out.
+   */
+  private epoch = 0;
+  private timer: unknown = null;
+  private readonly listeners = new Set<(state: SessionState) => void>();
+
+  constructor(private readonly deps: SessionDeps) {}
+
+  state(): SessionState {
+    if (this.user) return { status: "signedIn", user: this.user };
+    return { status: readRefresh(this.deps.storage) ? "restoring" : "signedOut", user: null };
+  }
+
+  subscribe(listener: (state: SessionState) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  /** On page load: trade a stored refresh token for a session, if there is one. */
+  async restore(): Promise<void> {
+    if (this.user || !readRefresh(this.deps.storage)) return;
+    try {
+      await this.refresh();
+    } catch {
+      // Unreachable server. The stored token is kept, the state stays "restoring", and the next
+      // thing that needs a token tries again.
+    }
+  }
+
+  signIn(email: string, password: string): Promise<AuthOutcome> {
+    return this.obtain("/api/auth/login", { email, password });
+  }
+
+  signUp(input: { invite?: string; email: string; password: string; displayName: string }): Promise<AuthOutcome> {
+    return this.obtain("/api/auth/signup", input);
+  }
+
+  /**
+   * Sign out: forget locally FIRST, then tell the server. The local half is what the person
+   * asked for and it must happen even if the server cannot be reached; the server half revokes
+   * the refresh token, so a copy of it (another tab, a stolen one) can no longer refresh. Another
+   * tab is not told: it keeps the access token it holds, at most fifteen minutes, and is signed
+   * out when it next tries to refresh. If someone signs in again before then, in this tab or any
+   * other, that tab's refresh reads THAT account's token from the shared storage and silently
+   * becomes it.
+   */
+  async signOut(): Promise<void> {
+    const token = readRefresh(this.deps.storage);
+    this.drop();
+    if (!token) return;
+    try {
+      await this.deps.fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: token }),
+        keepalive: true,
+      });
+    } catch {
+      // Nothing to do. The token is gone from this browser; it expires on its own on the server.
+    }
+  }
+
+  /**
+   * Delete the account `userId`, proving the password again. On success the session is forgotten
+   * here exactly as signOut forgets it (the server has already revoked every token it held).
+   *
+   * `userId` is the account the person confirmed, and the request names it. Tabs share one stored
+   * refresh token, so any refresh can move this tab to whichever account another tab signed in to
+   * last: the server refuses a bearer for any other account (ACCOUNT_MISMATCH), and this tab
+   * never sends one.
+   *
+   * ONE request, never authorizedFetch's retry on a 401: a wrong password answers 401 too, and
+   * retrying it would spend a second lockout strike on the same typo.
+   *
+   * UNAUTHENTICATED is different: the bearer was refused before any password was checked, which
+   * almost always means the account is already gone, deleted from another device. One refresh
+   * settles it without a second deletion attempt:
+   *   refused         the session ends here and the app goes to sign in, as it does when the
+   *                   account is deleted mid call (before, the tab stayed signed in for up to
+   *                   fifteen minutes and said it could not reach the server);
+   *   renewed         for the same account, the bearer had merely expired, and trying again works;
+   *   another account ACCOUNT_MISMATCH, never "try again": from the form confirmed for the old
+   *                   account, that was one Enter from deleting the new one (measured in review,
+   *                   with a password the two accounts shared);
+   *   unreachable     NETWORK, since trying again would fail the same way.
+   */
+  async deleteAccount(password: string, userId: string): Promise<AuthOutcome> {
+    let response: Response;
+    try {
+      const token = await this.accessToken();
+      if (token === null) return { ok: false, error: "UNAUTHENTICATED" };
+      if (this.user?.id !== userId) return { ok: false, error: "ACCOUNT_MISMATCH" };
+      response = await this.deps.fetch("/api/account", {
+        method: "DELETE",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ password, userId }),
+      });
+    } catch {
+      return { ok: false, error: "NETWORK" };
+    }
+    if (response.ok) {
+      this.drop();
+      return { ok: true };
+    }
+    const error = await errorCode(response);
+    if (error !== "UNAUTHENTICATED") return { ok: false, error };
+    try {
+      if ((await this.accessToken({ force: true })) === null) return { ok: false, error };
+    } catch {
+      return { ok: false, error: "NETWORK" };
+    }
+    return { ok: false, error: this.user?.id === userId ? error : "ACCOUNT_MISMATCH" };
+  }
+
+  /**
+   * A valid access token, refreshing first if it is missing or about to expire.
+   *
+   * Resolves null when there is no session to be had (signed out, or the server refused the
+   * refresh token). THROWS SessionUnavailable when the server could not be reached, which is a
+   * different fact: the caller should retry later rather than send the person to sign in.
+   *
+   * `force` refreshes even when the token in hand looks valid, for the caller that was just
+   * refused with it (a 401, or a socket that never opened).
+   */
+  async accessToken(options: { force?: boolean } = {}): Promise<string | null> {
+    const now = this.deps.now();
+    if (!options.force && this.access && this.access.expiresAt - REFRESH_MARGIN_MS > now) {
+      return this.access.token;
+    }
+    return this.refresh();
+  }
+
+  /**
+   * accessToken(), but only ever `account`'s: null once this tab holds another account. For a
+   * call, which has to go on as the account it was joined as or not at all (App's socket).
+   */
+  async accessTokenFor(account: string, options: { force?: boolean } = {}): Promise<string | null> {
+    const token = await this.accessToken(options);
+    return token !== null && this.user?.id === account ? token : null;
+  }
+
+  /**
+   * The token source for one call's socket, and whether that call ended because the tab moved.
+   *
+   * Every token it hands over is for the account the call was joined as. Tabs share one sign in,
+   * so a refresh (after a failed reconnect, or once a call outlives its access token) can land this
+   * tab on whichever account another tab signed in to last, and a socket opened with that token
+   * rejoined the call as it, under this account's name, and both accounts' history and contacts
+   * gained a call one of them never had (measured in review). Anything else is null, which ends
+   * the call, and moved() then tells a move apart from a sign out or a deletion. A call begun
+   * while the session was still restoring takes the account the restore lands on.
+   */
+  callTokens(): { source: (options: { force: boolean }) => Promise<string | null>; moved: () => boolean } {
+    let account = this.user?.id ?? null;
+    let moved = false;
+    return {
+      source: async (options) => {
+        if (account === null) {
+          const token = await this.accessToken(options);
+          account = this.user?.id ?? null;
+          return token;
+        }
+        const token = await this.accessTokenFor(account, options);
+        moved = token === null && this.user !== null;
+        return token;
+      },
+      moved: () => moved,
+    };
+  }
+
+  /**
+   * fetch with the access token, refreshed and retried once on a 401.
+   *
+   * Only ever as the account this tab showed when the request was made. Tabs share one stored
+   * refresh token, so a refresh (the one after a 401, or one renewing a token about to expire on
+   * the way in) can land this tab on whichever account another tab signed in to last, and a
+   * write replayed there changed that account's data (measured in review: its stored
+   * preferences). Then nothing is sent, and the answer is ACCOUNT_MISMATCH, as the server gives
+   * a deletion that names another account.
+   */
+  async authorizedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+    const account = this.user?.id;
+    const attempt = async (token: string | null) => {
+      if (account !== undefined && this.user?.id !== account) {
+        return new Response(JSON.stringify({ error: "ACCOUNT_MISMATCH" }), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return this.deps.fetch(path, {
+        ...init,
+        headers: { ...(init.headers as Record<string, string> | undefined), ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      });
+    };
+    const first = await attempt(await this.accessToken());
+    if (first.status !== 401) return first;
+    return attempt(await this.accessToken({ force: true }));
+  }
+
+  dispose(): void {
+    this.cancelTimer();
+    this.listeners.clear();
+  }
+
+  // -------------------------------------------------------------------------
+
+  private async obtain(path: string, body: unknown): Promise<AuthOutcome> {
+    let response: Response;
+    try {
+      response = await this.deps.fetch(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      return { ok: false, error: "NETWORK" };
+    }
+    if (!response.ok) return { ok: false, error: await errorCode(response) };
+    try {
+      this.adopt((await response.json()) as AuthSession);
+    } catch {
+      return { ok: false, error: "NETWORK" };
+    }
+    return { ok: true };
+  }
+
+  /** One refresh at a time in this tab, and (with a lock) across every tab. */
+  private refresh(): Promise<string | null> {
+    this.inflight ??= this.runRefresh().finally(() => {
+      this.inflight = null;
+    });
+    return this.inflight;
+  }
+
+  private async runRefresh(): Promise<string | null> {
+    const exchange = async (): Promise<string | null> => {
+      const epoch = this.epoch;
+      // Read INSIDE the lock, not before it: another tab may have rotated the token while this
+      // one waited, and the one it stored is the only one still good.
+      const token = readRefresh(this.deps.storage);
+      if (!token) {
+        this.drop(false);
+        return null;
+      }
+      let response: Response;
+      try {
+        response = await this.deps.fetch("/api/auth/refresh", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ refreshToken: token }),
+        });
+      } catch {
+        throw new SessionUnavailable("the server could not be reached");
+      }
+      // Signed out or in again while this was on the wire: its answer, a verdict or a session,
+      // is about a session this tab no longer has. What the tab holds now stands.
+      const superseded = () => this.epoch !== epoch;
+      if (superseded()) return this.access?.token ?? null;
+      if (response.status === 401 || response.status === 400) {
+        // A verdict: this token is spent, revoked or expired. Only clear storage if it still
+        // holds the token that was refused, so a newer one another tab just stored survives.
+        if (readRefresh(this.deps.storage) === token) clearRefresh(this.deps.storage);
+        this.drop(false);
+        return null;
+      }
+      if (!response.ok) throw new SessionUnavailable(`refresh failed: ${response.status}`);
+      const session = (await response.json()) as AuthSession;
+      if (superseded()) return this.access?.token ?? null;
+      this.adopt(session);
+      return session.accessToken;
+    };
+    return this.deps.lock ? this.deps.lock("translatv.refresh", exchange) : exchange();
+  }
+
+  private adopt(session: AuthSession): void {
+    this.epoch += 1;
+    writeRefresh(this.deps.storage, session.refreshToken);
+    this.access = { token: session.accessToken, expiresAt: session.accessExpiresAt };
+    this.user = session.user;
+    this.schedule(session.accessExpiresAt);
+    this.notify();
+  }
+
+  /** Forget the session in memory, and in storage unless the caller has already decided that. */
+  private drop(clearStorage = true): void {
+    this.epoch += 1;
+    if (clearStorage) clearRefresh(this.deps.storage);
+    this.access = null;
+    this.cancelTimer();
+    this.user = null;
+    this.notify();
+  }
+
+  /** Refresh ahead of expiry, so a long call's reconnect never has to wait for one. */
+  private schedule(expiresAt: number): void {
+    this.cancelTimer();
+    if (!this.deps.setTimer) return;
+    const delay = Math.max(MIN_REFRESH_DELAY_MS, expiresAt - REFRESH_MARGIN_MS - this.deps.now());
+    this.timer = this.deps.setTimer(() => {
+      this.timer = null;
+      void this.refresh().catch(() => {
+        // Unreachable right now. The next accessToken() call will try again.
+      });
+    }, delay);
+  }
+
+  private cancelTimer(): void {
+    if (this.timer !== null) this.deps.clearTimer?.(this.timer);
+    this.timer = null;
+  }
+
+  private notify(): void {
+    const state = this.state();
+    for (const listener of this.listeners) listener(state);
+  }
+}

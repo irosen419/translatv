@@ -23,8 +23,10 @@ plan of record for the multi-user server and the iOS app.
   Untracked spend is the specific failure this repo was set up to avoid.
 - There is no autopilot in this repo yet. If one is added, arming a step that spends is owner only,
   always, and no automation ever flips an `"armed"` flag.
-- Never log transcript text, chat text, usernames, or glossary content. The logger takes counts,
-  identifiers, and durations only. There is a unit test asserting it drops a `text` field.
+- Never log transcript text, chat text, usernames, or glossary content, and never emails,
+  passwords, access or refresh tokens, or invite codes. The logger takes counts, identifiers
+  (an opaque user id, never an email), and durations only. Unit tests assert it drops a `text`
+  field and an `email` field.
 - Never put a secret behind a `VITE_` prefix. Vite inlines every `VITE_*` variable into the client
   bundle, so a `VITE_ANTHROPIC_API_KEY` would ship the key to every visitor. `npm run check:secrets`
   greps the built client for key prefixes and fails on a hit.
@@ -32,8 +34,9 @@ plan of record for the multi-user server and the iOS app.
 
 ## Stack and layout
 
-- Node 20+ and npm workspaces: `shared` (wire protocol), `server` (Express plus ws), `client`
-  (React 18 plus Vite). TypeScript strict everywhere.
+- Node 22.16+ (22 LTS; the store uses the built in `node:sqlite`, and 22.16 is the first 22
+  release with `DatabaseSync#isTransaction`) and npm workspaces: `shared` (wire protocol),
+  `server` (Express plus ws), `client` (React 18 plus Vite). TypeScript strict everywhere.
 - `shared/src/protocol.ts` is the SINGLE source of truth for the WebSocket wire format. Both sides
   derive their types from its zod schemas, and those same schemas are the server's input validation
   layer. Never hand-write a duplicate type for a message.
@@ -41,8 +44,25 @@ plan of record for the multi-user server and the iOS app.
 - Each browser transcribes its OWN microphone and sends text. Nobody transcribes the remote stream.
 - Speech to text sits behind the `SttAdapter` interface in `client/src/stt/types.ts`. The Web Speech implementation is the
   default; a paid engine is a config change, not a rewrite.
-- Room state is in memory only. There is no database, and a server restart legitimately destroys
-  every room.
+- Room state is in memory only, and a server restart legitimately destroys every room.
+- Durable state (accounts and tokens from M3) lives in SQLite through Node's built in
+  `node:sqlite`, under `server/src/store/`, in `DATA_DIR/translatv.db`. No native npm dependency.
+  Migrations in `server/src/store/migrations.ts` are APPEND ONLY. Tests use `":memory:"`. In
+  production the data directory must be a mounted volume: the server refuses to start on the
+  image layer unless `ALLOW_EPHEMERAL_DATA=1`.
+- Accounts (M3) live in `server/src/auth/`: scrypt passwords, 15 minute HMAC access tokens keyed
+  from `AUTH_SECRET` (production refuses to start without it), 30 day refresh tokens stored hashed
+  and rotated on every use, with reuse revoking the whole family. Every WebSocket upgrade needs a
+  valid access token (`Authorization: Bearer` for native clients, the `bearer.<token>` subprotocol
+  for browsers, never the URL); a browser's Origin must still match the allowlist. The HTTP account
+  API's schemas and error codes are in `shared/src/auth.ts`. `ADMIN_PASSWORD` is retired.
+- Per user data (M5) lives in `server/src/account/`, with its HTTP schemas in
+  `shared/src/account.ts`: dialect preferences, a stored glossary (merged into a room through the
+  same path as `glossary.import`), and call history (a room code HASH, never the code). Contacts
+  are derived from call history, never stored. Transcripts, chat and room glossaries are NEVER
+  persisted. `DELETE /api/account` re authenticates, deletes the user row and lets ON DELETE do
+  the rest (CASCADE for what the user owns, SET NULL for what only mentions them, such as a
+  peer's call history), then closes that user's live sockets. It never touches the spend ledger.
 
 ## Spend tracking
 

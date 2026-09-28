@@ -1,0 +1,1087 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "clientMessage": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "properties": {
+            "dialect": {
+              "$ref": "#/definitions/dialectCode"
+            },
+            "t": {
+              "const": "room.create",
+              "type": "string"
+            },
+            "username": {
+              "$ref": "#/definitions/username"
+            },
+            "wantsVideo": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "t",
+            "username",
+            "dialect",
+            "wantsVideo"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "$ref": "#/definitions/roomCode"
+            },
+            "dialect": {
+              "$ref": "#/definitions/dialectCode"
+            },
+            "t": {
+              "const": "room.join",
+              "type": "string"
+            },
+            "username": {
+              "$ref": "#/definitions/username"
+            }
+          },
+          "required": [
+            "t",
+            "code",
+            "username",
+            "dialect"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "$ref": "#/definitions/roomCode"
+            },
+            "resumeToken": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "t": {
+              "const": "room.resume",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "code",
+            "resumeToken"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "t": {
+              "const": "room.leave",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "t": {
+              "const": "room.end",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "cameraEnabled": {
+              "type": "boolean"
+            },
+            "dialect": {
+              "$ref": "#/definitions/dialectCode"
+            },
+            "micEnabled": {
+              "type": "boolean"
+            },
+            "t": {
+              "const": "member.update",
+              "type": "string"
+            },
+            "username": {
+              "$ref": "#/definitions/username"
+            },
+            "wantsTranslation": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "t"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "sdp": {
+              "maxLength": 64000,
+              "type": "string"
+            },
+            "t": {
+              "const": "rtc.offer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "sdp"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "sdp": {
+              "maxLength": 64000,
+              "type": "string"
+            },
+            "t": {
+              "const": "rtc.answer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "sdp"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "candidate": {},
+            "t": {
+              "const": "rtc.ice",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "seq": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "t": {
+              "const": "stt.interim",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "text",
+            "seq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "seq": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "t": {
+              "const": "stt.final",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "text",
+            "seq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "t": {
+              "const": "chat.send",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "lineId": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "t": {
+              "const": "translation.retry",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "lineId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "correctedTranslation": {
+              "type": "string"
+            },
+            "lineId": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "t": {
+              "const": "glossary.correct",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "lineId",
+            "correctedTranslation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "entries": {
+              "items": {
+                "$ref": "#/definitions/glossaryEntry"
+              },
+              "maxItems": 40,
+              "type": "array"
+            },
+            "t": {
+              "const": "glossary.import",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "entries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "t": {
+              "const": "ping",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "dialectCode": {
+      "type": "string"
+    },
+    "errorCode": {
+      "enum": [
+        "ROOM_NOT_FOUND",
+        "ROOM_FULL",
+        "ROOM_ENDED",
+        "BAD_CODE",
+        "INVALID_RESUME",
+        "RATE_LIMITED",
+        "PAYLOAD_TOO_LARGE",
+        "MALFORMED",
+        "NOT_IN_ROOM",
+        "ALREADY_IN_ROOM",
+        "HOST_NOT_PRESENT",
+        "UNAUTHENTICATED"
+      ],
+      "type": "string"
+    },
+    "glossaryEntry": {
+      "additionalProperties": true,
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "sourceDialect": {
+          "$ref": "#/definitions/dialectCode"
+        },
+        "target": {
+          "type": "string"
+        },
+        "targetDialect": {
+          "$ref": "#/definitions/dialectCode"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "sourceDialect",
+        "targetDialect"
+      ],
+      "type": "object"
+    },
+    "member": {
+      "additionalProperties": true,
+      "properties": {
+        "cameraEnabled": {
+          "type": "boolean"
+        },
+        "connection": {
+          "enum": [
+            "connected",
+            "reconnecting"
+          ],
+          "type": "string"
+        },
+        "dialect": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "isHost": {
+          "type": "boolean"
+        },
+        "micEnabled": {
+          "type": "boolean"
+        },
+        "username": {
+          "type": "string"
+        },
+        "wantsTranslation": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "username",
+        "dialect",
+        "connection",
+        "micEnabled",
+        "cameraEnabled",
+        "wantsTranslation",
+        "isHost"
+      ],
+      "type": "object"
+    },
+    "renderedLine": {
+      "additionalProperties": true,
+      "properties": {
+        "failureReason": {
+          "$ref": "#/definitions/translationFailureCode"
+        },
+        "from": {
+          "type": "string"
+        },
+        "lineId": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "number"
+        },
+        "skipReason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/skipReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "enum": [
+            "speech",
+            "chat"
+          ],
+          "type": "string"
+        },
+        "srcDialect": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "translated": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "translationStatus": {
+          "enum": [
+            "ok",
+            "skipped",
+            "unavailable",
+            "rate_limited",
+            "budget_exceeded",
+            "pending"
+          ],
+          "type": "string"
+        },
+        "ts": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "lineId",
+        "from",
+        "srcDialect",
+        "text",
+        "source",
+        "ts",
+        "translated",
+        "translationStatus",
+        "revision",
+        "skipReason"
+      ],
+      "type": "object"
+    },
+    "roomCode": {
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+      "type": "string"
+    },
+    "rtcIceServerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "credential": {
+          "type": "string"
+        },
+        "urls": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ]
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "urls"
+      ],
+      "type": "object"
+    },
+    "serverMessage": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "config": {
+              "additionalProperties": true,
+              "properties": {
+                "graceMs": {
+                  "type": "number"
+                },
+                "maxMembers": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "graceMs",
+                "maxMembers"
+              ],
+              "type": "object"
+            },
+            "iceServers": {
+              "items": {
+                "$ref": "#/definitions/rtcIceServerConfig"
+              },
+              "type": "array"
+            },
+            "polite": {
+              "type": "boolean"
+            },
+            "resumeToken": {
+              "type": "string"
+            },
+            "selfId": {
+              "type": "string"
+            },
+            "t": {
+              "const": "room.created",
+              "type": "string"
+            },
+            "you": {
+              "$ref": "#/definitions/member"
+            }
+          },
+          "required": [
+            "t",
+            "code",
+            "selfId",
+            "resumeToken",
+            "you",
+            "polite",
+            "config",
+            "iceServers"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "config": {
+              "$ref": "#/definitions/serverMessage/anyOf/0/properties/config"
+            },
+            "iceServers": {
+              "items": {
+                "$ref": "#/definitions/rtcIceServerConfig"
+              },
+              "type": "array"
+            },
+            "peer": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/member"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "polite": {
+              "type": "boolean"
+            },
+            "resumeToken": {
+              "type": "string"
+            },
+            "selfId": {
+              "type": "string"
+            },
+            "snapshot": {
+              "additionalProperties": true,
+              "properties": {
+                "glossary": {
+                  "items": {
+                    "$ref": "#/definitions/glossaryEntry"
+                  },
+                  "type": "array"
+                },
+                "lines": {
+                  "items": {
+                    "$ref": "#/definitions/renderedLine"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "lines",
+                "glossary"
+              ],
+              "type": "object"
+            },
+            "t": {
+              "const": "room.joined",
+              "type": "string"
+            },
+            "you": {
+              "$ref": "#/definitions/member"
+            }
+          },
+          "required": [
+            "t",
+            "code",
+            "selfId",
+            "resumeToken",
+            "you",
+            "peer",
+            "polite",
+            "config",
+            "iceServers",
+            "snapshot"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "peer": {
+              "$ref": "#/definitions/member"
+            },
+            "t": {
+              "const": "peer.joined",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "peer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "peerId": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "left",
+                "timeout",
+                "ended"
+              ],
+              "type": "string"
+            },
+            "t": {
+              "const": "peer.left",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "peerId",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "cameraEnabled": {
+              "type": "boolean"
+            },
+            "dialect": {
+              "type": "string"
+            },
+            "micEnabled": {
+              "type": "boolean"
+            },
+            "peerId": {
+              "type": "string"
+            },
+            "t": {
+              "const": "peer.updated",
+              "type": "string"
+            },
+            "username": {
+              "type": "string"
+            },
+            "wantsTranslation": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "t",
+            "peerId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "connection": {
+              "$ref": "#/definitions/member/properties/connection"
+            },
+            "peerId": {
+              "type": "string"
+            },
+            "t": {
+              "const": "peer.state",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "peerId",
+            "connection"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "by": {
+              "type": "string"
+            },
+            "byUsername": {
+              "type": "string"
+            },
+            "t": {
+              "const": "room.ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "by",
+            "byUsername"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "sdp": {
+              "type": "string"
+            },
+            "t": {
+              "const": "rtc.offer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "from",
+            "sdp"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "sdp": {
+              "type": "string"
+            },
+            "t": {
+              "const": "rtc.answer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "from",
+            "sdp"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "candidate": {},
+            "from": {
+              "type": "string"
+            },
+            "t": {
+              "const": "rtc.ice",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "from"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "seq": {
+              "type": "number"
+            },
+            "t": {
+              "const": "transcript.interim",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "from",
+            "text",
+            "seq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "line": {
+              "$ref": "#/definitions/renderedLine"
+            },
+            "t": {
+              "const": "transcript.final",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "line"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "lineId": {
+              "type": "string"
+            },
+            "t": {
+              "const": "translation.pending",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "lineId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "lineId": {
+              "type": "string"
+            },
+            "reason": {
+              "$ref": "#/definitions/skipReason"
+            },
+            "revision": {
+              "type": "number"
+            },
+            "t": {
+              "const": "translation.skipped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "lineId",
+            "reason",
+            "revision"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "lineId": {
+              "type": "string"
+            },
+            "origin": {
+              "enum": [
+                "model",
+                "correction",
+                "echo"
+              ],
+              "type": "string"
+            },
+            "revision": {
+              "type": "number"
+            },
+            "t": {
+              "const": "translation.result",
+              "type": "string"
+            },
+            "targetDialect": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "lineId",
+            "targetDialect",
+            "text",
+            "revision",
+            "origin"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "lineId": {
+              "type": "string"
+            },
+            "reason": {
+              "$ref": "#/definitions/translationFailureCode"
+            },
+            "retriable": {
+              "type": "boolean"
+            },
+            "status": {
+              "enum": [
+                "unavailable",
+                "rate_limited",
+                "budget_exceeded"
+              ],
+              "type": "string"
+            },
+            "t": {
+              "const": "translation.failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "lineId",
+            "status",
+            "retriable",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "entries": {
+              "items": {
+                "$ref": "#/definitions/glossaryEntry"
+              },
+              "type": "array"
+            },
+            "t": {
+              "const": "glossary.updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "entries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "$ref": "#/definitions/errorCode"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "fatal": {
+              "type": "boolean"
+            },
+            "t": {
+              "const": "error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t",
+            "code",
+            "fatal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "t": {
+              "const": "pong",
+              "type": "string"
+            }
+          },
+          "required": [
+            "t"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "skipReason": {
+      "enum": [
+        "same_language",
+        "recipient_off",
+        "no_peer"
+      ],
+      "type": "string"
+    },
+    "translationFailureCode": {
+      "enum": [
+        "NOT_CONFIGURED",
+        "PROVIDER_REJECTED",
+        "TOO_MANY_IN_FLIGHT",
+        "TOO_FAST",
+        "DAILY_CAP",
+        "ROOM_CAP",
+        "LEDGER_UNREADABLE",
+        "LEDGER_UNWRITABLE",
+        "UNRESOLVED_DIALECT",
+        "EMPTY_RESULT",
+        "TIMED_OUT",
+        "PROVIDER_RATE_LIMITED",
+        "PROVIDER_ERROR"
+      ],
+      "type": "string"
+    },
+    "translationStatus": {
+      "enum": [
+        "ok",
+        "skipped",
+        "unavailable",
+        "rate_limited",
+        "budget_exceeded"
+      ],
+      "type": "string"
+    },
+    "username": {
+      "type": "string"
+    }
+  },
+  "description": "GENERATED by script/gen_wire.mjs from shared/src/protocol.ts. Do not edit by hand. Every frame is a JSON object discriminated on `t`: clientMessage is what a client sends, serverMessage is what the server sends.",
+  "protocolVersion": 2,
+  "title": "Translatv WebSocket wire protocol"
+}

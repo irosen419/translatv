@@ -1,0 +1,6 @@
+{
+  "t": "error",
+  "code": "MALFORMED",
+  "detail": "expected boolean, received string",
+  "fatal": false
+}

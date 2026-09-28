@@ -130,3 +130,142 @@ describe("the dev proxy and the socket path agree", () => {
     expect(typeof rule === "object" && rule.ws).toBe(true);
   });
 });
+
+describe("signing the socket in", () => {
+  /** Records what each `new WebSocket(...)` was given, and lets a test open or close it. */
+  class FakeWebSocket {
+    static made: FakeWebSocket[] = [];
+    readyState = 0;
+    onopen: (() => void) | null = null;
+    onclose: ((event: { code: number }) => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor(
+      readonly url: string,
+      readonly protocols?: string[],
+    ) {
+      FakeWebSocket.made.push(this);
+    }
+    send(): void {}
+    close(): void {
+      this.onclose?.({ code: 1000 });
+    }
+  }
+
+  function withFakeSocket(fn: () => Promise<void>): Promise<void> {
+    const original = Reflect.getOwnPropertyDescriptor(globalThis, "WebSocket");
+    FakeWebSocket.made = [];
+    Object.defineProperty(globalThis, "WebSocket", { value: FakeWebSocket, configurable: true, writable: true });
+    return fn().finally(() => {
+      if (original) Reflect.defineProperty(globalThis, "WebSocket", original);
+      else Reflect.deleteProperty(globalThis, "WebSocket");
+    });
+  }
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const quiet = { onMessage: () => {}, onOpen: () => {}, onClose: () => {}, onReconnecting: () => {} };
+
+  it("offers the access token as a subprotocol, and never puts it in the URL", () =>
+    withFakeSocket(async () => {
+      const client = new SignalingSocket("ws://localhost:5173/ws", quiet, async () => "access.token");
+      client.connect();
+      await flush();
+      const made = FakeWebSocket.made[0];
+      expect(made?.protocols).toEqual(["translatv.v1", "bearer.access.token"]);
+      expect(made?.url).not.toContain("access.token");
+      client.close();
+    }));
+
+  it("asks for a FRESH token after an upgrade that never opened, which is how a 401 looks", () =>
+    withFakeSocket(async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+      try {
+        const asked: boolean[] = [];
+        const client = new SignalingSocket("ws://localhost:5173/ws", quiet, async ({ force }) => {
+          asked.push(force);
+          return `token-${asked.length}`;
+        });
+        client.connect();
+        await vi.advanceTimersByTimeAsync(0);
+        FakeWebSocket.made[0]?.onclose?.({ code: 1006 });
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(asked).toEqual([false, true]);
+        expect(FakeWebSocket.made[1]?.protocols).toEqual(["translatv.v1", "bearer.token-2"]);
+        client.close();
+      } finally {
+        vi.useRealTimers();
+      }
+    }));
+
+  it("backs off and retries when a token cannot be had right now, rather than giving up", () =>
+    withFakeSocket(async () => {
+      // A refresh that could not reach the server (a blip mid call) throws. That is not "signed
+      // out", and a call must come back from it on its own once the server answers again.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+      try {
+        const events: string[] = [];
+        let asked = 0;
+        const client = new SignalingSocket(
+          "ws://localhost:5173/ws",
+          {
+            ...quiet,
+            onClose: ({ terminal }) => events.push(`close:${terminal}`),
+            onReconnecting: (attempt) => events.push(`reconnecting:${attempt}`),
+          },
+          async () => {
+            asked += 1;
+            if (asked === 1) throw new Error("the server could not be reached");
+            return "token-2";
+          },
+        );
+        client.connect();
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(events.slice(0, 2)).toEqual(["close:false", "reconnecting:1"]);
+        expect(FakeWebSocket.made).toHaveLength(1);
+        expect(FakeWebSocket.made[0]?.protocols).toEqual(["translatv.v1", "bearer.token-2"]);
+        client.close();
+      } finally {
+        vi.useRealTimers();
+      }
+    }));
+
+  it("opens nothing when closed while its token was still being fetched", () =>
+    withFakeSocket(async () => {
+      let release: (token: string) => void = () => {};
+      const client = new SignalingSocket(
+        "ws://localhost:5173/ws",
+        quiet,
+        () => new Promise<string>((resolve) => (release = resolve)),
+      );
+      client.connect();
+      client.close();
+      release("late.token");
+      await flush();
+      expect(FakeWebSocket.made).toHaveLength(0);
+    }));
+
+  it("stops, and says signed out, when there is no session to connect with", () =>
+    withFakeSocket(async () => {
+      const events: string[] = [];
+      const client = new SignalingSocket(
+        "ws://localhost:5173/ws",
+        {
+          ...quiet,
+          onSignedOut: () => events.push("signedOut"),
+          onClose: ({ terminal }) => events.push(`close:${terminal}`),
+        },
+        async () => null,
+      );
+      client.connect();
+      await flush();
+      expect(events).toEqual(["signedOut", "close:true"]);
+      expect(FakeWebSocket.made).toHaveLength(0);
+    }));
+});
+
+describe("the dev proxy carries the account API", () => {
+  it("forwards /api, or nobody can sign in under npm run dev", () => {
+    const proxy = viteConfig.server?.proxy ?? {};
+    expect(Object.keys(proxy)).toContain("/api");
+  });
+});

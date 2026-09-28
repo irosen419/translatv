@@ -1,0 +1,17 @@
+{
+  "t": "glossary.import",
+  "entries": [
+    {
+      "source": "mate",
+      "target": "mate (the Argentine herbal tea)",
+      "sourceDialect": "es-AR",
+      "targetDialect": "en-US"
+    },
+    {
+      "source": "a tope",
+      "target": "flat out",
+      "sourceDialect": "es-ES",
+      "targetDialect": "en-GB"
+    }
+  ]
+}

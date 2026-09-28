@@ -8,6 +8,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { copyFor, interpolate, type CopyRef } from "./copy.js";
+import esAR from "./es-AR.json";
+import esCO from "./es-CO.json";
+import esES from "./es-ES.json";
 
 describe("the fallback chain", () => {
   it("uses the base language when the dialect has no override for a key", () => {
@@ -139,6 +142,97 @@ function sweep(dialect: string, forbidden: string[]): void {
   expect(found).toEqual([]);
 }
 
+/**
+ * Keys whose "vuelve" is the third person ("la llamada vuelve a conectarse", or usted in es-CO),
+ * which is right in these registers. None today. Anywhere else here, "vuelve" is the tú
+ * imperative ("vuelve a intentarlo", "vuelve al inicio", "vuelve más tarde"). Two slips only this
+ * sweep sees read it in the wrong register: a new base line with no regional override, and an
+ * override edited back to it. Both went green with no sweep, and a new "vuelve al inicio" or
+ * "vuelve más tarde" line went green with a sweep for "vuelve a" alone (measured in review). A
+ * correct third person line fails it until its key is listed here, which is the decision a reviewer
+ * should see, and the failure says so.
+ */
+const THIRD_PERSON_VUELVE = new Set<string>([]);
+
+function vuelveSweep(dialect: string): void {
+  const found: string[] = [];
+  for (const [key, text] of copyFor(dialect).all()) {
+    if (key.startsWith(QUOTES_OTHER_DIALECTS) || THIRD_PERSON_VUELVE.has(key)) continue;
+    if (words(text).includes("vuelve")) found.push(key);
+  }
+  expect(found, "a third person vuelve is right: list its key in THIRD_PERSON_VUELVE").toEqual([]);
+}
+
+/**
+ * Every override each regional file carries, by name.
+ *
+ * A regional file that loses an override reads that line in base Spanish, which addresses the
+ * reader as tú. No word list catches that in general: the tú imperative is spelled like the third
+ * person ("vuelve a", "intenta"), so a phrase sweep flagged correct lines, and 63 of the 143
+ * overrides in es-AR and es-CO could be deleted with every other check green, almost all of them
+ * putting tú in front of someone who reads vos or usted (review deleted each in turn). So losing
+ * one fails here, by its key. Adding one needs no change; removing one on purpose means removing
+ * its name, which is the decision a reviewer should see.
+ */
+const PINNED_OVERRIDES: Record<string, string[]> = {
+  "es-AR": [
+    "account.delete.expired", "account.delete.password", "account.invite.failed",
+    "account.invite.lead", "app.ended.left.host", "auth.displayName.hint",
+    "auth.error.EMAIL_TAKEN", "auth.error.INVALID_INPUT", "auth.error.LOCKED",
+    "auth.error.RATE_LIMITED", "auth.error.WEAK_PASSWORD", "auth.error.unavailable",
+    "auth.invite.hint", "auth.sub", "auth.switch.toSignIn", "auth.switch.toSignUp",
+    "chips.cloud.title", "chips.onDevice.title", "composer.placeholder", "error.ALREADY_IN_ROOM",
+    "error.HOST_NOT_PRESENT", "error.INVALID_RESUME", "error.MALFORMED", "error.NOT_IN_ROOM",
+    "error.PAYLOAD_TOO_LARGE", "error.RATE_LIMITED", "error.ROOM_NOT_FOUND",
+    "error.UNAUTHENTICATED", "failure.EMPTY_RESULT", "failure.PROVIDER_ERROR",
+    "failure.PROVIDER_RATE_LIMITED", "failure.TIMED_OUT", "failure.TOO_MANY_IN_FLIGHT",
+    "failure.UNRESOLVED_DIALECT", "import.notJson", "landing.codeHint", "media.denied.camera",
+    "media.denied.microphone", "media.inUse.camera", "media.inUse.microphone",
+    "media.insecure.camera", "media.insecure.microphone", "media.noDevice.camera",
+    "media.noDevice.microphone", "overlay.empty", "overlay.you", "panel.empty",
+    "prejoin.title.create", "room.camera.offLabel", "room.camera.onLabel", "room.dialect.title",
+    "room.end.alt.before", "room.end.body", "room.end.host.note", "room.invite.lead",
+    "room.mic.muteLabel", "room.mic.unmuteLabel", "room.translation.title", "room.you",
+    "stt.keepsDropping", "stt.noMicrophone", "stt.permission",
+  ],
+  "es-CO": [
+    "account.delete.expired", "account.delete.lead", "account.delete.password",
+    "account.delete.title", "account.invite.failed", "account.invite.lead", "app.ended.left",
+    "app.ended.left.host", "auth.displayName", "auth.displayName.hint", "auth.error.EMAIL_TAKEN",
+    "auth.error.INVALID_INPUT", "auth.error.LOCKED", "auth.error.RATE_LIMITED",
+    "auth.error.WEAK_PASSWORD", "auth.error.unavailable", "auth.invite.hint", "auth.sub",
+    "auth.switch.toSignIn", "auth.switch.toSignUp", "chips.cloud.title", "chips.onDevice.title",
+    "chips.translationOff.title", "composer.placeholder", "correct.body", "correct.youSaid",
+    "error.ALREADY_IN_ROOM", "error.HOST_NOT_PRESENT", "error.INVALID_RESUME", "error.MALFORMED",
+    "error.NOT_IN_ROOM", "error.PAYLOAD_TOO_LARGE", "error.RATE_LIMITED", "error.ROOM_NOT_FOUND",
+    "error.UNAUTHENTICATED", "export.glossary", "failure.EMPTY_RESULT", "failure.PROVIDER_ERROR",
+    "failure.PROVIDER_RATE_LIMITED", "failure.TIMED_OUT", "failure.TOO_MANY_IN_FLIGHT",
+    "failure.UNRESOLVED_DIALECT", "import.notJson", "landing.codeHint", "media.denied.camera",
+    "media.denied.microphone", "media.inUse.camera", "media.inUse.microphone",
+    "media.insecure.camera", "media.insecure.microphone", "media.noDevice.camera",
+    "media.noDevice.microphone", "media.other.camera", "media.other.microphone", "overlay.you",
+    "panel.empty", "panel.export.json", "prejoin.dialect.label", "prejoin.glossary.loaded.many",
+    "prejoin.glossary.loaded.one", "prejoin.name.label", "prejoin.stt.cloud",
+    "prejoin.stt.onDevice", "prejoin.sub.create", "prejoin.title.create", "room.camera.offLabel",
+    "room.camera.onLabel", "room.dialect.label", "room.dialect.title", "room.end.alt.before",
+    "room.end.body", "room.end.host.note", "room.invite.lead", "room.mic.level",
+    "room.mic.muteLabel", "room.mic.unmuteLabel", "room.translation.title", "room.you",
+    "stt.keepsDropping", "stt.noMicrophone", "stt.permission",
+  ],
+  "es-ES": [
+    "account.delete.changed", "landing.sub", "overlay.empty", "prejoin.stt.cloud",
+    "room.translation.mootTitle",
+  ],
+};
+const REGIONAL_FILES: Record<string, Record<string, string>> = { "es-AR": esAR, "es-CO": esCO, "es-ES": esES };
+
+describe("every regional override", () => {
+  it.each(Object.keys(PINNED_OVERRIDES))("is still in %s", (dialect) => {
+    const present = new Set(Object.keys(REGIONAL_FILES[dialect] ?? {}));
+    expect(PINNED_OVERRIDES[dialect]?.filter((key) => !present.has(key))).toEqual([]);
+  });
+});
+
 describe("Argentine Spanish (es-AR)", () => {
   const copy = copyFor("es-AR");
 
@@ -146,6 +240,9 @@ describe("Argentine Spanish (es-AR)", () => {
     expect(copy.t("composer.placeholder")).toContain("Escribí");
     expect(copy.t("panel.empty")).toContain("Decí");
     expect(copy.t("room.dialect.title")).toContain("Cambiá");
+    // Pinned by key as well as swept: the sweep below says what this line must not say, and this
+    // says what it says instead.
+    expect(copy.t("account.delete.expired")).toContain("Volvé");
   });
 
   it("uses vos rather than tu for the subject pronoun", () => {
@@ -156,6 +253,10 @@ describe("Argentine Spanish (es-AR)", () => {
   // The catalog's instruction, verbatim: NEVER use tu or tienes or puedes.
   it("never addresses the reader as tu", () => {
     sweep("es-AR", ["tú", "tienes", "puedes", "quieres", "eres", "vienes"]);
+  });
+
+  it("says volvé, never the tú imperative vuelve", () => {
+    vuelveSweep("es-AR");
   });
 
   it("uses ustedes for plural you, never vosotros", () => {
@@ -189,10 +290,17 @@ describe("Colombian Spanish (es-CO)", () => {
     expect(copy.t("overlay.you")).toBe("usted");
     expect(copy.t("composer.placeholder")).toContain("Escriba");
     expect(copy.t("panel.empty")).toContain("Diga");
+    expect(copy.t("account.delete.expired")).toContain("Vuelva");
   });
 
   it("never addresses the reader as tu or vos", () => {
-    sweep("es-CO", ["tú", "vos", "tienes", "puedes", "tenés", "quieres", "escribe", "recarga"]);
+    // "tu" too: the possessive of tú. Usted's is "su", and a key es-CO forgets to override
+    // inherits base Spanish's "tu" (review reverted an es-CO override with every gate green).
+    sweep("es-CO", ["tú", "tu", "vos", "tienes", "puedes", "tenés", "quieres", "escribe", "recarga"]);
+  });
+
+  it("says vuelva, never the tú imperative vuelve", () => {
+    vuelveSweep("es-CO");
   });
 
   it("still uses ustedes for plural you, not vosotros", () => {
@@ -219,5 +327,38 @@ describe("Mexican Spanish (es-MX)", () => {
 
   it("never uses vosotros or voseo", () => {
     sweep("es-MX", ["vosotros", "vuestro", "vos", "tenés", "escribí"]);
+  });
+});
+
+// The sign in and sign up screens arrived with accounts (M4) and address the reader on almost
+// every line, which is exactly where a register slip would show. The sweeps above already cover
+// them; these pin one line per dialect so a revert to base Spanish fails by name.
+describe("the account screens speak each dialect's register", () => {
+  it("uses voseo in Argentina", () => {
+    expect(copyFor("es-AR").t("auth.sub")).toContain("Necesitás");
+    expect(copyFor("es-AR").t("auth.switch.toSignUp")).toContain("tenés");
+  });
+
+  it("uses usted in Colombia", () => {
+    expect(copyFor("es-CO").t("auth.sub")).toContain("Necesita una cuenta");
+    expect(copyFor("es-CO").t("auth.displayName")).toBe("Su nombre");
+  });
+
+  it("uses tu in base Spanish, which is also Spain's singular", () => {
+    expect(copyFor("es").t("auth.sub")).toContain("Necesitas");
+    expect(copyFor("es-ES").t("auth.sub")).toBe(copyFor("es").t("auth.sub"));
+  });
+
+  it("asks for the password to delete an account in each register", () => {
+    expect(copyFor("es").t("account.delete.password")).toContain("Escribe tu contraseña");
+    expect(copyFor("es-AR").t("account.delete.password")).toContain("Escribí tu contraseña");
+    expect(copyFor("es-CO").t("account.delete.password")).toContain("Escriba su contraseña");
+    expect(copyFor("es-CO").t("account.delete.lead")).toContain("su cuenta");
+  });
+
+  it("keeps the password minimum as a placeholder in every language", () => {
+    for (const dialect of ["en-US", "es", "es-AR", "es-CO", "es-ES"]) {
+      expect(copyFor(dialect).t("auth.error.WEAK_PASSWORD", { min: 10 })).toContain("10");
+    }
   });
 });

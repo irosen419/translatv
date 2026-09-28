@@ -129,9 +129,10 @@ label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px
 .hint { margin: 6px 0 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
 .hint.bad { color: var(--warn); }
 
-/* The admin login. Deliberately the quietest thing on the card: one person needs it and
-   everyone else has to read past it. */
-.admin-strip {
+/* Who is signed in, and the way out. Deliberately the quietest thing on the card: everyone has
+   to read past it to get to what they came for. Wraps rather than truncates, because "Sesión
+   iniciada como" plus a name is a good deal longer than its English. */
+.account-strip {
   margin-top: 20px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
@@ -141,8 +142,22 @@ label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px
   flex-wrap: wrap;
   font-size: 12px;
 }
-.admin-state { color: var(--muted); }
-.admin-login { width: 100%; }
+.account-state { color: var(--muted); overflow-wrap: anywhere; min-width: 0; }
+.invite-result { width: 100%; }
+/* Not .invite-code: that is the room code on the waiting screen (below), and sharing the class
+   gave the owner's code its 26 to 38px type and the room code this border and padding. */
+.owner-invite-code {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  user-select: all;
+}
+.auth-title { margin: 0 0 14px; font-size: 16px; }
 .linklike {
   background: none;
   border: 0;
@@ -903,3 +918,10 @@ dialog p { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 1
   .gear-button svg { transition: none; }
   .control-drawer { transition: none; }
 }
+
+/* Deleting the account: opens in place of its link, full width inside the account strip. The two
+   buttons wrap onto their own lines rather than shrink, since "Conservar mi cuenta" and "Eliminar
+   mi cuenta" are each longer than the English and neither may ever be cut short. */
+.delete-account { width: 100%; font-size: 13px; }
+.delete-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.delete-actions > button { flex: 1 1 auto; }
