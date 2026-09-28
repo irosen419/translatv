@@ -141,7 +141,8 @@ interface State {
  * imports the store, including in environments that have no browser globals at all. Node 20 has
  * no global navigator (Node 21 added one) and the client suite runs in the node environment, so
  * an unguarded read threw ReferenceError and took EVERY client suite down with it on the Node
- * version CI pins, while passing locally on a newer one.
+ * version CI pinned then (20), while passing locally on a newer one. CI is on 22 now, which has a
+ * global navigator; the guard stays for any environment without one.
  */
 export function initialUiDialect(): string {
   const language = typeof navigator === "undefined" ? undefined : navigator.language;

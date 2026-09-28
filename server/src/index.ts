@@ -59,7 +59,8 @@ if (!writable.ok) {
   log.error("boot", {
     message:
       "  The call, the transcript, and the original language subtitles all still work. " +
-      "Fix the file's ownership or permissions and restart. In Docker this is COPY --chown.",
+      "Fix the file's ownership or permissions and restart. In the image that is COPY --chown; " +
+      "for the compose bind mount it is `sudo chown -R 1000:1000 out` on the host (DEPLOY.md section 5).",
   });
 }
 
