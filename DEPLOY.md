@@ -240,6 +240,9 @@ the checkout belongs to a different account, hand both directories over once:
 sudo chown -R 1000:1000 out data
 ```
 
+Never run `git clean -X` (or `-x`) in the deploy checkout: `data/translatv.db` is ignored by git,
+so a clean deletes every account. The ledger is tracked and survives it; the database does not.
+
 ## 6. Accounts: set AUTH_SECRET, or the server will not start
 
 Every call needs a signed in account. Accounts live in the SQLite database (section 5), and a
@@ -272,6 +275,12 @@ npm run invite                                                 # from a checkout
 ```
 
 It prints the code and nothing else stores it: only a hash reaches the database.
+
+Prefer the first line. `docker compose exec` runs the CLI inside the container, as the image's
+`node` user (uid 1000), against the database the server already made. From a checkout on the host,
+run it only after the server has started once, and as the account that owns `data/`: run as root
+before the first boot, it CREATES `data/translatv.db` owned by root, and the server (uid 1000)
+then cannot write it and stops at boot with "attempt to write a readonly database".
 
 **The owner.** `OWNER_EMAIL=<your email>` makes the account with that address the owner, re
 checked on every boot. The owner can mint invites from the app (`POST /api/invites`). Nothing else

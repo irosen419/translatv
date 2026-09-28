@@ -3,12 +3,14 @@
 // Every test here runs against ":memory:" except the ones whose subject is the file itself (WAL,
 // reopening an existing database), which use a throwaway directory. Nothing touches data/.
 
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { MIGRATIONS } from "./migrations.js";
-import { openStore, type Store } from "./store.js";
+import { DatabaseSync } from "./sqlite.js";
+import { assertSupportedSqlite, openStore, type Store } from "./store.js";
 
 const opened: Store[] = [];
 const dirs: string[] = [];
@@ -60,6 +62,23 @@ describe("openStore", () => {
   it("uses WAL for a file database", () => {
     const store = open({ path: join(tempDir(), "t.db") });
     expect(store.db.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "wal" });
+  });
+
+  it("waits for a busy file database rather than failing at once", () => {
+    // The invite CLI opens the same file while the server has it, and a writer that finds the
+    // other holding the lock should wait for it (measured: a 2.6 s wait, then success).
+    const store = open({ path: join(tempDir(), "t.db") });
+    expect(store.db.prepare("PRAGMA busy_timeout").get()).toEqual({ timeout: 5000 });
+  });
+
+  it("refuses a Node whose node:sqlite has no isTransaction (before 22.16)", () => {
+    // transaction() decides whether to roll back by reading db.isTransaction. Where it is
+    // undefined, every callback that throws leaves its transaction open: each later call fails
+    // "cannot start a transaction within a transaction", and the writes inside never commit.
+    // (openStore calls this on every open; a supported Node cannot be made to lack the property,
+    // so the call itself is exercised only by every other test here passing.)
+    expect(() => assertSupportedSqlite({})).toThrow(/Node 22\.16/);
+    expect(() => assertSupportedSqlite({ isTransaction: false })).not.toThrow();
   });
 
   it("creates the parent directory of a file database", () => {
@@ -123,6 +142,31 @@ describe("openStore", () => {
   });
 });
 
+describe("migrations", () => {
+  /**
+   * The first 16 hex characters of each shipped migration's sha256, in order.
+   *
+   * A database records WHICH versions it has applied, not what they said, so editing a migration
+   * that has shipped splits every existing install from every new one, with no error anywhere.
+   * Appending a migration needs no change here; once it has shipped, append its hash too.
+   */
+  const SHIPPED = [
+    "d14c4ffe9d417b95",
+    "df8e8cde7ad1c751",
+    "ffd44914db2d7a6a",
+    "0c01996a6f9f1b0d",
+    "b672d3c58ce98403",
+    "bcbbf75dbc805c58",
+    "95652c844ecc9110",
+    "30f4a0fa4a596827",
+  ];
+
+  it("never changes or reorders a shipped migration: they are append only", () => {
+    const hashes = MIGRATIONS.map((sql) => createHash("sha256").update(sql).digest("hex").slice(0, 16));
+    expect(hashes.slice(0, SHIPPED.length)).toEqual(SHIPPED);
+  });
+});
+
 describe("transaction", () => {
   function withTable(): Store {
     const store = open({ path: ":memory:" });
@@ -166,6 +210,86 @@ describe("transaction", () => {
       ).toThrow("inner");
     });
     expect(count(store)).toBe(1);
+  });
+
+  it("rethrows the real error from a NESTED call when SQLite has ended the whole transaction", () => {
+    // After SQLite ends the transaction itself, the savepoint is gone too, and a ROLLBACK TO
+    // there fails "no such savepoint" over the error that explains it. The outer call then has
+    // nothing to commit and fails too, even though it caught the inner error.
+    const store = withTable();
+    store.db.exec("CREATE TABLE big (b BLOB NOT NULL)");
+    const pages = Number(store.db.prepare("PRAGMA page_count").get()?.["page_count"]);
+    store.db.exec(`PRAGMA max_page_count = ${pages + 2}`);
+
+    let inner: unknown = null;
+    expect(() =>
+      store.transaction(() => {
+        try {
+          store.transaction(() => {
+            for (let i = 0; i < 64; i += 1) store.db.prepare("INSERT INTO big (b) VALUES (zeroblob(4096))").run();
+          });
+        } catch (error) {
+          inner = error;
+        }
+      }),
+    ).toThrow();
+    expect(String(inner)).toMatch(/full/);
+    expect(store.db.isTransaction).toBe(false);
+
+    store.db.exec("PRAGMA max_page_count = 1073741823");
+    expect(store.transaction(() => "after")).toBe("after");
+  });
+
+  describe("against a second connection to the same file", () => {
+    // Lock mode is invisible on one connection, so these use two. An outer call must start with
+    // BEGIN IMMEDIATE, taking the write lock at once; a call that wrongly thinks it is nested
+    // runs a SAVEPOINT instead, which takes no lock until its first write, and then the other
+    // connection can write in the middle of it. (Probes by the round 2 reviewer.)
+    function pair(): { store: Store; other: DatabaseSync } {
+      const path = join(tempDir(), "t.db");
+      const store = open({ path, migrations: ["CREATE TABLE t (n INTEGER NOT NULL)"] });
+      const other = new DatabaseSync(path);
+      other.exec("PRAGMA busy_timeout = 0");
+      return { store, other };
+    }
+    function otherCanWriteInside(store: Store, other: DatabaseSync): boolean {
+      let wrote = true;
+      store.transaction(() => {
+        try {
+          other.exec("INSERT INTO t (n) VALUES (1)");
+        } catch {
+          wrote = false; // SQLITE_BUSY: this transaction holds the write lock
+        }
+      });
+      return wrote;
+    }
+
+    it("takes the write lock at the start of every outer call, including after a callback threw", () => {
+      const { store, other } = pair();
+      try {
+        expect(() =>
+          store.transaction(() => {
+            throw new Error("callback failed");
+          }),
+        ).toThrow("callback failed");
+        expect(otherCanWriteInside(store, other)).toBe(false);
+      } finally {
+        other.close();
+      }
+    });
+
+    it("stays an outer call after a BEGIN refused on a busy database", () => {
+      const { store, other } = pair();
+      store.db.exec("PRAGMA busy_timeout = 0");
+      try {
+        other.exec("BEGIN IMMEDIATE");
+        expect(() => store.transaction(() => "never")).toThrow(/locked|busy/);
+        other.exec("ROLLBACK");
+        expect(otherCanWriteInside(store, other)).toBe(false);
+      } finally {
+        other.close();
+      }
+    });
   });
 
   it("refuses an async callback and rolls back, since it would commit before its awaits ran", () => {

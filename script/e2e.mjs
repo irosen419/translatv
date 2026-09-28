@@ -153,6 +153,41 @@ async function apiAccessToken(base, name) {
   return (await response.json()).accessToken;
 }
 
+/**
+ * Start `npx tsx server/src/index.ts` as a process group of its own, and stop it as one. npx does
+ * not forward SIGTERM to the tsx it starts, nor tsx to its node, so killing only the npx left the
+ * server running after every run (one leaked per run, measured), still holding its port and data.
+ */
+function startServer(env) {
+  return spawn("npx", ["tsx", "server/src/index.ts"], { env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+}
+function stopServer(child) {
+  if (!child?.pid) return;
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    // Already gone.
+  }
+}
+
+/**
+ * Installed before a page loads: records whether the sign in form was EVER inserted. It reads the
+ * mutation records rather than the live document, because React can mount the form and swap it
+ * out within one task, before any observer callback sees the DOM. Keyed on the email field, which
+ * only the sign in form has (the delete account form shares its heading class).
+ */
+function watchForSignInForm() {
+  window.__sawSignInForm = false;
+  new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (node.matches("#auth-email") || node.querySelector("#auth-email")) window.__sawSignInForm = true;
+      }
+    }
+  }).observe(document, { childList: true, subtree: true });
+}
+
 /** Resolves true once the locator shows up, false if it never does. */
 const reached = (locator) =>
   locator
@@ -166,8 +201,7 @@ mkdirSync(join(root, "out", "translatv"), { recursive: true });
 writeFileSync(join(root, "out", "translatv", "spend_log.jsonl"), "", "utf8");
 
 console.log("Starting server...");
-const server = spawn("npx", ["tsx", "server/src/index.ts"], {
-  env: {
+const server = startServer({
     ...process.env,
     // 0 means "any free port". The real one comes back on the listening log line.
     PORT: "0",
@@ -179,8 +213,6 @@ const server = spawn("npx", ["tsx", "server/src/index.ts"], {
     ANTHROPIC_API_KEY: "",
     // Open signup and a throwaway database: see script/accounts.mjs.
     ...accountsEnv(root),
-  },
-  stdio: ["ignore", "pipe", "pipe"],
 });
 const serverLog = [];
 server.stdout.on("data", (d) => serverLog.push(String(d)));
@@ -966,6 +998,11 @@ try {
       .then(() => true)
       .catch(() => false),
   );
+  // The submit button is disabled while the request runs, which drops its focus to <body>.
+  check(
+    "after a refusal, focus is back in the password field",
+    (await eve.evaluate(() => document.activeElement?.id)) === "delete-password",
+  );
   await eve.getByLabel(en("account.delete.password")).fill(PASSWORD);
   await eve.getByRole("button", { name: en("account.delete.confirm") }).click();
   check(
@@ -995,17 +1032,14 @@ try {
   // owner lose the control that mints one, and every check above still passed. A server and a
   // database of its own, so no account from above exists here.
   const inviteRoot = join(root, "invite-only");
-  inviteServer = spawn("npx", ["tsx", "server/src/index.ts"], {
-    env: {
-      ...process.env,
-      PORT: "0",
-      NODE_ENV: "development",
-      ANTHROPIC_API_KEY: "",
-      ...accountsEnv(inviteRoot),
-      SIGNUP_MODE: "invite",
-      OWNER_EMAIL: emailFor("Olga"),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
+  inviteServer = startServer({
+    ...process.env,
+    PORT: "0",
+    NODE_ENV: "development",
+    ANTHROPIC_API_KEY: "",
+    ...accountsEnv(inviteRoot),
+    SIGNUP_MODE: "invite",
+    OWNER_EMAIL: emailFor("Olga"),
   });
   const inviteLog = [];
   inviteServer.stdout.on("data", (d) => inviteLog.push(String(d)));
@@ -1060,22 +1094,28 @@ try {
   // The observer reads what was INSERTED, not what is in the document when it runs: React can
   // mount the form and swap it out within one task, before an observer's callback ever sees the
   // live DOM, and a querySelector there passed with the form mounted on every load.
-  await pat.addInitScript(() => {
-    window.__sawSignInForm = false;
-    new MutationObserver((records) => {
-      for (const record of records) {
-        for (const node of record.addedNodes) {
-          if (node.nodeType !== 1) continue;
-          if (node.matches(".auth-title") || node.querySelector(".auth-title")) window.__sawSignInForm = true;
-        }
-      }
-    }).observe(document, { childList: true, subtree: true });
-  });
+  // The positive control first: the same observer, on a signed out load, has to see the form, or
+  // "never saw it" below proves nothing.
+  const control = await (await browser.newContext()).newPage();
+  await control.addInitScript(watchForSignInForm);
+  await control.goto(INVITE_BASE);
+  await control.getByLabel(en("auth.email")).waitFor();
+  check(
+    "the first render watcher sees the sign in form on a signed out load",
+    (await control.evaluate(() => window.__sawSignInForm)) === true,
+  );
+  await pat.addInitScript(watchForSignInForm);
   await pat.reload();
   await pat.getByRole("button", { name: "Start a new chat" }).waitFor();
   check(
     "a returning visitor never sees the sign in form, not even for a frame",
     (await pat.evaluate(() => window.__sawSignInForm)) === false,
+  );
+  // Nothing takes focus on its own when the start page loads: a stolen focus on "Delete account"
+  // is one Enter away from the deletion form.
+  check(
+    "the start page loads with nothing focused on its own",
+    (await pat.evaluate(() => document.activeElement?.textContent)) !== en("account.delete.open"),
   );
 
   // Deleted from somewhere else mid call: the tab has to notice on its own and go to the sign in
@@ -1097,7 +1137,7 @@ try {
     "the tab that was in a call goes to the sign in screen on its own",
     await reached(pat.getByRole("button", { name: en("auth.submit.signIn") })),
   );
-  inviteServer.kill("SIGTERM");
+  stopServer(inviteServer);
   inviteServer = null;
 
   // ---------------------------------------------------------------------
@@ -1129,8 +1169,8 @@ try {
   console.error(`\n--- server tail ---\n${serverLog.slice(-15).join("")}`);
 } finally {
   await browser?.close();
-  inviteServer?.kill("SIGTERM");
-  server.kill("SIGTERM");
+  stopServer(inviteServer);
+  stopServer(server);
   rmSync(root, { recursive: true, force: true });
 }
 

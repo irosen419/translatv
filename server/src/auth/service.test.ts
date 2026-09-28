@@ -8,9 +8,10 @@ import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openStore, type Store } from "../store/index.js";
-import { saveLockout } from "../store/loginLockouts.js";
+import { findLockout, pruneLockouts, saveLockout } from "../store/loginLockouts.js";
+import { deleteUser } from "../store/users.js";
 import { ACCESS_TTL_MS } from "./accessTokens.js";
-import { AuthService, LOCK_MS, MAX_FAILURES, REFRESH_TTL_MS, type AuthOptions } from "./service.js";
+import { AuthService, FAILURE_WINDOW_MS, LOCK_MS, MAX_FAILURES, REFRESH_TTL_MS, type AuthOptions } from "./service.js";
 
 const NOW = 1_800_000_000_000;
 // Generated, never literal. See passwords.test.ts.
@@ -287,6 +288,31 @@ describe("login", () => {
       ok: false,
       error: "LOCKED",
     });
+  });
+
+  it("refuses, rather than failing, when the account is deleted while its password is checked", async () => {
+    // DELETE /api/account from another device, landing during this login's scrypt. Issuing a
+    // session for the row that is gone broke its foreign key, and the route answered 500.
+    const auth = service();
+    const account = await signedUp(auth);
+    const inFlight = auth.login({ email: "ana@example.test", password: PASSWORD }, NOW);
+    deleteUser(store, account.user.id);
+    expect(await inFlight).toEqual({ ok: false, error: "INVALID_CREDENTIALS" });
+    expect(count("refresh_tokens")).toBe(0);
+  });
+
+  it("never prunes a lock still in force, however old its last failure", () => {
+    // A lock lasts exactly as long as the failure window today, so a prune keyed on the window
+    // alone can never reach a live lock, and the locked_until guard in pruneLockouts looks
+    // redundant. It is what keeps a longer lock alive (a natural hardening), so it is pinned here
+    // directly rather than left resting on the two constants being equal.
+    saveLockout(store, "someone", {
+      failures: 0,
+      lastFailureAt: NOW - 10 * FAILURE_WINDOW_MS,
+      lockedUntil: NOW + LOCK_MS,
+    });
+    pruneLockouts(store, NOW, FAILURE_WINDOW_MS);
+    expect(findLockout(store, "someone")?.lockedUntil).toBe(NOW + LOCK_MS);
   });
 
   it("locks an email with no account exactly as it locks a real one", async () => {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AuthSession } from "@translatv/shared";
 import {
-  MIN_REFRESH_DELAY_MS,
   REFRESH_KEY,
   REFRESH_MARGIN_MS,
   SessionManager,
@@ -304,7 +303,9 @@ describe("the scheduled refresh", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     expect(timers.length).toBeGreaterThan(1);
-    expect(timers.every((timer) => timer.ms >= MIN_REFRESH_DELAY_MS)).toBe(true);
+    // The requirement, written out rather than read from MIN_REFRESH_DELAY_MS: a test comparing
+    // the schedule to that constant stayed green with the constant set to 0, storm and all.
+    expect(timers.every((timer) => timer.ms >= 60_000)).toBe(true);
     expect(server.calls.filter((c) => c.path === "/api/auth/refresh")).toHaveLength(3);
   });
 });

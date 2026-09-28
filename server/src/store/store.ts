@@ -27,7 +27,9 @@ export interface Store {
   schemaVersion(): number;
   /**
    * Run fn inside a transaction: commit when it returns, roll back and rethrow when it throws.
-   * Nested calls become savepoints, so an inner failure undoes only the inner work.
+   * Nested calls become savepoints, so an inner failure undoes only the inner work, UNLESS SQLite
+   * itself ended the whole transaction (a full disk, an I/O error): then everything since the
+   * outer BEGIN is gone, and the outer call fails at COMMIT even if it caught the inner error.
    *
    * fn must be synchronous. An async fn would return at its first await, the transaction would
    * commit, and the rest of its writes would land outside it: exactly the partial write a
@@ -39,6 +41,22 @@ export interface Store {
 
 const MEMORY = ":memory:";
 
+/**
+ * Refuse a node:sqlite with no DatabaseSync#isTransaction, which first shipped in Node 22.16.
+ * transaction() reads it to decide whether a rollback is needed; where it is undefined, every
+ * callback that throws leaves its transaction open, each later call fails "cannot start a
+ * transaction within a transaction", and the writes inside never commit. package.json's engines
+ * floor says 22.16, but npm only warns about engines, so this is where it is enforced.
+ */
+export function assertSupportedSqlite(db: { isTransaction?: unknown }): void {
+  if (typeof db.isTransaction !== "boolean") {
+    throw new Error(
+      `this Node's node:sqlite has no DatabaseSync#isTransaction: the store needs Node 22.16 or ` +
+        `newer, and this is ${process.version}`,
+    );
+  }
+}
+
 export function openStore(options: StoreOptions): Store {
   const { path } = options;
   const migrations = options.migrations ?? MIGRATIONS;
@@ -47,6 +65,7 @@ export function openStore(options: StoreOptions): Store {
   const db = new DatabaseSync(path);
 
   try {
+    assertSupportedSqlite(db);
     // SQLite itself leaves foreign keys off, per connection, and silently: a REFERENCES clause is
     // decoration until they are on, and every ON DELETE in migrations.ts with it. node:sqlite's
     // DatabaseSync happens to turn them on by default (enableForeignKeyConstraints); set here

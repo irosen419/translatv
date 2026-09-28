@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { hashPassword, MIN_PASSWORD_LENGTH, passwordIsAcceptable, verifyPassword } from "./passwords.js";
+import { dummyHash, hashPassword, MIN_PASSWORD_LENGTH, passwordIsAcceptable, verifyPassword } from "./passwords.js";
 
 // Generated, never written down: a password shaped literal reads as a committed credential to a
 // scanner and to a person skimming the file.
@@ -38,6 +38,21 @@ describe("password hashing", () => {
     // A stored value is trusted input in principle, but a corrupted or hostile row must not be
     // able to make one login allocate gigabytes.
     expect(await verifyPassword(PASSWORD, "scrypt$N=1073741824,r=8,p=1$AAAA$AAAA")).toBe(false);
+  });
+});
+
+describe("the dummy hash a login for a missing account verifies against", () => {
+  // What makes "no such account" cost the same as "wrong password" (service.ts, login). The timing
+  // test there catches a dummy that costs nothing; these catch the subtler ones, which it cannot:
+  // a dummy rebuilt per call (two scrypts, double the time) or made with cheaper parameters (half
+  // the time) both leave "no account" measurably different, and both passed a quarter margin.
+  it("is made once and then reused, so a missing account pays one scrypt, not two", () => {
+    expect(dummyHash()).toBe(dummyHash());
+  });
+
+  it("uses exactly the parameters a real password is hashed with today", async () => {
+    const params = (stored: string) => stored.split("$").slice(0, 2).join("$");
+    expect(params(await dummyHash())).toBe(params(await hashPassword(PASSWORD)));
   });
 });
 

@@ -185,3 +185,26 @@ jobs:
           docker logs vt-volumes
           docker rm -f vt-volumes
           exit 1
+
+      - name: The server starts in production on bind mounts owned the way DEPLOY.md says
+        run: |
+          # The step above proves the guards let a mounted deploy through, on named volumes.
+          # docker-compose.yml bind mounts the checkout's ./out and ./data instead, and those get
+          # their owner from the host: this runner is not uid 1000, which is exactly the host
+          # DEPLOY.md section 5 has a chown for. So: the checkout's own out/ and data/ (data/ is in
+          # the repository for this), chowned as documented, bind mounted as compose mounts them.
+          mkdir -p bind
+          cp -r out data bind/
+          sudo chown -R 1000:1000 bind/out bind/data
+          docker run -d --name vt-bind -p 8080:8080 -e ORIGIN=http://localhost:8080 \
+            -e AUTH_SECRET="$(openssl rand -hex 32)" \
+            -v "$PWD/bind/out:/app/out" -v "$PWD/bind/data:/app/data" \
+            translatv:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/healthz; then echo; docker rm -f vt-bind; exit 0; fi
+            sleep 1
+          done
+          echo "the container never answered /healthz on bind mounts owned as DEPLOY.md says"
+          docker logs vt-bind
+          docker rm -f vt-bind
+          exit 1
