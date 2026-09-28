@@ -47,8 +47,10 @@ export function openStore(options: StoreOptions): Store {
   const db = new DatabaseSync(path);
 
   try {
-    // Off by default in SQLite, per connection, and silently: a REFERENCES clause is decoration
-    // until this is on.
+    // SQLite itself leaves foreign keys off, per connection, and silently: a REFERENCES clause is
+    // decoration until they are on, and every ON DELETE in migrations.ts with it. node:sqlite's
+    // DatabaseSync happens to turn them on by default (enableForeignKeyConstraints); set here
+    // anyway, so the account deletion cascade does not rest on a library default.
     db.exec("PRAGMA foreign_keys = ON");
     if (path !== MEMORY) {
       // WAL lets reads proceed during a write, and survives a crash mid write as well as the
