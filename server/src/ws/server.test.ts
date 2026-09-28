@@ -16,6 +16,7 @@ import { CLOSE, WS_PATH, type ServerMessage } from "@translatv/shared";
 import { GRACE_MS } from "../rooms/RoomManager.js";
 import type { Config } from "../config.js";
 import { roomHash, SpendGate } from "../spend/caps.js";
+import { load } from "../spend/ledger.js";
 import { MAX_CONNECTIONS_PER_IP } from "../security/rateLimit.js";
 import { TranslationService, type LlmClient } from "../translate/TranslationService.js";
 import { accessKey, ACCESS_TTL_MS, mintAccessToken, verifyAccessToken } from "../auth/accessTokens.js";
@@ -39,6 +40,7 @@ function config(): Config {
     ownerEmail: null,
     dailyCapUsd: 10,
     roomCapUsd: 1.5,
+    userDailyCapUsd: 1,
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     isProduction: false,
     trustProxy: false,
@@ -177,7 +179,7 @@ beforeEach(async () => {
   writeFileSync(join(root, "out", "translatv", "spend_log.jsonl"), "", "utf8");
 
   const cfg = config();
-  const gate = new SpendGate(root, { dailyCapUsd: cfg.dailyCapUsd, roomCapUsd: cfg.roomCapUsd });
+  const gate = new SpendGate(root, { dailyCapUsd: cfg.dailyCapUsd, roomCapUsd: cfg.roomCapUsd, userDailyCapUsd: cfg.userDailyCapUsd });
   const translation = new TranslationService(echoClient, gate, root);
 
   server = createServer();
@@ -635,7 +637,7 @@ describe("lines that need no translation", () => {
     // Otherwise a monolingual room on a keyless server reports a failure for lines it was never
     // going to translate, and the client latches translation off over it.
     const keyless = createServer();
-    const gate = new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5 });
+    const gate = new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5, userDailyCapUsd: 1 });
     const offline = new SignalingServer(
       keyless,
       config(),
@@ -1162,7 +1164,7 @@ describe("an async handler that rejects", () => {
     process.on("unhandledRejection", onRejection);
 
     const broken = createServer();
-    const gate = new SpendGate(brokenRoot, { dailyCapUsd: 10, roomCapUsd: 1.5 });
+    const gate = new SpendGate(brokenRoot, { dailyCapUsd: 10, roomCapUsd: 1.5, userDailyCapUsd: 1 });
     const service = new TranslationService(echoClient, gate, brokenRoot);
     const brokenSignaling = new SignalingServer(broken, config(), service, verifier);
     await new Promise<void>((resolve) => broken.listen(0, "127.0.0.1", resolve));
@@ -1299,7 +1301,7 @@ describe("accounts on the socket", () => {
     mkdirSync(join(ownRoot, "out", "translatv"), { recursive: true });
     writeFileSync(join(ownRoot, "out", "translatv", "spend_log.jsonl"), "", "utf8");
     const cfg = { ...config(), repoRoot: ownRoot, ...overrides };
-    const gate = new SpendGate(ownRoot, { dailyCapUsd: cfg.dailyCapUsd, roomCapUsd: cfg.roomCapUsd });
+    const gate = new SpendGate(ownRoot, { dailyCapUsd: cfg.dailyCapUsd, roomCapUsd: cfg.roomCapUsd, userDailyCapUsd: cfg.userDailyCapUsd });
     ownServer = createServer();
     ownSignaling = new SignalingServer(ownServer, cfg, new TranslationService(echoClient, gate, ownRoot), verifier);
     await new Promise<void>((resolve) => ownServer.listen(0, "127.0.0.1", resolve));
@@ -1537,5 +1539,87 @@ describe("accounts on the socket", () => {
       expect((await other.next("room.created")).t).toBe("room.created");
       other.close();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Who pays (docs/PLAN.md, D9 and D10). Translation spend is attributed to the room's HOST, the
+// account that created it, whichever of the two people is speaking. The ledger row says so, and
+// the per user cap charges that same account.
+
+describe("spend attribution", () => {
+  const HOST = "hostAccount00000000000A";
+  const GUEST = "guestAccount0000000000B";
+
+  async function hostedPair() {
+    const host = await Client.connect(ORIGIN, { user: HOST });
+    const created = await createRoom(host, "Ana", "en-US");
+    const guest = await Client.connect(ORIGIN, { user: GUEST });
+    guest.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
+    await guest.next("room.joined");
+    await host.next("peer.joined");
+    return { host, guest, code: created.code };
+  }
+
+  it("books the line to the HOST even when the guest spoke it", async () => {
+    const { host, guest } = await hostedPair();
+
+    guest.send({ t: "stt.final", text: "hola, como andas", seq: 1 });
+    await host.next("translation.result");
+
+    const records = load({ root });
+    expect(records).toHaveLength(1);
+    expect(records[0]?.user_id).toBe(HOST);
+    // Not the speaker, under any field. The guest's account is not a payer here, and the ledger
+    // is a committed file: naming an account it has no reason to name is a leak, not detail.
+    expect(JSON.stringify(records)).not.toContain(GUEST);
+
+    host.close();
+    guest.close();
+  });
+
+  it("books the host's own lines to the host too", async () => {
+    const { host, guest } = await hostedPair();
+
+    host.send({ t: "stt.final", text: "do you have time tomorrow", seq: 1 });
+    await guest.next("translation.result");
+
+    expect(load({ root }).map((r) => r.user_id)).toEqual([HOST]);
+
+    host.close();
+    guest.close();
+  });
+
+  it("refuses with USER_CAP when the host's day is spent, though the guest has spent nothing", async () => {
+    const { host, guest } = await hostedPair();
+
+    // Today, another room, well under the global cap (10) and nowhere near this room's (1.5).
+    // Only the host's own daily allowance (1) is gone.
+    writeFileSync(
+      join(root, "out", "translatv", "spend_log.jsonl"),
+      `${JSON.stringify({
+        ts: new Date().toISOString(),
+        project: "translatv",
+        program: "runtime-translation",
+        model: "claude-haiku-4-5",
+        room: roomHash("ELSEWHERE"),
+        user_id: HOST,
+        cost_usd: 1,
+        cost_source: "logged",
+      })}\n`,
+      "utf8",
+    );
+    const before = echoClient.calls;
+
+    guest.send({ t: "stt.final", text: "hola, como andas", seq: 1 });
+    const failed = await host.next("translation.failed");
+
+    expect(failed.reason).toBe("USER_CAP");
+    expect(failed.status).toBe("budget_exceeded");
+    expect(failed.retriable).toBe(false);
+    expect(echoClient.calls).toBe(before);
+
+    host.close();
+    guest.close();
   });
 });

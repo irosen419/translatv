@@ -204,6 +204,7 @@
   "failure.TOO_FAST": "Translating too fast, catching up.",
   "failure.DAILY_CAP": "Today's translation budget is spent, so nothing more is being translated.",
   "failure.ROOM_CAP": "This chat has used up its translation budget, so nothing more is being translated.",
+  "failure.USER_CAP": "The person hosting this chat has used up their translation budget for today, so nothing more is being translated.",
   "failure.LEDGER_UNREADABLE": "The spend record cannot be read, so this server refuses to translate rather than spend untracked.",
   "failure.LEDGER_UNWRITABLE": "The spend record cannot be written, so this server stopped translating rather than spend untracked.",
   "failure.UNRESOLVED_DIALECT": "A language in this call is not one this server recognizes. Pick your language again from the list.",

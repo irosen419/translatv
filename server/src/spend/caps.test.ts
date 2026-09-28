@@ -11,8 +11,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PROGRAMS, roomHash, SpendGate } from "./caps.js";
 import { append, entry } from "./ledger.js";
 
-const CONFIG = { dailyCapUsd: 1.0, roomCapUsd: 0.5 };
+const CONFIG = { dailyCapUsd: 1.0, roomCapUsd: 0.5, userDailyCapUsd: 0.3 };
 const ROOM = roomHash("TESTROOM");
+// Opaque account ids, the shape store/users.ts mints (16 random bytes, base64url). Never an email.
+const HOST = "hostAccount00000000000A";
+const OTHER_HOST = "hostAccount00000000000B";
 
 describe("SpendGate", () => {
   let root: string;
@@ -30,7 +33,13 @@ describe("SpendGate", () => {
     writeFileSync(join(root, "out", project, "spend_log.jsonl"), "", "utf8");
   }
 
-  function spend(dollars: number, room: string | null, project = "gate", ts?: string): void {
+  function spend(
+    dollars: number,
+    room: string | null,
+    project = "gate",
+    ts?: string,
+    userId: string | null = null,
+  ): void {
     append(
       {
         ...entry({
@@ -38,6 +47,7 @@ describe("SpendGate", () => {
           kind: "translation",
           model: "claude-haiku-4-5",
           room,
+          userId,
           project,
           capUsd: CONFIG.roomCapUsd,
           ...(ts ? { ts } : {}),
@@ -55,7 +65,7 @@ describe("SpendGate", () => {
     // The most important case. Spending against a cap that cannot be read is exactly the
     // failure the cap exists to prevent, so an unreadable ledger is a refusal, not a pass.
     const gate = new SpendGate(root, CONFIG, "never-created");
-    const decision = gate.check(ROOM);
+    const decision = gate.check(ROOM, null);
     expect(decision.allowed).toBe(false);
     if (!decision.allowed) {
       expect(decision.reason).toBe("ledger_unreadable");
@@ -66,7 +76,7 @@ describe("SpendGate", () => {
   it("allows a call against an empty ledger", () => {
     seedEmptyLedger();
     const gate = new SpendGate(root, CONFIG, "gate");
-    expect(gate.check(ROOM).allowed).toBe(true);
+    expect(gate.check(ROOM, null).allowed).toBe(true);
   });
 
   it("blocks once the room cap is reached", () => {
@@ -75,7 +85,7 @@ describe("SpendGate", () => {
     spend(0.5, ROOM);
     gate.invalidate();
 
-    const decision = gate.check(ROOM);
+    const decision = gate.check(ROOM, null);
     expect(decision.allowed).toBe(false);
     if (!decision.allowed) expect(decision.reason).toBe("room_cap");
   });
@@ -85,7 +95,7 @@ describe("SpendGate", () => {
     const gate = new SpendGate(root, CONFIG, "gate");
     spend(0.5, ROOM);
     gate.invalidate();
-    expect(gate.check(roomHash("OTHERROOM")).allowed).toBe(true);
+    expect(gate.check(roomHash("OTHERROOM"), null).allowed).toBe(true);
   });
 
   it("blocks every room once the daily cap is reached", () => {
@@ -97,7 +107,7 @@ describe("SpendGate", () => {
     spend(0.4, roomHash("C"));
     gate.invalidate();
 
-    const decision = gate.check(roomHash("D"));
+    const decision = gate.check(roomHash("D"), null);
     expect(decision.allowed).toBe(false);
     if (!decision.allowed) expect(decision.reason).toBe("daily_cap");
   });
@@ -108,7 +118,7 @@ describe("SpendGate", () => {
     spend(0.9, roomHash("A"), "gate", "2020-01-01T00:00:00.000Z");
     gate.invalidate();
     // Yesterday's spend is real money but it is not today's, so the daily gate must not fire.
-    expect(gate.check(roomHash("B")).allowed).toBe(true);
+    expect(gate.check(roomHash("B"), null).allowed).toBe(true);
   });
 
   it("does not count an undated record toward any day", () => {
@@ -132,7 +142,7 @@ describe("SpendGate", () => {
       root,
     );
     gate.invalidate();
-    expect(gate.check(roomHash("B")).allowed).toBe(true);
+    expect(gate.check(roomHash("B"), null).allowed).toBe(true);
   });
 
   it("survives a restart, because it reads the ledger and not a counter", () => {
@@ -144,7 +154,7 @@ describe("SpendGate", () => {
     spend(0.4, roomHash("C"));
 
     const afterRestart = new SpendGate(root, CONFIG, "gate");
-    const decision = afterRestart.check(roomHash("D"));
+    const decision = afterRestart.check(roomHash("D"), null);
     expect(decision.allowed).toBe(false);
     if (!decision.allowed) expect(decision.reason).toBe("daily_cap");
   });
@@ -153,11 +163,184 @@ describe("SpendGate", () => {
     // The nightly eval writes to the same ledger while the server runs.
     seedEmptyLedger();
     const gate = new SpendGate(root, CONFIG, "gate");
-    expect(gate.check(ROOM).allowed).toBe(true);
+    expect(gate.check(ROOM, null).allowed).toBe(true);
 
     spend(0.6, ROOM);
     gate.invalidate();
-    expect(gate.check(ROOM).allowed).toBe(false);
+    expect(gate.check(ROOM, null).allowed).toBe(false);
+  });
+
+  describe("the per user daily cap", () => {
+    it("REFUSES once this user's day is spent, although the global and room caps have room", () => {
+      // Spread across rooms so no room cap is anywhere near, and well under the global cap.
+      seedEmptyLedger();
+      const gate = new SpendGate(root, CONFIG, "gate");
+      spend(0.15, roomHash("A"), "gate", undefined, HOST);
+      spend(0.15, roomHash("B"), "gate", undefined, HOST);
+      gate.invalidate();
+
+      const decision = gate.check(roomHash("C"), HOST);
+      expect(decision.allowed).toBe(false);
+      if (!decision.allowed) {
+        expect(decision.reason).toBe("user_cap");
+        expect(decision.userSpentUsd).toBeCloseTo(0.3, 9);
+        expect(decision.dailySpentUsd).toBeCloseTo(0.3, 9);
+        expect(decision.roomSpentUsd).toBe(0);
+      }
+    });
+
+    it("does not let one user's spend block a different user", () => {
+      seedEmptyLedger();
+      const gate = new SpendGate(root, CONFIG, "gate");
+      spend(0.3, roomHash("A"), "gate", undefined, HOST);
+      gate.invalidate();
+      const decision = gate.check(roomHash("B"), OTHER_HOST);
+      expect(decision.allowed).toBe(true);
+      if (decision.allowed) expect(decision.userSpentUsd).toBe(0);
+    });
+
+    it("counts only this user's spend from TODAY", () => {
+      // MORE than the whole user cap, on another day, so the day filter is the only thing that
+      // can allow this. At $0.29 against the $0.30 cap it passed with the filter deleted, and a
+      // host whose lifetime spend passed the cap would have been refused forever.
+      seedEmptyLedger();
+      const gate = new SpendGate(root, CONFIG, "gate");
+      // Derived from CONFIG, so raising the user cap cannot quietly make this unable to fail again.
+      spend(2 * CONFIG.userDailyCapUsd, roomHash("A"), "gate", "2020-01-01T00:00:00.000Z", HOST);
+      gate.invalidate();
+      expect(gate.check(roomHash("B"), HOST).allowed).toBe(true);
+    });
+
+    it("does not count an undated row toward a user's day", () => {
+      // The daily cap's rule, held for the user cap too: an unreadable ts is no day at all, and
+      // calling it today would refuse a host over spend nobody can place.
+      seedEmptyLedger();
+      const gate = new SpendGate(root, CONFIG, "gate");
+      append(
+        {
+          ...entry({
+            program: PROGRAMS.runtimeTranslation,
+            kind: "translation",
+            model: "claude-haiku-4-5",
+            room: roomHash("A"),
+            userId: HOST,
+            project: "gate",
+            ts: null,
+          }),
+          cost_usd: 2 * CONFIG.userDailyCapUsd,
+          cost_source: "logged" as const,
+        },
+        root,
+      );
+      gate.invalidate();
+      expect(gate.check(roomHash("B"), HOST).allowed).toBe(true);
+    });
+
+    it("names the FIRST cap that refuses, in the order global, room, user", () => {
+      // The reason picks the sentence the room reads (DAILY_CAP, ROOM_CAP or USER_CAP), so when
+      // several caps are past at once, which one is named is visible, not an implementation detail.
+      seedEmptyLedger();
+      const gate = new SpendGate(root, CONFIG, "gate");
+      // Past the room cap AND the user cap, still under the day. Derived from CONFIG, and the
+      // precondition checked, so a CONFIG change cannot quietly turn this into a different test.
+      const roomAndUser = Math.max(CONFIG.roomCapUsd, CONFIG.userDailyCapUsd) + 0.01;
+      expect(roomAndUser).toBeLessThan(CONFIG.dailyCapUsd);
+      spend(roomAndUser, ROOM, "gate", undefined, HOST);
+      gate.invalidate();
+      const both = gate.check(ROOM, HOST);
+      expect(both.allowed).toBe(false);
+      if (!both.allowed) expect(both.reason).toBe("room_cap");
+
+      spend(CONFIG.dailyCapUsd, roomHash("B"), "gate", undefined, HOST); // and now the day too
+      gate.invalidate();
+      const all = gate.check(ROOM, HOST);
+      expect(all.allowed).toBe(false);
+      if (!all.allowed) expect(all.reason).toBe("daily_cap");
+    });
+
+    it("never counts an unattributed row toward any user", () => {
+      // Rows written before user_id existed carry no key at all. They are real spend and still
+      // count toward the global and room caps, but attributing them to whoever asks next would
+      // charge a user for money somebody else spent.
+      seedEmptyLedger();
+      const gate = new SpendGate(root, CONFIG, "gate");
+      spend(0.29, roomHash("A"), "gate", undefined, null);
+      spend(0.29, roomHash("B"), "gate", undefined, null);
+      gate.invalidate();
+      const decision = gate.check(roomHash("C"), HOST);
+      expect(decision.allowed).toBe(true);
+      if (decision.allowed) {
+        expect(decision.userSpentUsd).toBe(0);
+        expect(decision.dailySpentUsd).toBeCloseTo(0.58, 9);
+      }
+    });
+
+    it("never allows what the GLOBAL daily cap refuses, however little the user has spent", () => {
+      seedEmptyLedger();
+      const gate = new SpendGate(root, CONFIG, "gate");
+      spend(0.4, roomHash("A"), "gate", undefined, OTHER_HOST);
+      spend(0.4, roomHash("B"), "gate", undefined, null);
+      spend(0.4, roomHash("C"), "gate", undefined, null);
+      gate.invalidate();
+
+      const decision = gate.check(roomHash("D"), HOST);
+      expect(decision.allowed).toBe(false);
+      if (!decision.allowed) expect(decision.reason).toBe("daily_cap");
+    });
+
+    it("never allows what the ROOM cap refuses, however little the user has spent", () => {
+      // A generous user cap must not loosen a tight room cap: all three have to pass.
+      seedEmptyLedger();
+      const loose = new SpendGate(root, { ...CONFIG, userDailyCapUsd: 100 }, "gate");
+      spend(0.5, ROOM, "gate", undefined, null);
+      loose.invalidate();
+
+      const decision = loose.check(ROOM, HOST);
+      expect(decision.allowed).toBe(false);
+      if (!decision.allowed) expect(decision.reason).toBe("room_cap");
+    });
+
+    it("never allows what the global cap refuses even with a user cap far above it", () => {
+      seedEmptyLedger();
+      const loose = new SpendGate(root, { ...CONFIG, userDailyCapUsd: 100 }, "gate");
+      spend(0.45, roomHash("A"), "gate", undefined, HOST);
+      spend(0.45, roomHash("B"), "gate", undefined, HOST);
+      spend(0.45, roomHash("C"), "gate", undefined, HOST);
+      loose.invalidate();
+
+      const decision = loose.check(roomHash("D"), HOST);
+      expect(decision.allowed).toBe(false);
+      if (!decision.allowed) expect(decision.reason).toBe("daily_cap");
+    });
+
+    it("still REFUSES a missing ledger when a user is named", () => {
+      const gate = new SpendGate(root, CONFIG, "never-created");
+      const decision = gate.check(ROOM, HOST);
+      expect(decision.allowed).toBe(false);
+      if (!decision.allowed) {
+        expect(decision.reason).toBe("ledger_unreadable");
+        expect(decision.userSpentUsd).toBeNull();
+      }
+    });
+
+    it("applies the global and room caps, and no user cap, to an unattributed call", () => {
+      // Verification and eval spend belongs to no account. Leaving the user cap out for them is
+      // not a loophole: the other two caps still bind, and they are the ones that bound every
+      // call before this cap existed.
+      seedEmptyLedger();
+      const gate = new SpendGate(root, CONFIG, "gate");
+      spend(0.3, roomHash("A"), "gate", undefined, HOST);
+      gate.invalidate();
+      const decision = gate.check(roomHash("B"), null);
+      expect(decision.allowed).toBe(true);
+      if (decision.allowed) expect(decision.userSpentUsd).toBeNull();
+
+      spend(0.5, roomHash("B"), "gate", undefined, null);
+      gate.invalidate();
+      const refused = gate.check(roomHash("B"), null);
+      expect(refused.allowed).toBe(false);
+      if (!refused.allowed) expect(refused.reason).toBe("room_cap");
+    });
   });
 
   it("reports the caps in force per program", () => {

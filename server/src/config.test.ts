@@ -212,3 +212,45 @@ describe("accounts configuration", () => {
     expect("adminPassword" in loadConfig(root)).toBe(false);
   });
 });
+
+describe("spend caps", () => {
+  const CAP_VARS = ["ANTHROPIC_DAILY_CAP_USD", "ROOM_CAP_USD", "USER_DAILY_CAP_USD"] as const;
+  let savedCaps: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    savedCaps = {};
+    for (const name of CAP_VARS) {
+      savedCaps[name] = process.env[name];
+      delete process.env[name];
+    }
+  });
+
+  afterEach(() => {
+    for (const name of CAP_VARS) {
+      if (savedCaps[name] === undefined) delete process.env[name];
+      else process.env[name] = savedCaps[name];
+    }
+  });
+
+  it("defaults the per user daily cap to one dollar (docs/PLAN.md, D10)", () => {
+    const config = loadConfig(root);
+    expect(config.userDailyCapUsd).toBe(1.0);
+    expect(config.dailyCapUsd).toBe(10);
+    expect(config.roomCapUsd).toBe(1.5);
+  });
+
+  it("reads USER_DAILY_CAP_USD", () => {
+    process.env["USER_DAILY_CAP_USD"] = "0.25";
+    expect(loadConfig(root).userDailyCapUsd).toBe(0.25);
+  });
+
+  it("refuses a USER_DAILY_CAP_USD that is not a number rather than running uncapped", () => {
+    process.env["USER_DAILY_CAP_USD"] = "one dollar";
+    expect(() => loadConfig(root)).toThrow(/USER_DAILY_CAP_USD must be a number/);
+  });
+
+  it("names the per user cap in the boot report", () => {
+    const config = { ...loadConfig(root), anthropicApiKey: "set" };
+    expect(describeConfig(config).join("\n")).toContain("$1.00/user/day");
+  });
+});

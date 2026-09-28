@@ -48,14 +48,26 @@ const FIXTURE_ROOT = join(HERE, "..", "..", "..", "test_fixtures", "ledger_root"
 const FIXTURE_PROJECT = "fixture-project";
 
 // The shared contract. Mirrored in test_spend_log.py.
-const EXPECTED_KNOWN_USD = 0.0033;
-const EXPECTED_UNPARSED_ROWS = 2;
-const EXPECTED_ENTRIES = 5;
-const EXPECTED_INPUT_TOKENS = 3320;
-const EXPECTED_OUTPUT_TOKENS = 148;
+const EXPECTED_KNOWN_USD = 0.0059;
+const EXPECTED_UNPARSED_ROWS = 3;
+const EXPECTED_ENTRIES = 10;
+const EXPECTED_INPUT_TOKENS = 5820;
+const EXPECTED_OUTPUT_TOKENS = 238;
 const EXPECTED_MALFORMED_LINES = 2;
-const EXPECTED_TRANSLATION_SPENT = 0.00205;
+const EXPECTED_HEADERS = 2;
+const EXPECTED_TRANSLATION_SPENT = 0.00395;
 const EXPECTED_EVAL_SPENT = 0.00125;
+const EXPECTED_TERM_EXTRACTION_SPENT = 0.00045;
+const EXPECTED_VERIFICATION_SPENT = 0.00025;
+// Per account (D10). The fixture's first five records predate user_id and carry no key; the
+// verification row carries an explicit null. All six are unattributed.
+const HOST_A = "fixtureHostA0000000000";
+const HOST_B = "fixtureHostB0000000000";
+const EXPECTED_USERS = {
+  [HOST_A]: { spent_usd: 0.0019, unparsed_rows: 0, entries: 2 },
+  [HOST_B]: { spent_usd: 0.00045, unparsed_rows: 1, entries: 2 },
+};
+const EXPECTED_UNATTRIBUTED = { spent_usd: 0.00355, unparsed_rows: 2, entries: 6 };
 
 function fixture(): SpendRecord[] {
   return load({ root: FIXTURE_ROOT, project: FIXTURE_PROJECT });
@@ -75,7 +87,7 @@ describe("load", () => {
 
   it("offers the header separately", () => {
     const headers = loadHeaders({ root: FIXTURE_ROOT, project: FIXTURE_PROJECT });
-    expect(headers).toHaveLength(1);
+    expect(headers).toHaveLength(EXPECTED_HEADERS);
     expect(headers[0]?.project).toBe(FIXTURE_PROJECT);
   });
 
@@ -118,32 +130,166 @@ describe("totals", () => {
     // rows now: the unpriced model (cost_usd is an explicit null) and the row that omits the
     // key entirely. Absent and null have to count the same, in both readers.
     const summary = totals(fixture());
-    expect(summary.unparsed_rows).toBe(2);
+    expect(summary.unparsed_rows).toBe(EXPECTED_UNPARSED_ROWS);
     expect(summary.known_usd).toBeCloseTo(EXPECTED_KNOWN_USD, 9);
   });
 
   it("buckets programs separately", () => {
     const { programs } = totals(fixture());
-    expect(Object.keys(programs).sort()).toEqual(["autopilot-eval", "runtime-translation"]);
+    expect(Object.keys(programs).sort()).toEqual([
+      "autopilot-eval",
+      "runtime-term-extraction",
+      "runtime-translation",
+      "verification",
+    ]);
     expect(programs["runtime-translation"]?.spent_usd).toBeCloseTo(EXPECTED_TRANSLATION_SPENT, 9);
     expect(programs["autopilot-eval"]?.spent_usd).toBeCloseTo(EXPECTED_EVAL_SPENT, 9);
+    expect(programs["runtime-term-extraction"]?.spent_usd).toBeCloseTo(
+      EXPECTED_TERM_EXTRACTION_SPENT,
+      9,
+    );
+    expect(programs["verification"]?.spent_usd).toBeCloseTo(EXPECTED_VERIFICATION_SPENT, 9);
   });
 
   it("counts an unparsed row toward its program's entry count", () => {
     // The call still happened and still belongs to its program even though its money is
     // unknown. Dropping it from the count would hide it entirely.
     const { programs } = totals(fixture());
-    expect(programs["runtime-translation"]?.entries).toBe(4);
+    expect(programs["runtime-translation"]?.entries).toBe(7);
     expect(programs["autopilot-eval"]?.entries).toBe(1);
   });
 
   it("leaves a known cap standing when a later row omits the key entirely", () => {
-    // The absent key case against the fixture rather than a literal. The last runtime row has
+    // The absent key case against the fixture. The last runtime row BEFORE the per user rows has
     // no cap_usd at all, and both readers have to keep the 1.5 the earlier rows carried rather
-    // than clearing it or throwing on undefined.
+    // than clearing it or throwing on undefined. The per user rows after it restate 1.5, so the
+    // literal below is what still isolates the absent key.
     const { programs } = totals(fixture());
     expect(programs["runtime-translation"]?.cap_usd).toBe(1.5);
     expect(programs["autopilot-eval"]?.cap_usd).toBe(10);
+  });
+
+  it("leaves a known cap standing when the LAST row omits the key entirely", () => {
+    const records = [
+      { program: "p", cost_usd: 1, cap_usd: 5 },
+      { program: "p", cost_usd: 1 },
+    ] as unknown as SpendRecord[];
+    expect(totals(records).programs["p"]?.cap_usd).toBe(5);
+  });
+
+  it("totals per account, keyed by the opaque user_id, matching the Python reader", () => {
+    const { users } = totals(fixture());
+    expect(Object.keys(users).sort()).toEqual([HOST_A, HOST_B]);
+    for (const [id, expected] of Object.entries(EXPECTED_USERS)) {
+      expect(users[id]?.spent_usd).toBeCloseTo(expected.spent_usd, 9);
+      expect(users[id]?.unparsed_rows).toBe(expected.unparsed_rows);
+      expect(users[id]?.entries).toBe(expected.entries);
+    }
+  });
+
+  it("groups rows with no user_id, absent or null, as unattributed rather than dropping them", () => {
+    // Rows from before the field existed are real spend. They must still total, and they must
+    // not be charged to any account.
+    const { unattributed } = totals(fixture());
+    expect(unattributed.spent_usd).toBeCloseTo(EXPECTED_UNATTRIBUTED.spent_usd, 9);
+    expect(unattributed.unparsed_rows).toBe(EXPECTED_UNATTRIBUTED.unparsed_rows);
+    expect(unattributed.entries).toBe(EXPECTED_UNATTRIBUTED.entries);
+  });
+
+  it("adds the per account buckets and the unattributed one back up to the whole", () => {
+    const summary = totals(fixture());
+    const buckets = [...Object.values(summary.users), summary.unattributed];
+    expect(roundMoney(buckets.reduce((t, b) => t + b.spent_usd, 0))).toBeCloseTo(
+      summary.known_usd,
+      9,
+    );
+    expect(buckets.reduce((t, b) => t + b.entries, 0)).toBe(summary.entries);
+    expect(buckets.reduce((t, b) => t + b.unparsed_rows, 0)).toBe(summary.unparsed_rows);
+  });
+
+  it("totals the pre user_id rows exactly as it did before the field existed", () => {
+    // The first five records are the fixture as it stood before D10. Their figures are the old
+    // shared contract, unchanged: adding a field must not move a total computed without it.
+    const before = totals(fixture().slice(0, 5));
+    expect(before.known_usd).toBeCloseTo(0.0033, 9);
+    expect(before.unparsed_rows).toBe(2);
+    expect(before.entries).toBe(5);
+    expect(before.users).toEqual({});
+    expect(before.unattributed.entries).toBe(5);
+  });
+
+  it("totals a user_id or program that is a name every plain object already has", () => {
+    // Both buckets are keyed by strings read from the ledger. In a plain {} a user_id of
+    // "constructor" found Object itself, and the next line wrote a string over Object.entries,
+    // which took the server down at the next view flush; "__proto__", "toString" and the rest
+    // dropped their row's money from every bucket, so the buckets no longer added up.
+    const names = ["__proto__", "constructor", "toString", "valueOf", "hasOwnProperty"];
+    const summary = totals(
+      names.map((name) => ({ program: name, cost_usd: 0.25, user_id: name })) as unknown as SpendRecord[],
+    );
+    expect(typeof Object.entries).toBe("function");
+    expect(Object.keys(summary.users).sort()).toEqual([...names].sort());
+    expect(Object.keys(summary.programs).sort()).toEqual([...names].sort());
+    for (const name of names) {
+      expect(summary.users[name]).toEqual({ spent_usd: 0.25, unparsed_rows: 0, entries: 1 });
+      expect(summary.programs[name]?.spent_usd).toBe(0.25);
+    }
+    expect(summary.unattributed.entries).toBe(0);
+  });
+
+  it("rounds each account's total to 6 decimals, exactly", () => {
+    // Exact, not toBeCloseTo: 0.1 + 0.2 is 0.30000000000000004 unrounded, which a 9 place
+    // comparison accepts, so every per user assertion above passed with the rounding deleted.
+    const summary = totals([
+      { program: "p", cost_usd: 0.1, user_id: "someAccount" },
+      { program: "p", cost_usd: 0.2, user_id: "someAccount" },
+      { program: "p", cost_usd: 0.1 },
+      { program: "p", cost_usd: 0.2 },
+    ] as unknown as SpendRecord[]);
+    expect(summary.users["someAccount"]?.spent_usd).toBe(0.3);
+    expect(summary.unattributed.spent_usd).toBe(0.3);
+  });
+
+  it("counts an attributed row with no program toward its account, and still adds up", () => {
+    // The account is read BEFORE the no program skip: a row's account is a separate fact from
+    // its program. Every fixture row has a program, so moving the skip first went unnoticed.
+    const summary = totals([
+      { cost_usd: 0.25, user_id: "someAccount" },
+      { program: "p", cost_usd: 0.5, user_id: "someAccount" },
+    ] as unknown as SpendRecord[]);
+    expect(summary.users["someAccount"]).toEqual({ spent_usd: 0.75, unparsed_rows: 0, entries: 2 });
+    expect(summary.programs["p"]?.spent_usd).toBe(0.5);
+    expect(summary.known_usd).toBe(0.75);
+  });
+
+  it("rounds each program's total to 6 decimals, exactly", () => {
+    const summary = totals([
+      { program: "p", cost_usd: 0.1 },
+      { program: "p", cost_usd: 0.2 },
+    ] as unknown as SpendRecord[]);
+    expect(summary.programs["p"]?.spent_usd).toBe(0.3);
+  });
+
+  it("reads a program that is not a non empty string as no program, the way the Python reader does", () => {
+    // A hand edited row can hold anything. Its money still counts, toward the total and its
+    // account; it just has no program bucket, rather than one named "5" or "a,b".
+    const summary = totals(
+      [5, true, ["a", "b"], { x: 1 }, ""].map((program) => ({ program, cost_usd: 0.25, user_id: "someAccount" })) as unknown as SpendRecord[],
+    );
+    expect(Object.keys(summary.programs)).toEqual([]);
+    expect(summary.known_usd).toBe(1.25);
+    expect(summary.users["someAccount"]?.entries).toBe(5);
+  });
+
+  it("reads a corrupt user_id as unattributed rather than inventing an account", () => {
+    const summary = totals([
+      { program: "p", cost_usd: 1, user_id: 42 },
+      { program: "p", cost_usd: 1, user_id: "" },
+      { program: "p", cost_usd: 1, user_id: null },
+    ] as unknown as SpendRecord[]);
+    expect(summary.users).toEqual({});
+    expect(summary.unattributed.entries).toBe(3);
+    expect(summary.unattributed.spent_usd).toBeCloseTo(3, 9);
   });
 
   it("lets the last cap seen win", () => {
@@ -270,6 +416,30 @@ describe("entry", () => {
     });
     expect(record).not.toHaveProperty("image_count");
     expect(JSON.parse(JSON.stringify(record))).not.toHaveProperty("image_count");
+  });
+
+  it("records the opaque account id it is given as user_id", () => {
+    const record = entry({
+      program: "runtime-translation",
+      kind: "translation",
+      model: "claude-haiku-4-5",
+      userId: "hostAccount00000000000A",
+      inputTokens: 10,
+      outputTokens: 10,
+    });
+    expect(record.user_id).toBe("hostAccount00000000000A");
+  });
+
+  it("writes user_id as an explicit null when the spend belongs to no account", () => {
+    // Stated rather than omitted, so a new row cannot be mistaken for one that predates the field.
+    const record = entry({
+      program: "verification",
+      kind: "verification",
+      model: "claude-haiku-4-5",
+      inputTokens: 10,
+      outputTokens: 10,
+    });
+    expect(JSON.parse(JSON.stringify(record))).toHaveProperty("user_id", null);
   });
 
   it("never stores a room code, only a hash the caller supplies", () => {

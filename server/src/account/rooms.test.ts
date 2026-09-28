@@ -47,6 +47,7 @@ function config(): Config {
     ownerEmail: null,
     dailyCapUsd: 10,
     roomCapUsd: 1.5,
+    userDailyCapUsd: 1,
     iceServers: [],
     isProduction: false,
     trustProxy: false,
@@ -64,7 +65,7 @@ beforeEach(async () => {
   account = new AccountService(store);
   const cfg = config();
   // No LLM client: nothing here translates, and nothing here may spend.
-  const translation = new TranslationService(null, new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5 }), root);
+  const translation = new TranslationService(null, new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5, userDailyCapUsd: 1 }), root);
   server = createServer(createApp(cfg, join(root, "no-dist"), translation, auth, account));
   signaling = new SignalingServer(server, cfg, translation, auth, account);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

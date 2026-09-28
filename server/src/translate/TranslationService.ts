@@ -26,13 +26,17 @@ import { buildSystemPrompt, buildUserMessage, type ContextTurn } from "./prompt.
  * told fails to compile instead of arriving on screen as nothing at all.
  */
 const CAP_REASONS: Record<
-  "daily_cap" | "room_cap" | "ledger_unreadable",
+  "daily_cap" | "room_cap" | "user_cap" | "ledger_unreadable",
   TranslationFailureCode
 > = {
   daily_cap: "DAILY_CAP",
   room_cap: "ROOM_CAP",
+  user_cap: "USER_CAP",
   ledger_unreadable: "LEDGER_UNREADABLE",
 };
+
+/** The refusals that mean "the money for this ran out", as opposed to "we cannot tell". */
+const BUDGET_REASONS: ReadonlySet<string> = new Set(["daily_cap", "room_cap", "user_cap"]);
 
 /** How long to wait on the API before giving up on a line. */
 export const TIMEOUT_MS = 6_000;
@@ -57,6 +61,15 @@ export interface TranslateRequest {
   context: readonly ContextTurn[];
   glossary: readonly GlossaryEntry[];
   roomHash: string;
+  /**
+   * The opaque account id this spend is attributed to: the room's HOST, whoever spoke the line
+   * (docs/PLAN.md, D9). null for spend that belongs to no account (verification, eval), which
+   * the per user cap then does not apply to; the global and room caps still do.
+   *
+   * Required rather than optional so that no caller can forget to say who pays: an omitted field
+   * would read as null and quietly skip the per user cap.
+   */
+  userId: string | null;
   kind: SpendKind;
 }
 
@@ -245,14 +258,20 @@ export class TranslationService {
     }
 
     // The spend gate reads the LEDGER, not a counter, so a restart cannot reset the day.
-    const decision = this.gate.check(request.roomHash);
+    // Checked against the HOST's account, so the per user cap charges the person who opened the
+    // room rather than whichever of the two happened to be talking.
+    const decision = this.gate.check(request.roomHash, request.userId);
     if (!decision.allowed) {
-      log.warn("translation.blocked", { reason: decision.reason, room: request.roomHash });
+      // The opaque id only, never an email: the logger's own rule, and the id is what an operator
+      // needs to match a refusal against the ledger's user_id column.
+      log.warn("translation.blocked", {
+        reason: decision.reason,
+        room: request.roomHash,
+        user: request.userId,
+      });
       return {
         ok: false,
-        status: decision.reason === "room_cap" || decision.reason === "daily_cap"
-          ? "budget_exceeded"
-          : "unavailable",
+        status: BUDGET_REASONS.has(decision.reason) ? "budget_exceeded" : "unavailable",
         // The gate's own message carries dollar figures and is written for an operator reading
         // logs, which is where it stays. The reader gets told the cap was reached, not the
         // server's finances.
@@ -391,6 +410,7 @@ export class TranslationService {
           kind: request.kind,
           model: DEFAULT_MODEL,
           room: request.roomHash,
+          userId: request.userId,
           inputTokens,
           outputTokens,
           capUsd: this.gate.capFor(program),

@@ -34,8 +34,10 @@ function dialect(code: string): Dialect {
   return found;
 }
 
-const CAPS = { dailyCapUsd: 1.0, roomCapUsd: 0.5 };
+const CAPS = { dailyCapUsd: 1.0, roomCapUsd: 0.5, userDailyCapUsd: 0.4 };
 const ROOM = "roomhash00000000";
+/** The room's host: an opaque account id, the only thing a ledger row may name. */
+const HOST = "hostAccount00000000000A";
 
 function request(overrides: Partial<TranslateRequest> = {}): TranslateRequest {
   return {
@@ -46,6 +48,7 @@ function request(overrides: Partial<TranslateRequest> = {}): TranslateRequest {
     context: [],
     glossary: [],
     roomHash: ROOM,
+    userId: HOST,
     kind: "translation",
     ...overrides,
   };
@@ -155,11 +158,55 @@ describe("TranslationService", () => {
     // Each call costs 0.00095, and the room cap is 0.50, so drive the ledger straight there.
     for (let i = 0; i < 3; i += 1) await service.translate(request({ lineId: `L${i}` }));
 
-    const bigGate = new SpendGate(root, { dailyCapUsd: 1, roomCapUsd: 0.001 });
+    const bigGate = new SpendGate(root, { dailyCapUsd: 1, roomCapUsd: 0.001, userDailyCapUsd: 1 });
     const capped = new TranslationService(fakeClient(), bigGate, root);
     const result = await capped.translate(request());
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.status).toBe("budget_exceeded");
+  });
+
+  it("attributes the spend to the account the request names, the room's host", async () => {
+    const service = new TranslationService(fakeClient(), gate, root);
+    await service.translate(request());
+    await service.translate(request({ lineId: "L2", kind: "term-extraction" }));
+
+    const records = load({ root });
+    expect(records.map((r) => r.user_id)).toEqual([HOST, HOST]);
+    expect(records[1]?.program).toBe(PROGRAMS.runtimeTermExtraction);
+  });
+
+  it("writes an explicit null user_id for spend that belongs to no account", async () => {
+    const service = new TranslationService(fakeClient(), gate, root);
+    await service.translate(request({ kind: "verification", userId: null }));
+    const [record] = load({ root });
+    expect(record).toHaveProperty("user_id", null);
+  });
+
+  it("refuses with USER_CAP once the host's day is spent, before any call is made", async () => {
+    // The global cap (1.00) and this room's cap (0.50) both have room. Only the host's own 0.40
+    // for the day is gone, spent in OTHER rooms, so this is the per user cap and nothing else.
+    const client = fakeClient();
+    const service = new TranslationService(client, gate, root);
+    const spent = new TranslationService(
+      { complete: async () => ({ text: "x", inputTokens: 200_000, outputTokens: 0 }) },
+      gate,
+      root,
+    );
+    await spent.translate(request({ roomHash: "otherroom0000001" }));
+    await spent.translate(request({ roomHash: "otherroom0000002" }));
+
+    const result = await service.translate(request());
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe("budget_exceeded");
+      expect(result.reason).toBe("USER_CAP");
+      expect(result.retriable).toBe(false);
+    }
+    expect(client.calls).toBe(0);
+
+    // A different host is not held to the first one's day.
+    const other = await service.translate(request({ userId: "hostAccount00000000000B" }));
+    expect(other.ok).toBe(true);
   });
 
   it("REFUSES rather than spends when the ledger is unreadable", async () => {
@@ -478,7 +525,7 @@ describe("a ledger that cannot be written", () => {
     root = mkdtempSync(join(tmpdir(), "unwritable-"));
     mkdirSync(join(root, "out", "translatv"), { recursive: true });
     writeFileSync(join(root, "out", "translatv", "spend_log.jsonl"), "", "utf8");
-    gate = new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5 });
+    gate = new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5, userDailyCapUsd: 1 });
   });
 
   afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -543,7 +590,7 @@ describe("the per room promise chain", () => {
     const root = mkdtempSync(join(tmpdir(), "queues-"));
     mkdirSync(join(root, "out", "translatv"), { recursive: true });
     writeFileSync(join(root, "out", "translatv", "spend_log.jsonl"), "", "utf8");
-    const gate = new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5 });
+    const gate = new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5, userDailyCapUsd: 1 });
     const service = new TranslationService(fakeClient(), gate, root);
 
     await service.translate({ ...request(), roomHash: "room-one" });

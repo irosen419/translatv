@@ -17,6 +17,11 @@ One JSON object per line, one line per API call:
     kind                        translation, term-extraction, eval, or verification
     model                       the model that was called
     room                        truncated sha256 of the room code, never the code itself
+    user_id                     opaque account id the spend is attributed to: the room's HOST,
+                                whoever spoke (docs/PLAN.md, D9 and D10). Never an email or a
+                                display name. null for spend that belongs to no account
+                                (verification, eval). Rows older than the field have no key at
+                                all; absent and null both read as "unattributed".
     input_tokens, output_tokens as the API reported them
     unit_cost_in_usd_per_mtok   documented price, or null for an unpriced model
     unit_cost_out_usd_per_mtok
@@ -182,6 +187,24 @@ def _round(amount):
     return round(float(amount), MONEY_PRECISION)
 
 
+def attributed_user(record):
+    """The account a record is attributed to, or None for an unattributed one.
+
+    Only a non empty string counts. An absent key (a row older than the field), an explicit
+    null, and anything corrupt (a number, a boolean, an empty string) are all unattributed:
+    charging money to a value that is not an id would bill an account that never spent it.
+    server/src/spend/ledger.ts attributedUser() applies the same rule.
+    """
+    value = record.get("user_id")
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _user_bucket():
+    return {"spent_usd": 0.0, "unparsed_rows": 0, "entries": 0}
+
+
 def totals(records):
     """Aggregate records into the numbers the cockpit and the cap gate both read.
 
@@ -191,12 +214,19 @@ def totals(records):
 
     Where a program's cap was raised mid program, the last cap seen wins: that is the one in
     force now.
+
+    users holds a bucket per attributed account, keyed by user_id, and unattributed holds every
+    row that names none. A separate bucket rather than a reserved key, so no real id can collide
+    with it, and so the buckets always add back up to the whole. Each carries its own
+    unparsed_rows, because a per account figure is a floor for the same reason the total is.
     """
     known = 0.0
     unparsed = 0
     input_tokens = 0
     output_tokens = 0
     programs = {}
+    users = {}
+    unattributed = _user_bucket()
 
     for record in records:
         cost = _numeric(record.get("cost_usd"))
@@ -208,8 +238,21 @@ def totals(records):
         input_tokens += int(_numeric(record.get("input_tokens")) or 0)
         output_tokens += int(_numeric(record.get("output_tokens")) or 0)
 
+        # Before the program bucket, which skips a row with no program: a row's account is a
+        # separate fact from its program.
+        user = attributed_user(record)
+        owner = unattributed if user is None else users.setdefault(user, _user_bucket())
+        owner["entries"] += 1
+        if cost is None:
+            owner["unparsed_rows"] += 1
+        else:
+            owner["spent_usd"] = _round(owner["spent_usd"] + cost)
+
         program = record.get("program")
-        if not program:
+        # Only a non empty string names a program. A list or dict here raised TypeError (it cannot
+        # key a dict), a number or boolean raised when the report sorted it, and either took down
+        # `totals`, `render` and check:spend-view. Read as no program, as ledger.ts does.
+        if not isinstance(program, str) or not program:
             continue
         bucket = programs.setdefault(
             program, {"program": program, "spent_usd": 0.0, "cap_usd": None, "entries": 0}
@@ -228,7 +271,56 @@ def totals(records):
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "programs": programs,
+        "users": users,
+        "unattributed": unattributed,
     }
+
+
+def _user_line(label, bucket):
+    unknown = bucket["unparsed_rows"]
+    return "user    %-26s $%10.6f across %d entries%s" % (
+        label,
+        bucket["spent_usd"],
+        bucket["entries"],
+        ", %d with no recoverable cost" % unknown if unknown else "",
+    )
+
+
+def format_totals(summary, malformed):
+    """The `totals` subcommand's report, as lines.
+
+    The per user section appears only once some row names an account. A ledger that has never
+    seen user_id prints exactly what it printed before the field existed, byte for byte, so
+    nothing reading this output has to learn about a field its ledger does not contain.
+    """
+    lines = [
+        "known spend $%.6f across %d calls" % (summary["known_usd"], summary["entries"]),
+        "%d input tokens, %d output tokens" % (summary["input_tokens"], summary["output_tokens"]),
+    ]
+    if summary["unparsed_rows"] or malformed:
+        lines.append(
+            "%d rows with no recoverable cost, %d malformed lines: the total is a FLOOR."
+            % (summary["unparsed_rows"], malformed)
+        )
+    lines.append("")
+    for name, bucket in sorted(summary["programs"].items()):
+        cap = bucket["cap_usd"]
+        lines.append(
+            "program %-26s $%10.6f%s across %d entries"
+            % (
+                name,
+                bucket["spent_usd"],
+                " of $%.2f cap" % cap if cap is not None else "",
+                bucket["entries"],
+            )
+        )
+    if summary["users"]:
+        lines.append("")
+        for user_id, bucket in sorted(summary["users"].items()):
+            lines.append(_user_line(user_id, bucket))
+        if summary["unattributed"]["entries"]:
+            lines.append(_user_line("(unattributed)", summary["unattributed"]))
+    return lines
 
 
 def _cost_cell(record):
@@ -343,29 +435,8 @@ def _main(argv=None):
             return 1
 
         summary = totals(records)
-        print("known spend $%.6f across %d calls" % (summary["known_usd"], summary["entries"]))
-        print(
-            "%d input tokens, %d output tokens"
-            % (summary["input_tokens"], summary["output_tokens"])
-        )
-        malformed = malformed_lines(args.project)
-        if summary["unparsed_rows"] or malformed:
-            print(
-                "%d rows with no recoverable cost, %d malformed lines: the total is a FLOOR."
-                % (summary["unparsed_rows"], malformed)
-            )
-        print()
-        for name, bucket in sorted(summary["programs"].items()):
-            cap = bucket["cap_usd"]
-            print(
-                "program %-26s $%10.6f%s across %d entries"
-                % (
-                    name,
-                    bucket["spent_usd"],
-                    " of $%.2f cap" % cap if cap is not None else "",
-                    bucket["entries"],
-                )
-            )
+        for line in format_totals(summary, malformed_lines(args.project)):
+            print(line)
         return 0
 
     text = render_markdown(args.project, root=args.root, write=args.execute)

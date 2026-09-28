@@ -41,6 +41,7 @@ const config = loadConfig(repoRoot);
 const gate = new SpendGate(repoRoot, {
   dailyCapUsd: config.dailyCapUsd,
   roomCapUsd: config.roomCapUsd,
+  userDailyCapUsd: config.userDailyCapUsd,
 });
 
 // Can the ledger actually be appended to, not merely read?

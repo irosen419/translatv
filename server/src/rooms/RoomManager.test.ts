@@ -69,6 +69,19 @@ describe("hasHostPresent", () => {
   });
 });
 
+describe("who pays", () => {
+  it("records the creator's account on the room, and a joiner cannot move it", () => {
+    // Translation spend is attributed to the host (docs/PLAN.md, D9). It is a fact about the room,
+    // fixed at create, so the bill cannot follow whoever happens to hold a seat.
+    const rooms = new RoomManager();
+    const { room } = rooms.create("Ana", "es-AR", T0, "user-ana");
+    expect(room.hostUserId).toBe("user-ana");
+
+    rooms.join(room.code, "Ben", "en-US", T0, "user-ben");
+    expect(rooms.peek(room.code)?.hostUserId).toBe("user-ana");
+  });
+});
+
 describe("hasEnded", () => {
   it("is true for an ended code and false for a live or unknown one", () => {
     const rooms = new RoomManager();

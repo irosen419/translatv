@@ -420,6 +420,7 @@ camera prompt appearing at all confirms the TLS path end to end.
 | `ANTHROPIC_API_KEY` | no | none | Without it translation is off and the app says so. Never prefix with `VITE_`. |
 | `ANTHROPIC_DAILY_CAP_USD` | no | `10.00` | Hard ceiling. On breach, translation degrades and the call continues. |
 | `ROOM_CAP_USD` | no | `1.50` | About three hours of continuous conversation. |
+| `USER_DAILY_CAP_USD` | no | `1.00` | Per account, per UTC day, charged to the room's host. All three caps must pass, so it only tightens. |
 | `TURN_URL` / `TURN_USERNAME` / `TURN_CREDENTIAL` | no | none | See section 4. |
 | `AUTH_SECRET` | **in production** | random per process in development | Signs every access token. At least 32 characters; `openssl rand -hex 32`. The server REFUSES TO START in production without it. See section 6. |
 | `SIGNUP_MODE` | no | `invite` | `invite` or `open`. Anything else is refused at boot. See section 6. |
