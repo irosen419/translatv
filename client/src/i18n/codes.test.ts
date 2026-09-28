@@ -19,6 +19,14 @@ import { copyFor } from "./copy.js";
 const ENGLISH = "en-US";
 const SPANISH = "es-MX";
 
+/**
+ * Wire keys whose right copy is deliberately the same in both languages. Empty today (none of
+ * the 26 is). Other catalog keys already are ("Ana", "(original: {text})"), so if a wire key ever
+ * joins them, name it here with the reason, rather than deleting the check below: a match is
+ * otherwise exactly what a missing Spanish key looks like.
+ */
+const SAME_IN_BOTH_LANGUAGES = new Set<string>([]);
+
 describe("wire codes to copy", () => {
   /** The sentence for key in each base language, checked for words and for real Spanish. */
   function expectBothLanguages(key: Parameters<ReturnType<typeof copyFor>["t"]>[0], label: string): void {
@@ -27,7 +35,9 @@ describe("wire codes to copy", () => {
     expect(english.t(key), `${ENGLISH} ${label}`).not.toBe(english.t("copy.missing"));
     expect(spanish.t(key), `${SPANISH} ${label}`).not.toBe(spanish.t("copy.missing"));
     // The fallback case: with its es.json key gone, the Spanish sentence IS the English one.
-    expect(spanish.t(key), `${SPANISH} ${label} is the English sentence`).not.toBe(english.t(key));
+    if (!SAME_IN_BOTH_LANGUAGES.has(key)) {
+      expect(spanish.t(key), `${SPANISH} ${label} is the English sentence`).not.toBe(english.t(key));
+    }
   }
 
   it("gives every translation failure code a sentence in each base language", () => {

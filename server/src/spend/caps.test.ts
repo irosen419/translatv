@@ -205,7 +205,33 @@ describe("SpendGate", () => {
       // host whose lifetime spend passed the cap would have been refused forever.
       seedEmptyLedger();
       const gate = new SpendGate(root, CONFIG, "gate");
-      spend(0.35, roomHash("A"), "gate", "2020-01-01T00:00:00.000Z", HOST);
+      // Derived from CONFIG, so raising the user cap cannot quietly make this unable to fail again.
+      spend(2 * CONFIG.userDailyCapUsd, roomHash("A"), "gate", "2020-01-01T00:00:00.000Z", HOST);
+      gate.invalidate();
+      expect(gate.check(roomHash("B"), HOST).allowed).toBe(true);
+    });
+
+    it("does not count an undated row toward a user's day", () => {
+      // The daily cap's rule, held for the user cap too: an unreadable ts is no day at all, and
+      // calling it today would refuse a host over spend nobody can place.
+      seedEmptyLedger();
+      const gate = new SpendGate(root, CONFIG, "gate");
+      append(
+        {
+          ...entry({
+            program: PROGRAMS.runtimeTranslation,
+            kind: "translation",
+            model: "claude-haiku-4-5",
+            room: roomHash("A"),
+            userId: HOST,
+            project: "gate",
+            ts: null,
+          }),
+          cost_usd: 2 * CONFIG.userDailyCapUsd,
+          cost_source: "logged" as const,
+        },
+        root,
+      );
       gate.invalidate();
       expect(gate.check(roomHash("B"), HOST).allowed).toBe(true);
     });
@@ -215,13 +241,17 @@ describe("SpendGate", () => {
       // several caps are past at once, which one is named is visible, not an implementation detail.
       seedEmptyLedger();
       const gate = new SpendGate(root, CONFIG, "gate");
-      spend(0.6, ROOM, "gate", undefined, HOST); // room and user both past
+      // Past the room cap AND the user cap, still under the day. Derived from CONFIG, and the
+      // precondition checked, so a CONFIG change cannot quietly turn this into a different test.
+      const roomAndUser = Math.max(CONFIG.roomCapUsd, CONFIG.userDailyCapUsd) + 0.01;
+      expect(roomAndUser).toBeLessThan(CONFIG.dailyCapUsd);
+      spend(roomAndUser, ROOM, "gate", undefined, HOST);
       gate.invalidate();
       const both = gate.check(ROOM, HOST);
       expect(both.allowed).toBe(false);
       if (!both.allowed) expect(both.reason).toBe("room_cap");
 
-      spend(0.5, roomHash("B"), "gate", undefined, HOST); // and now the day too
+      spend(CONFIG.dailyCapUsd, roomHash("B"), "gate", undefined, HOST); // and now the day too
       gate.invalidate();
       const all = gate.check(ROOM, HOST);
       expect(all.allowed).toBe(false);
