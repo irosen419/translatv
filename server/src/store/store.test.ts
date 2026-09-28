@@ -139,10 +139,13 @@ describe("openStore", () => {
       expect(performance.now() - started).toBeLessThan(1000);
       // It got as far as the rewrite, whose pages wait in the WAL: the second checkpoint answered,
       // not the first. Were the first ever to turn this reader away, this test would stop reaching
-      // what it is here for, and say so. A rewrite puts every page there, so at least the whole
-      // file: a stray write before the first checkpoint left two pages and passed a bare "not
-      // empty", with the second checkpoint's answer ignored as well (measured in review).
-      expect(statSync(`${path}-wal`).size).toBeGreaterThanOrEqual(statSync(path).size);
+      // what it is here for, and say so. A rewrite puts every page of the rewritten file there: a
+      // stray write before the first checkpoint left two pages and passed a bare "not empty", with
+      // the second checkpoint's answer ignored as well (measured in review). Against the rewritten
+      // size rather than the old file's, which free pages would leave larger than the rewrite.
+      const pageSize = Number(store.db.prepare("PRAGMA page_size").get()?.["page_size"]);
+      const pages = Number(store.db.prepare("PRAGMA page_count").get()?.["page_count"]);
+      expect(statSync(`${path}-wal`).size).toBeGreaterThanOrEqual(pages * pageSize);
       reader.exec("COMMIT");
       expect(store.erase()).toBe(true);
     } finally {

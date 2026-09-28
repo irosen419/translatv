@@ -74,6 +74,14 @@ function fileStore(): { store: Store; path: string } {
 
 const wait = (store: Store) => Number(store.db.prepare("PRAGMA busy_timeout").get()?.["timeout"]);
 
+/** The checkpoints and the rewrite the next erase sends, in order. */
+function statements(): string[] {
+  const seen: string[] = [];
+  hook.beforeCheckpoint = () => seen.push("checkpoint");
+  hook.beforeVacuum = () => seen.push("rewrite");
+  return seen;
+}
+
 it("answers false, and puts the wait back, when a writer takes the lock just before the rewrite", () => {
   // Reported done, the rewrite that never ran would never be retried; thrown, it would be
   // logged as a failure and left for the next deletion. Busy means "not now".
@@ -119,6 +127,41 @@ it("waits for no lock at any of its statements", () => {
   expect(new Set(seen.map(([kind]) => kind))).toEqual(new Set(["checkpoint", "rewrite"]));
   expect(seen.filter(([, ms]) => ms !== 0)).toEqual([]);
   expect(wait(store)).toBeGreaterThanOrEqual(5000);
+});
+
+it("answers false at once, after one checkpoint, while another connection holds the write lock", () => {
+  // What the Store doc promises, and nothing pinned it: a writer already holding the lock when the
+  // erase starts. A probe for the lock taken before the wait was lowered waited five seconds and
+  // then threw, and the first checkpoint retried in a loop waited as long as the loop ran; both
+  // passed every test (measured in review). One checkpoint, then the answer.
+  const { store, path } = fileStore();
+  const writer = new DatabaseSync(path);
+  cleanup.push(() => writer.close());
+  writer.exec("BEGIN IMMEDIATE");
+  const seen = statements();
+  const started = performance.now();
+  expect(store.erase()).toBe(false);
+  expect(performance.now() - started).toBeLessThan(1000);
+  expect(seen).toEqual(["checkpoint"]);
+  expect(wait(store)).toBeGreaterThanOrEqual(5000);
+
+  writer.exec("ROLLBACK");
+  expect(store.erase()).toBe(true);
+});
+
+it("rewrites once and checks once more beside a reader of the database file itself", () => {
+  // The second checkpoint's answer is the attempt's answer. Retried in a loop, it waited as long as
+  // the loop ran with every test green (measured in review), which "never waits" rules out.
+  const { store, path } = fileStore();
+  expect(store.erase()).toBe(true);
+  const reader = new DatabaseSync(path);
+  cleanup.push(() => reader.close());
+  reader.exec("BEGIN");
+  reader.prepare("SELECT count(*) AS n FROM scratch").get();
+  const seen = statements();
+  expect(store.erase()).toBe(false);
+  expect(seen).toEqual(["checkpoint", "rewrite", "checkpoint"]);
+  reader.exec("COMMIT");
 });
 
 it("throws anything but a busy database from the rewrite, and still puts the wait back", () => {
