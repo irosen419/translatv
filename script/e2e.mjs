@@ -1055,12 +1055,20 @@ try {
   await submitSignUp(quin, "Quin", minted);
   check("a code already used is refused with a sentence", await reached(quin.getByText(en("auth.error.INVITE_INVALID"))));
 
-  // A returning visitor's first frame is the start page, restoring, never the sign in form. The
-  // session state used to be set after the first paint, so the form showed for a frame each load.
+  // A returning visitor's first render is the start page, restoring, never the sign in form. The
+  // session state used to be set in a mount effect, so the form was mounted first on every load.
+  // The observer reads what was INSERTED, not what is in the document when it runs: React can
+  // mount the form and swap it out within one task, before an observer's callback ever sees the
+  // live DOM, and a querySelector there passed with the form mounted on every load.
   await pat.addInitScript(() => {
     window.__sawSignInForm = false;
-    new MutationObserver(() => {
-      if (document.querySelector(".auth-title")) window.__sawSignInForm = true;
+    new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node.nodeType !== 1) continue;
+          if (node.matches(".auth-title") || node.querySelector(".auth-title")) window.__sawSignInForm = true;
+        }
+      }
     }).observe(document, { childList: true, subtree: true });
   });
   await pat.reload();
