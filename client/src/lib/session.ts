@@ -181,7 +181,8 @@ export class SessionManager {
    * asked for and it must happen even if the server cannot be reached; the server half revokes
    * the refresh token, so a copy of it (another tab, a stolen one) can no longer refresh. Another
    * tab is not told: it keeps the access token it holds, at most fifteen minutes, and is signed
-   * out when it next tries to refresh.
+   * out when it next tries to refresh. If someone signs in again here before then, the other
+   * tab's refresh reads THAT account's token from the shared storage and silently becomes it.
    */
   async signOut(): Promise<void> {
     const token = readRefresh(this.deps.storage);

@@ -40,6 +40,13 @@ export function DeleteAccount({ onDelete }: Props) {
   // ways. Opening moves focus to the password field (autoFocus below), cancelling to this button.
   const openButton = useRef<HTMLButtonElement>(null);
   const focusOpenButton = useRef(false);
+  // After a refusal, back to the field, selected, ready to retype. The submit button is disabled
+  // while the request runs, and a disabled button drops the focus it had to <body>.
+  const passwordField = useRef<HTMLInputElement>(null);
+  const retype = () => {
+    passwordField.current?.focus();
+    passwordField.current?.select();
+  };
   useEffect(() => {
     if (open || !focusOpenButton.current) return;
     focusOpenButton.current = false;
@@ -64,9 +71,14 @@ export function DeleteAccount({ onDelete }: Props) {
         setFailure(null);
         void onDelete(password)
           .then((outcome) => {
-            if (!outcome.ok) setFailure(outcome.error);
+            if (outcome.ok) return;
+            setFailure(outcome.error);
+            retype();
           })
-          .catch(() => setFailure("NETWORK"))
+          .catch(() => {
+            setFailure("NETWORK");
+            retype();
+          })
           .finally(() => setBusy(false));
       }}
     >
@@ -76,6 +88,7 @@ export function DeleteAccount({ onDelete }: Props) {
         <label htmlFor="delete-password">{copy.t("account.delete.password")}</label>
         <input
           id="delete-password"
+          ref={passwordField}
           autoFocus
           type="password"
           autoComplete="current-password"
