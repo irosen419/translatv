@@ -368,15 +368,25 @@ describe("/api/me", () => {
 describe("DELETE /api/account", () => {
   it("refuses the wrong password with 401 INVALID_CREDENTIALS, then deletes with the right one", async () => {
     const { body } = await signup("ana@example.test");
-    const wrong = await send("DELETE", "/api/account", body.accessToken, { password: "not it at all" });
+    const wrong = await send("DELETE", "/api/account", body.accessToken, { password: "not it at all", userId: body.user.id });
     expect(wrong.status).toBe(401);
     expect(await wrong.json()).toEqual({ error: "INVALID_CREDENTIALS" });
 
-    const right = await send("DELETE", "/api/account", body.accessToken, { password: PASSWORD });
+    const right = await send("DELETE", "/api/account", body.accessToken, { password: PASSWORD, userId: body.user.id });
     expect(right.status).toBe(204);
 
     expect((await send("GET", "/api/auth/me", body.accessToken)).status).toBe(401);
     expect((await post("/api/auth/refresh", { refreshToken: body.refreshToken })).status).toBe(401);
     expect((await post("/api/auth/login", { email: "ana@example.test", password: PASSWORD })).status).toBe(401);
+  });
+
+  it("answers 409 ACCOUNT_MISMATCH, and deletes nothing, for a bearer of another account than the one named", async () => {
+    const ana = await signup("ana@example.test");
+    const ben = await signup("ben@example.test");
+    const crossed = await send("DELETE", "/api/account", ben.body.accessToken, { password: PASSWORD, userId: ana.body.user.id });
+    expect(crossed.status).toBe(409);
+    expect(await crossed.json()).toEqual({ error: "ACCOUNT_MISMATCH" });
+    expect((await send("GET", "/api/auth/me", ben.body.accessToken)).status).toBe(200);
+    expect((await send("GET", "/api/auth/me", ana.body.accessToken)).status).toBe(200);
   });
 });

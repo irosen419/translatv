@@ -202,38 +202,55 @@ export class SessionManager {
   }
 
   /**
-   * Delete the account, proving the password again. On success the session is forgotten here
-   * exactly as signOut forgets it (the server has already revoked every token it held).
+   * Delete the account `userId`, proving the password again. On success the session is forgotten
+   * here exactly as signOut forgets it (the server has already revoked every token it held).
+   *
+   * `userId` is the account the person confirmed, and the request names it. Tabs share one stored
+   * refresh token, so any refresh can move this tab to whichever account another tab signed in to
+   * last: the server refuses a bearer for any other account (ACCOUNT_MISMATCH), and this tab
+   * never sends one.
    *
    * ONE request, never authorizedFetch's retry on a 401: a wrong password answers 401 too, and
    * retrying it would spend a second lockout strike on the same typo.
    *
    * UNAUTHENTICATED is different: the bearer was refused before any password was checked, which
    * almost always means the account is already gone, deleted from another device. One refresh
-   * settles it without a second deletion attempt. Refused, the session ends here and the app goes
-   * to sign in, as it does when the account is deleted mid call; before this, the tab stayed
-   * signed in for up to fifteen minutes and said it could not reach the server.
+   * settles it without a second deletion attempt:
+   *   refused         the session ends here and the app goes to sign in, as it does when the
+   *                   account is deleted mid call (before, the tab stayed signed in for up to
+   *                   fifteen minutes and said it could not reach the server);
+   *   renewed         for the same account, the bearer had merely expired, and trying again works;
+   *   another account ACCOUNT_MISMATCH, never "try again": from the form confirmed for the old
+   *                   account, that was one Enter from deleting the new one (measured in review,
+   *                   with a password the two accounts shared);
+   *   unreachable     NETWORK, since trying again would fail the same way.
    */
-  async deleteAccount(password: string): Promise<AuthOutcome> {
+  async deleteAccount(password: string, userId: string): Promise<AuthOutcome> {
     let response: Response;
     try {
       const token = await this.accessToken();
       if (token === null) return { ok: false, error: "UNAUTHENTICATED" };
+      if (this.user?.id !== userId) return { ok: false, error: "ACCOUNT_MISMATCH" };
       response = await this.deps.fetch("/api/account", {
         method: "DELETE",
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ password, userId }),
       });
     } catch {
       return { ok: false, error: "NETWORK" };
     }
-    if (!response.ok) {
-      const error = await errorCode(response);
-      if (error === "UNAUTHENTICATED") await this.accessToken({ force: true }).catch(() => null);
-      return { ok: false, error };
+    if (response.ok) {
+      this.drop();
+      return { ok: true };
     }
-    this.drop();
-    return { ok: true };
+    const error = await errorCode(response);
+    if (error !== "UNAUTHENTICATED") return { ok: false, error };
+    try {
+      if ((await this.accessToken({ force: true })) === null) return { ok: false, error };
+    } catch {
+      return { ok: false, error: "NETWORK" };
+    }
+    return { ok: false, error: this.user?.id === userId ? error : "ACCOUNT_MISMATCH" };
   }
 
   /**

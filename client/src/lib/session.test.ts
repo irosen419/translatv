@@ -39,28 +39,42 @@ const throwingStore: TokenStore = {
   },
 };
 
+const ACCOUNTS = {
+  u1: { id: "u1", displayName: "Ana", isOwner: false },
+  u2: { id: "u2", displayName: "Ben", isOwner: false },
+} as const;
+type AccountId = keyof typeof ACCOUNTS;
+
 /**
  * A pretend server: rotates refresh tokens the way the real one does (each token works once), and
- * records every call so a test can assert what was sent.
+ * records every call so a test can assert what was sent. Two accounts, Ana (ana@example.test) and
+ * Ben (ben@example.test), so a tab can be moved from one to the other the way a shared stored
+ * refresh token moves it.
  */
 function fakeServer(clock: { now: number }) {
   let serial = 0;
   const live = new Set<string>();
+  /** Whose each token is. */
+  const owner = new Map<string, AccountId>();
+  const gone = new Set<AccountId>();
   const calls: Array<{ path: string; body: Record<string, unknown>; authorization?: string }> = [];
   let offline = false;
-  let gone = false;
+  let refreshOffline = false;
   let staleOnce = false;
 
-  function session(): AuthSession {
+  function session(account: AccountId = "u1"): AuthSession {
     serial += 1;
     const refreshToken = `refresh-${serial}`;
+    const accessToken = `access-${serial}`;
     live.add(refreshToken);
-    return {
-      accessToken: `access-${serial}`,
-      accessExpiresAt: clock.now + ACCESS_MS,
-      refreshToken,
-      user: { id: "u1", displayName: "Ana", isOwner: false },
-    };
+    owner.set(refreshToken, account);
+    owner.set(accessToken, account);
+    return { accessToken, accessExpiresAt: clock.now + ACCESS_MS, refreshToken, user: ACCOUNTS[account] };
+  }
+
+  /** Every refresh token of `account` stops working, as a deletion or a revocation does. */
+  function revoke(account: AccountId): void {
+    for (const token of [...live]) if (owner.get(token) === account) live.delete(token);
   }
 
   const json = (status: number, body: unknown) =>
@@ -74,27 +88,37 @@ function fakeServer(clock: { now: number }) {
     calls.push({ path, body, ...(authorization ? { authorization } : {}) });
     switch (path) {
       case "/api/auth/login":
-        return body["password"] === "right password" ? json(200, session()) : json(401, { error: "INVALID_CREDENTIALS" });
+        if (body["password"] !== "right password") return json(401, { error: "INVALID_CREDENTIALS" });
+        return json(200, session(body["email"] === "ben@example.test" ? "u2" : "u1"));
       case "/api/auth/signup":
         return json(201, session());
       case "/api/auth/refresh": {
+        if (refreshOffline) throw new TypeError("fetch failed");
         const token = String(body["refreshToken"]);
         if (!live.has(token)) return json(401, { error: "INVALID_REFRESH" });
         live.delete(token);
-        return json(200, session());
+        return json(200, session(owner.get(token)));
       }
       case "/api/auth/logout":
         live.delete(String(body["refreshToken"]));
         return new Response(null, { status: 204 });
-      case "/api/account":
+      case "/api/account": {
         if (staleOnce) {
           staleOnce = false;
           return json(401, { error: "UNAUTHENTICATED" });
         }
-        if (gone || authorization !== `Bearer access-${serial}`) return json(401, { error: "UNAUTHENTICATED" });
+        // The real server's order: the bearer, then the account the request names, then the password.
+        const account = owner.get(authorization?.replace(/^Bearer /, "") ?? "");
+        if (!account || gone.has(account) || authorization !== `Bearer access-${serial}`) {
+          return json(401, { error: "UNAUTHENTICATED" });
+        }
+        if (typeof body["userId"] !== "string") return json(400, { error: "INVALID_INPUT" });
+        if (body["userId"] !== account) return json(409, { error: "ACCOUNT_MISMATCH" });
         if (body["password"] !== "right password") return json(401, { error: "INVALID_CREDENTIALS" });
-        live.clear();
+        gone.add(account);
+        revoke(account);
         return new Response(null, { status: 204 });
+      }
       case "/api/thing":
         return authorization === `Bearer access-${serial}` ? json(200, { ok: true }) : json(401, { error: "UNAUTHENTICATED" });
       default:
@@ -110,9 +134,14 @@ function fakeServer(clock: { now: number }) {
       offline = value;
     },
     /** The account deleted from another device: its tokens stop working, access and refresh. */
-    deleteElsewhere: () => {
-      gone = true;
-      live.clear();
+    deleteElsewhere: (account: AccountId = "u1") => {
+      gone.add(account);
+      revoke(account);
+    },
+    isGone: (account: AccountId) => gone.has(account),
+    /** Every refresh from now on fails to get through, while other requests still do. */
+    setRefreshOffline: (value: boolean) => {
+      refreshOffline = value;
     },
     /** The next bearer is refused once, as an expired one is, while the refresh token stays good. */
     refuseNextBearer: () => {
@@ -373,15 +402,15 @@ describe("signing out", () => {
 });
 
 describe("deleting the account", () => {
-  it("sends the password with the bearer, and on success forgets the session everywhere", async () => {
+  it("sends the password and the account it deletes with the bearer, and on success forgets the session everywhere", async () => {
     const store = memoryStore();
     const { manager, server } = setup(store);
     await manager.signIn("ana@example.test", "right password");
-    const outcome = await manager.deleteAccount("right password");
+    const outcome = await manager.deleteAccount("right password", "u1");
     expect(outcome).toEqual({ ok: true });
     expect(server.calls.at(-1)).toMatchObject({
       path: "/api/account",
-      body: { password: "right password" },
+      body: { password: "right password", userId: "u1" },
       authorization: "Bearer access-1",
     });
     expect(store.data[REFRESH_KEY]).toBeUndefined();
@@ -392,7 +421,7 @@ describe("deleting the account", () => {
     const { manager, server } = setup();
     await manager.signIn("ana@example.test", "right password");
     const before = server.calls.length;
-    const outcome = await manager.deleteAccount("wrong password");
+    const outcome = await manager.deleteAccount("wrong password", "u1");
     expect(outcome).toEqual({ ok: false, error: "INVALID_CREDENTIALS" });
     // One request: a retry would spend a second lockout strike on the same typo.
     expect(server.calls.slice(before).filter((c) => c.path === "/api/account")).toHaveLength(1);
@@ -406,7 +435,7 @@ describe("deleting the account", () => {
     await manager.signIn("ana@example.test", "right password");
     server.deleteElsewhere();
     const before = server.calls.length;
-    expect(await manager.deleteAccount("right password")).toEqual({ ok: false, error: "UNAUTHENTICATED" });
+    expect(await manager.deleteAccount("right password", "u1")).toEqual({ ok: false, error: "UNAUTHENTICATED" });
     expect(manager.state()).toEqual({ status: "signedOut", user: null });
     // Settled by one refresh, never by a second deletion attempt.
     expect(server.calls.slice(before).map((call) => call.path)).toEqual(["/api/account", "/api/auth/refresh"]);
@@ -420,17 +449,58 @@ describe("deleting the account", () => {
     await manager.signIn("ana@example.test", "right password");
     server.refuseNextBearer();
     const before = server.calls.length;
-    expect(await manager.deleteAccount("right password")).toEqual({ ok: false, error: "UNAUTHENTICATED" });
+    expect(await manager.deleteAccount("right password", "u1")).toEqual({ ok: false, error: "UNAUTHENTICATED" });
     expect(manager.state().status).toBe("signedIn");
     expect(server.calls.slice(before).map((call) => call.path)).toEqual(["/api/account", "/api/auth/refresh"]);
-    expect(await manager.deleteAccount("right password")).toEqual({ ok: true });
+    expect(await manager.deleteAccount("right password", "u1")).toEqual({ ok: true });
+  });
+
+  it("never deletes the account another tab moved this one to, and never says to try again", async () => {
+    // Tabs share one stored refresh token, so signing in as someone else in one tab moves every
+    // other tab to that account at its next refresh. Measured in review against the real server:
+    // Ana's tab was refused (her account deleted elsewhere), its refresh read Ben's token and
+    // became Ben, the form said her sign in had expired, and trying again with the password the
+    // two shared deleted Ben's account.
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    const tab = () => new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    const ana = tab();
+    await ana.signIn("ana@example.test", "right password");
+    const other = tab();
+    await other.restore();
+    await other.signOut();
+    await other.signIn("ben@example.test", "right password");
+    server.deleteElsewhere("u1");
+
+    const before = server.calls.length;
+    expect(await ana.deleteAccount("right password", "u1")).toEqual({ ok: false, error: "ACCOUNT_MISMATCH" });
+    expect(ana.state().user?.id).toBe("u2");
+    // Again, as "try again" would have had them do, from the form opened for Ana.
+    expect(await ana.deleteAccount("right password", "u1")).toEqual({ ok: false, error: "ACCOUNT_MISMATCH" });
+    expect(server.isGone("u2")).toBe(false);
+    // One DELETE, Ana's, refused on her bearer. The second try never left this tab: it holds Ben's
+    // bearer now, and only the account the person confirmed is ever named with one.
+    const deletes = server.calls.slice(before).filter((call) => call.path === "/api/account");
+    expect(deletes.map((call) => call.body["userId"])).toEqual(["u1"]);
+  });
+
+  it("says the server could not be reached, not that the sign in expired, when the refresh cannot get through", async () => {
+    // "Expired, try again" promises the retry will work; with the refresh unreachable it fails the
+    // same way again (measured in review).
+    const { manager, server } = setup();
+    await manager.signIn("ana@example.test", "right password");
+    server.refuseNextBearer();
+    server.setRefreshOffline(true);
+    expect(await manager.deleteAccount("right password", "u1")).toEqual({ ok: false, error: "NETWORK" });
+    expect(manager.state().status).toBe("signedIn");
   });
 
   it("reports NETWORK when the server cannot be reached, and stays signed in", async () => {
     const { manager, server } = setup();
     await manager.signIn("ana@example.test", "right password");
     server.setOffline(true);
-    expect(await manager.deleteAccount("right password")).toEqual({ ok: false, error: "NETWORK" });
+    expect(await manager.deleteAccount("right password", "u1")).toEqual({ ok: false, error: "NETWORK" });
     expect(manager.state().status).toBe("signedIn");
   });
 });

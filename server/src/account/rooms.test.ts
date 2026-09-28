@@ -311,7 +311,7 @@ describe("deleting an account with a live socket", () => {
     const response = await fetch(`${base}/api/account`, {
       method: "DELETE",
       headers: { "content-type": "application/json", authorization: `Bearer ${session.accessToken}` },
-      body: JSON.stringify({ password: PASSWORD }),
+      body: JSON.stringify({ password: PASSWORD, userId: session.user.id }),
     });
     return response.status;
   }

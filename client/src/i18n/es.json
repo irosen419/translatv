@@ -47,6 +47,7 @@
   "account.delete.cancel": "Conservar mi cuenta",
   "account.delete.wrongPassword": "Esa contraseña no es correcta.",
   "account.delete.expired": "Tu sesión había expirado. Vuelve a intentarlo.",
+  "account.delete.changed": "Esta pestaña ahora usa otra cuenta. No se eliminó nada.",
   "auth.error.unavailable": "No se pudo contactar con el servidor. Vuelve a intentarlo.",
   "prejoin.title.create": "Prepara tu chat",
   "prejoin.title.join": "Entrar al chat",
