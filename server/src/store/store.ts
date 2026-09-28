@@ -28,8 +28,11 @@ export interface Store {
   /**
    * Run fn inside a transaction: commit when it returns, roll back and rethrow when it throws.
    * Nested calls become savepoints, so an inner failure undoes only the inner work, UNLESS SQLite
-   * itself ended the whole transaction (a full disk, an I/O error): then everything since the
-   * outer BEGIN is gone, and the outer call fails at COMMIT even if it caught the inner error.
+   * itself ended the whole transaction (a full disk, an I/O error). Then everything written
+   * before the failure is gone, and the outer call is no longer in a transaction at all: if it
+   * catches the inner error and carries on, each later write (a later nested call's included)
+   * commits on its own, and the outer call still fails at COMMIT. So an outer fn must not catch
+   * a nested failure and keep writing. No caller nests today.
    *
    * fn must be synchronous. An async fn would return at its first await, the transaction would
    * commit, and the rest of its writes would land outside it: exactly the partial write a
@@ -40,6 +43,16 @@ export interface Store {
 }
 
 const MEMORY = ":memory:";
+
+/**
+ * The table that records which migrations a database has applied. It is shipped schema like any
+ * migration (store.test.ts pins it the same way): a column added here would exist only in
+ * databases created after the change. Byte for byte as it first shipped, hence the indentation.
+ */
+export const MIGRATIONS_TABLE = `CREATE TABLE IF NOT EXISTS schema_migrations (
+      version    INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    ) STRICT`;
 
 /**
  * Refuse a node:sqlite with no DatabaseSync#isTransaction, which first shipped in Node 22.16.
@@ -113,10 +126,7 @@ export function openStore(options: StoreOptions): Store {
       return Number(row?.["v"] ?? 0);
     };
 
-    db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-      version    INTEGER PRIMARY KEY,
-      applied_at TEXT NOT NULL
-    ) STRICT`);
+    db.exec(MIGRATIONS_TABLE);
 
     const current = schemaVersion();
     if (current > migrations.length) {
