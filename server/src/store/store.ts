@@ -50,7 +50,10 @@ export interface Store {
    * backup, an operator's shell) or holds the write lock, and the caller tries again later. The
    * WAL is emptied FIRST and the rewrite runs only once that works, because a rewrite beside a
    * reader lands in a WAL nobody can empty: a full copy of the file per attempt (measured in
-   * review). Only a reader that starts between the two can still cost one such copy.
+   * review). A reader the first checkpoint cannot see still costs one such copy and the time of
+   * the rewrite: one reading the database file itself (it began while the WAL was empty), or one
+   * that starts between the two. The next attempt empties the WAL before rewriting again, so the
+   * WAL holds at most one copy.
    *
    * Never waits for a lock. This connection is synchronous, so waiting out busy_timeout would
    * stall every call on the server for five seconds (measured). The rewrite itself does hold it,
