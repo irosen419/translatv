@@ -736,8 +736,9 @@ describe("deleteAccount", () => {
         NOW,
       );
       if (!signup.ok) throw new Error(`signup failed: ${signup.error}`);
-      // A full glossary spans whole pages, which a delete frees outright. secure_delete FAST zeroes
-      // a row within a page but leaves a freed page's old content behind, so only ON passes here.
+      // A full glossary spans whole pages, which a delete frees outright. The rewrite clears them
+      // here whatever secure_delete is set to; store.test.ts pins secure_delete itself, for a
+      // deletion the rewrite never reaches.
       const saved = new AccountService(onDisk).setGlossary(signup.value.user.id, {
         entries: Array.from({ length: LIMITS.glossaryEntries }, (_, i) => ({
           source: `term${i} ${marker}`.padEnd(LIMITS.glossaryTerm, "s"),
