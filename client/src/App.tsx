@@ -12,6 +12,7 @@ import { SignalingSocket, socketUrl } from "./net/socket.js";
 import { useStore } from "./state/store.js";
 import { AuthScreen } from "./components/AuthScreen.jsx";
 import { browserLock, browserStore, SessionManager } from "./lib/session.js";
+import { PreferenceSync } from "./lib/preferences.js";
 import { useCopy } from "./i18n/useCopy.js";
 import type { CopyRef } from "./i18n/copy.js";
 import { WebSpeechAdapter } from "./stt/WebSpeechAdapter.js";
@@ -47,6 +48,9 @@ const session = new SessionManager({
   setTimer: (fn, ms) => setTimeout(fn, ms),
   clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 });
+
+/** The signed in account's stored dialect, loaded on sign in and saved when the picker moves. */
+const preferenceSync = new PreferenceSync((path, init) => session.authorizedFetch(path, init));
 
 /**
  * Mint an invite as the owner. The server checks ownership; this only asks.
@@ -87,6 +91,27 @@ export function App() {
       unsubscribe();
     };
   }, []);
+  // Stored dialect preference. On sign in, the pre join picker defaults from it, but only while
+  // no call is under way: a reload mid call resumes into the dialect the call already has. After
+  // that, every change of the picker (before or during a call) is saved.
+  const signedInAs = store.session.status === "signedIn" ? store.session.user?.id ?? null : null;
+  useEffect(() => {
+    preferenceSync.reset();
+    if (signedInAs === null) return;
+    let cancelled = false;
+    void preferenceSync.load().then((prefs) => {
+      if (cancelled || !prefs?.dialect) return;
+      const { phase: now } = useStore.getState();
+      if (now === "landing" || now === "prejoin") useStore.getState().setUiDialect(prefs.dialect);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedInAs]);
+  useEffect(() => {
+    if (signedInAs !== null) void preferenceSync.changed(store.uiDialect);
+  }, [signedInAs, store.uiDialect]);
+
   const copy = useCopy();
   const [mode, setMode] = useState<"create" | "join">("create");
   const [interimText, setInterimText] = useState("");
@@ -696,6 +721,7 @@ export function App() {
       user={store.session.user}
       onSignOut={() => void session.signOut()}
       onCreateInvite={createInvite}
+      onDeleteAccount={(password) => session.deleteAccount(password)}
       onCreate={() => {
         setMode("create");
         useStore.getState().setError(null);

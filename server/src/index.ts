@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { authSecretRefusal, resolveAuthSecret } from "./auth/secret.js";
+import { AccountService } from "./account/service.js";
 import { AuthService } from "./auth/service.js";
 import { describeConfig, loadConfig } from "./config.js";
 import { createApp } from "./http.js";
@@ -150,9 +151,13 @@ const VIEW_FLUSH_MS = 60_000;
 const viewTimer = setInterval(() => flushView(repoRoot), VIEW_FLUSH_MS);
 viewTimer.unref();
 
-const app = createApp(config, clientDist, translation, auth);
+// Per user data (M5). The signaling server subscribes itself to account deletions through auth,
+// so a deleted account's live sockets close without any wiring here.
+const account = new AccountService(store);
+
+const app = createApp(config, clientDist, translation, auth, account);
 const server = createServer(app);
-const signaling = new SignalingServer(server, config, translation, auth);
+const signaling = new SignalingServer(server, config, translation, auth, account);
 
 server.listen(config.port, () => {
   // Report the port actually bound, not the one requested. With PORT=0 the OS picks one, and

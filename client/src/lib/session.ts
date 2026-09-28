@@ -188,6 +188,31 @@ export class SessionManager {
   }
 
   /**
+   * Delete the account, proving the password again. On success the session is forgotten here
+   * exactly as signOut forgets it (the server has already revoked every token it held).
+   *
+   * ONE request, never authorizedFetch's retry on a 401: a wrong password answers 401 too, and
+   * retrying it would spend a second lockout strike on the same typo.
+   */
+  async deleteAccount(password: string): Promise<AuthOutcome> {
+    let response: Response;
+    try {
+      const token = await this.accessToken();
+      if (token === null) return { ok: false, error: "UNAUTHENTICATED" };
+      response = await this.deps.fetch("/api/account", {
+        method: "DELETE",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ password }),
+      });
+    } catch {
+      return { ok: false, error: "NETWORK" };
+    }
+    if (!response.ok) return { ok: false, error: await errorCode(response) };
+    this.drop();
+    return { ok: true };
+  }
+
+  /**
    * A valid access token, refreshing first if it is missing or about to expire.
    *
    * Resolves null when there is no session to be had (signed out, or the server refused the

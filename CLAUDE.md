@@ -55,6 +55,13 @@ plan of record for the multi-user server and the iOS app.
   valid access token (`Authorization: Bearer` for native clients, the `bearer.<token>` subprotocol
   for browsers, never the URL); a browser's Origin must still match the allowlist. The HTTP account
   API's schemas and error codes are in `shared/src/auth.ts`. `ADMIN_PASSWORD` is retired.
+- Per user data (M5) lives in `server/src/account/`, with its HTTP schemas in
+  `shared/src/account.ts`: dialect preferences, a stored glossary (merged into a room through the
+  same path as `glossary.import`), and call history (a room code HASH, never the code). Contacts
+  are derived from call history, never stored. Transcripts, chat and room glossaries are NEVER
+  persisted. `DELETE /api/account` re authenticates, deletes the user row and lets ON DELETE do
+  the rest (CASCADE for what the user owns, SET NULL for what only mentions them, such as a
+  peer's call history), then closes that user's live sockets. It never touches the spend ledger.
 
 ## Spend tracking
 

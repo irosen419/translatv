@@ -7,8 +7,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { LIMITS } from "@translatv/shared";
 import type { Config } from "../config.js";
 import { createApp } from "../http.js";
+import { AccountService } from "../account/service.js";
 import { openStore, type Store } from "../store/index.js";
 import { AuthService } from "./service.js";
 
@@ -18,6 +20,7 @@ let server: Server;
 let base: string;
 let store: Store;
 let auth: AuthService;
+let account: AccountService;
 
 function config(): Config {
   return {
@@ -45,7 +48,8 @@ beforeEach(async () => {
     signupMode: "invite",
     ownerEmail: "owner@example.test",
   });
-  server = createServer(createApp(config(), join(tmpdir(), "translatv-no-such-dist"), undefined, auth));
+  account = new AccountService(store);
+  server = createServer(createApp(config(), join(tmpdir(), "translatv-no-such-dist"), undefined, auth, account));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 });
@@ -200,5 +204,111 @@ describe("the retired admin login", () => {
   it("is gone", async () => {
     const response = await post("/auth/login", { password: PASSWORD });
     expect(response.status).not.toBe(200);
+  });
+});
+
+function send(method: string, path: string, token: unknown, body?: unknown) {
+  return fetch(`${base}${path}`, {
+    method,
+    headers: {
+      "content-type": "application/json",
+      ...(typeof token === "string" ? { authorization: `Bearer ${token}` } : {}),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+
+describe("/api/me", () => {
+  it("answers 401 UNAUTHENTICATED on every route without a bearer", async () => {
+    for (const [method, path] of [
+      ["GET", "/api/me/preferences"],
+      ["PUT", "/api/me/preferences"],
+      ["GET", "/api/me/glossary"],
+      ["PUT", "/api/me/glossary"],
+      ["GET", "/api/me/calls"],
+      ["GET", "/api/me/contacts"],
+      ["DELETE", "/api/account"],
+    ] as const) {
+      const response = await send(method, path, null, method === "GET" ? undefined : {});
+      expect(response.status, `${method} ${path}`).toBe(401);
+      expect(await response.json()).toEqual({ error: "UNAUTHENTICATED" });
+    }
+  });
+
+  it("round trips preferences", async () => {
+    const { body } = await signup("ana@example.test");
+    const token = body.accessToken;
+    expect(await (await send("GET", "/api/me/preferences", token)).json()).toEqual({ dialect: null, uiDialect: null });
+    const put = await send("PUT", "/api/me/preferences", token, { dialect: "es-AR", uiDialect: "es-AR" });
+    expect(put.status).toBe(200);
+    expect(await (await send("GET", "/api/me/preferences", token)).json()).toEqual({ dialect: "es-AR", uiDialect: "es-AR" });
+    const bad = await send("PUT", "/api/me/preferences", token, { dialect: "nope", uiDialect: null });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "INVALID_INPUT" });
+  });
+
+  it("replaces the glossary, and takes a full list of maximum length entries", async () => {
+    const { body } = await signup("ana@example.test");
+    const token = body.accessToken;
+    // The largest valid glossary, well past the 4kb the auth routes allow.
+    const entries = Array.from({ length: LIMITS.glossaryEntries }, (_, i) => ({
+      source: `${i}`.padEnd(LIMITS.glossaryTerm, "ñ"),
+      target: "t".repeat(LIMITS.glossaryTranslation),
+      sourceDialect: "es-AR",
+      targetDialect: "en-US",
+    }));
+    const put = await send("PUT", "/api/me/glossary", token, { entries });
+    expect(put.status).toBe(200);
+    const got = (await (await send("GET", "/api/me/glossary", token)).json()) as { entries: unknown[] };
+    expect(got.entries).toEqual(entries);
+
+    const tooMany = await send("PUT", "/api/me/glossary", token, { entries: [...entries, entries[0]] });
+    expect(tooMany.status).toBe(400);
+    expect(await tooMany.json()).toEqual({ error: "INVALID_INPUT" });
+  });
+
+  it("keeps the 4kb bound on the auth routes", async () => {
+    const response = await post("/api/auth/login", { email: "a@example.test", password: "x".repeat(5_000) });
+    expect(response.status).toBe(413);
+  });
+
+  it("lists calls and contacts", async () => {
+    const ana = await signup("ana@example.test");
+    const ben = await signup("ben@example.test");
+    const anaId = (ana.body.user as { id: string }).id;
+    const benId = (ben.body.user as { id: string }).id;
+    const call = account.callStarted({ userId: anaId, roomHash: "h", peerUserId: benId, now: Date.now() });
+    account.callEnded(call as string, Date.now() + 1);
+
+    const calls = (await (await send("GET", "/api/me/calls?limit=10", ana.body.accessToken)).json()) as {
+      calls: Array<{ peer: { displayName: string } | null }>;
+      nextCursor: string | null;
+    };
+    expect(calls.calls).toHaveLength(1);
+    expect(calls.calls[0]?.peer?.displayName).toBe("ben");
+    expect(calls.nextCursor).toBeNull();
+
+    const contacts = (await (await send("GET", "/api/me/contacts", ana.body.accessToken)).json()) as {
+      contacts: Array<{ displayName: string; callCount: number }>;
+    };
+    expect(contacts.contacts).toMatchObject([{ displayName: "ben", callCount: 1 }]);
+
+    expect((await send("GET", "/api/me/calls?limit=9999", ana.body.accessToken)).status).toBe(400);
+  });
+});
+
+describe("DELETE /api/account", () => {
+  it("refuses the wrong password with 401 INVALID_CREDENTIALS, then deletes with the right one", async () => {
+    const { body } = await signup("ana@example.test");
+    const wrong = await send("DELETE", "/api/account", body.accessToken, { password: "not it at all" });
+    expect(wrong.status).toBe(401);
+    expect(await wrong.json()).toEqual({ error: "INVALID_CREDENTIALS" });
+
+    const right = await send("DELETE", "/api/account", body.accessToken, { password: PASSWORD });
+    expect(right.status).toBe(204);
+
+    expect((await send("GET", "/api/auth/me", body.accessToken)).status).toBe(401);
+    expect((await post("/api/auth/refresh", { refreshToken: body.refreshToken })).status).toBe(401);
+    expect((await post("/api/auth/login", { email: "ana@example.test", password: PASSWORD })).status).toBe(401);
   });
 });

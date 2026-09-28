@@ -11,6 +11,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import {
   CLOSE,
   LIMITS,
+  type GlossaryEntry,
   parseClientMessage,
   translationNeed,
   WS_PATH,
@@ -22,6 +23,7 @@ import {
   type TranslationFailureCode,
 } from "@translatv/shared";
 
+import type { RoomUserData } from "../account/service.js";
 import type { Config } from "../config.js";
 import { log } from "../log.js";
 import { GRACE_MS, MAX_MEMBERS, RoomManager, type Member } from "../rooms/RoomManager.js";
@@ -196,6 +198,19 @@ interface Connection {
  */
 export interface AccessVerifier {
   verifyAccess(token: string, now: number): string | null;
+  /**
+   * Hear about deleted accounts, so their live sockets can be closed. Optional so the room tests'
+   * stub needs none; AuthService has it, and the server subscribes itself in its constructor so
+   * the wiring cannot be forgotten in index.ts.
+   */
+  onAccountDeleted?(listener: (userId: string) => void): () => void;
+}
+
+/** A member's open call history row, and who it names on the other end so far. */
+interface OpenCall {
+  callId: string;
+  userId: string;
+  peerUserId: string | null;
 }
 
 export class SignalingServer {
@@ -222,6 +237,10 @@ export class SignalingServer {
   private readonly messageLimiter = new TokenBuckets(RATE.messagesPerConnection);
   private readonly translationLimiter = new TokenBuckets(RATE.translationsPerRoom);
 
+  /** memberId -> their open call history row. Empty when no RoomUserData was given. */
+  private readonly calls = new Map<string, OpenCall>();
+  private unsubscribeDeleted: (() => void) | null = null;
+
   private sweepTimer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
   /** Once only. A per connection warning about a misconfiguration is itself a log flood. */
@@ -232,6 +251,11 @@ export class SignalingServer {
     private readonly config: Config,
     private readonly translation: TranslationService,
     private readonly auth: AccessVerifier,
+    /**
+     * Per user data (M5): stored glossaries merged into rooms, and call history. Optional so the
+     * room suites can run without a database; the real server always passes one.
+     */
+    private readonly userData?: RoomUserData,
   ) {
     this.wss = new WebSocketServer({
       server,
@@ -254,6 +278,8 @@ export class SignalingServer {
 
     this.pingTimer = setInterval(() => this.pingRound(), PING_INTERVAL_MS);
     this.pingTimer.unref();
+
+    this.unsubscribeDeleted = auth.onAccountDeleted?.((userId) => this.disconnectUser(userId)) ?? null;
   }
 
   /**
@@ -552,6 +578,9 @@ export class SignalingServer {
       iceServers: this.config.iceServers,
     });
     log.info("room.created", { room: roomHash(room.code) });
+
+    this.openCall(member.id, userId, room.code, null, now);
+    this.mergeStoredGlossary(room.code, userId);
   }
 
   private handleJoin(
@@ -622,6 +651,12 @@ export class SignalingServer {
 
     this.broadcast(room.code, { t: "peer.joined", peer: toWire(member) }, member.id);
     log.info("room.joined", { room: roomHash(room.code), members: room.members.length });
+
+    // The same account on both ends (two tabs, one person) is not a contact of itself.
+    const other = peer && peer.userId !== userId ? peer : null;
+    this.openCall(member.id, userId, room.code, other?.userId ?? null, now);
+    if (other) this.peerCall(other.id, userId, room.code, now);
+    this.mergeStoredGlossary(room.code, userId);
   }
 
   private handleResume(
@@ -703,6 +738,7 @@ export class SignalingServer {
 
     const room = this.rooms.leave(roomCode, memberId, now);
     this.unbind(connection);
+    this.closeCall(memberId, now);
     connection.socket.close(CLOSE.normal, "left");
 
     if (hostLeft) {
@@ -742,6 +778,7 @@ export class SignalingServer {
     // Tell everyone BEFORE closing their sockets, so the client can freeze its transcript and
     // offer a download rather than just seeing the connection vanish.
     for (const member of endedRoom.members) {
+      this.closeCall(member.id, now);
       const socket = this.byMember.get(member.id);
       if (!socket) continue;
       this.send(socket, { t: "room.ended", by: byMemberId, byUsername });
@@ -1092,14 +1129,93 @@ export class SignalingServer {
   ): void {
     const { roomCode } = connection;
     if (!roomCode) return;
+    this.importGlossary(roomCode, entries);
+  }
+
+  /**
+   * THE glossary import path: merge entries into a room's glossary by RoomSession's rules and
+   * tell everyone in the room. Shared by glossary.import and by a stored glossary joining a room,
+   * so the two cannot come to merge differently.
+   */
+  private importGlossary(roomCode: string, entries: readonly GlossaryEntry[]): void {
     const session = this.sessions.get(roomCode);
     if (!session) return;
-
     session.importGlossary(entries);
     this.broadcastAll(roomCode, {
       t: "glossary.updated",
       entries: [...session.glossaryEntries],
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Per user data: stored glossaries and call history
+  // -------------------------------------------------------------------------
+
+  /**
+   * A signed in user's stored glossary joins the room they just created or joined. Sent AFTER
+   * room.created or room.joined, as a glossary.updated, exactly like an import from the pre join
+   * screen, so a client needs nothing new to receive it. Nothing is sent for an empty glossary.
+   */
+  private mergeStoredGlossary(roomCode: string, userId: string): void {
+    const entries = this.userData?.glossaryFor(userId) ?? [];
+    if (entries.length === 0) return;
+    this.importGlossary(roomCode, entries);
+  }
+
+  private openCall(memberId: string, userId: string, roomCode: string, peerUserId: string | null, now: number): void {
+    if (!this.userData) return;
+    const callId = this.userData.callStarted({ userId, roomHash: roomHash(roomCode), peerUserId, now });
+    if (callId !== null) this.calls.set(memberId, { callId, userId, peerUserId });
+  }
+
+  /**
+   * Someone joined the member's room. A row with nobody on the other end yet gets them. A row
+   * that already names somebody (a host whose first guest left before this one arrived) is
+   * closed and a new one opened, so each row is one conversation with one person and contacts
+   * count calls rather than rooms.
+   */
+  private peerCall(memberId: string, peerUserId: string, roomCode: string, now: number): void {
+    if (!this.userData) return;
+    const open = this.calls.get(memberId);
+    if (!open) return;
+    if (open.peerUserId === null) {
+      this.userData.callPeered(open.callId, peerUserId);
+      open.peerUserId = peerUserId;
+      return;
+    }
+    this.closeCall(memberId, now);
+    this.openCall(memberId, open.userId, roomCode, peerUserId, now);
+  }
+
+  private closeCall(memberId: string, now: number): void {
+    const open = this.calls.get(memberId);
+    if (!open) return;
+    this.calls.delete(memberId);
+    this.userData?.callEnded(open.callId, now);
+  }
+
+  /**
+   * An account was deleted: close every live socket it holds, with a NORMAL close code.
+   *
+   * A socket in a room leaves it through handleLeave, so the room continues or ends by the
+   * existing rules (a guest leaving leaves the host a room; the host leaving ends it). A seat
+   * held with no socket (mid reconnect) is not chased: its grace window runs out as it would for
+   * anyone, and it cannot be resumed, because resuming needs an upgrade and the upgrade needs an
+   * account that exists.
+   */
+  disconnectUser(userId: string): void {
+    const now = Date.now();
+    let closed = 0;
+    for (const connection of [...this.connections.values()]) {
+      if (connection.userId !== userId) continue;
+      closed += 1;
+      if (connection.roomCode && connection.memberId) {
+        this.handleLeave(connection, now);
+      } else {
+        connection.socket.close(CLOSE.normal, "account deleted");
+      }
+    }
+    log.info("ws.account_disconnected", { user: userId, sockets: closed });
   }
 
   // -------------------------------------------------------------------------
@@ -1209,6 +1325,7 @@ export class SignalingServer {
 
     for (const { room, member } of released) {
       this.byMember.delete(member.id);
+      this.closeCall(member.id, now);
       if (member.isHost) {
         // The host's grace window ran out, so they are gone rather than blinking. This is the
         // other end of the same rule as handleLeave: a transient drop keeps the call alive for
@@ -1221,6 +1338,7 @@ export class SignalingServer {
     }
 
     for (const room of destroyed) {
+      for (const member of room.members) this.closeCall(member.id, now);
       this.sessions.delete(room.code);
       // The third lifetime. Room, session, and translation queue all end here now; the queue used
       // to be left behind and accumulate one entry per room for the life of the process.
@@ -1258,6 +1376,12 @@ export class SignalingServer {
 
   /** For tests and graceful shutdown. */
   close(): void {
+    // Rooms die with the process, so every call still open ends now. Without this a graceful
+    // restart would leave each one reading "live" forever.
+    const now = Date.now();
+    for (const memberId of [...this.calls.keys()]) this.closeCall(memberId, now);
+    this.unsubscribeDeleted?.();
+    this.unsubscribeDeleted = null;
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.sweepTimer = null;
     if (this.pingTimer) clearInterval(this.pingTimer);

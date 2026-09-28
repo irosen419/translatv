@@ -702,20 +702,33 @@ try {
     "Ben's page to come back",
   );
   check("a reload lands on a usable page rather than a blank one", backUp.length > 0);
-  // Back in English: a reload drops the seat and the chosen dialect with it, so Ben lands on the
-  // same first screen anybody else would.
+  // A reload drops the seat, so Ben lands on the same first screen anybody else would. It may
+  // paint in the browser's English for the moment before his stored preference arrives.
   check(
     "the room code is remembered for rejoining",
-    backUp.includes(en("landing.codeLabel")) || backUp.includes(en("panel.title")),
+    [en("landing.codeLabel"), en("panel.title"), es("landing.codeLabel"), es("panel.title")].some((t) =>
+      backUp.includes(t),
+    ),
   );
+  // Ben picked es-AR before his first join, and that choice is stored on his account (M5), so
+  // the page settles in his dialect rather than staying in the browser's English.
+  const inHisDialect = await waitFor(
+    async () => ((await ben.locator("body").innerText()).includes(es("landing.join")) ? true : null),
+    "Ben's stored dialect to apply after the reload",
+  );
+  check("a reload restores the dialect stored on the account", inHisDialect === true);
 
   // Put Ben back in the room. A reload drops the media permission grant, so he rejoins through
-  // the form exactly as a real person would after refreshing.
+  // the form exactly as a real person would after refreshing. The picker already reads es-AR,
+  // from the stored preference, so it is left alone.
   if (!(await ben.locator(".room").isVisible())) {
-    await ben.getByLabel("Room code").fill(code);
-    await ben.getByRole("button", { name: "Join chat" }).click();
-    await ben.getByLabel("Your name, just for this chat").fill("Ben");
-    await ben.getByLabel("Your language and region").selectOption("es-AR");
+    await ben.getByLabel(es("landing.codeLabel")).fill(code);
+    await ben.getByRole("button", { name: es("landing.join") }).click();
+    await ben.getByLabel(es("prejoin.name.label")).fill("Ben");
+    check(
+      "the pre join dialect defaults from the stored preference",
+      (await ben.getByLabel(es("prejoin.dialect.label")).inputValue()) === "es-AR",
+    );
     await ben.getByRole("button", { name: es("prejoin.submit.join") }).click();
     await waitFor(async () => ben.locator(".room").isVisible(), "Ben to rejoin after reloading");
   }
@@ -870,6 +883,45 @@ try {
     "the code to be refused after ending",
   ).catch(() => null);
   check("the code is dead after ending", Boolean(dead));
+
+  // ---------------------------------------------------------------------
+  section("Deleting an account");
+  // A page of its own, outside the console error watch above: the wrong password below answers
+  // 401 on purpose, and so does the sign in attempt after the account is gone.
+  const eve = await (await browser.newContext()).newPage();
+  await signUpViaScreen(eve, "Eve");
+  await eve.getByRole("button", { name: en("account.delete.open") }).click();
+  await eve.getByLabel(en("account.delete.password")).fill("not the password");
+  await eve.getByRole("button", { name: en("account.delete.confirm") }).click();
+  check(
+    "deleting needs the password: a wrong one is refused with a sentence",
+    await eve
+      .getByText(en("account.delete.wrongPassword"))
+      .waitFor()
+      .then(() => true)
+      .catch(() => false),
+  );
+  await eve.getByLabel(en("account.delete.password")).fill(PASSWORD);
+  await eve.getByRole("button", { name: en("account.delete.confirm") }).click();
+  check(
+    "the right password deletes the account and signs out",
+    await eve
+      .getByRole("button", { name: en("auth.submit.signIn") })
+      .waitFor()
+      .then(() => true)
+      .catch(() => false),
+  );
+  await eve.getByLabel(en("auth.email")).fill(emailFor("Eve"));
+  await eve.getByLabel(en("auth.password")).fill(PASSWORD);
+  await eve.getByRole("button", { name: en("auth.submit.signIn") }).click();
+  check(
+    "and the deleted account can no longer sign in",
+    await eve
+      .getByText(en("auth.error.INVALID_CREDENTIALS"))
+      .waitFor()
+      .then(() => true)
+      .catch(() => false),
+  );
 
   // ---------------------------------------------------------------------
   section("Credentials stay out of URLs");

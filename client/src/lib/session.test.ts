@@ -77,6 +77,11 @@ function fakeServer(clock: { now: number }) {
       case "/api/auth/logout":
         live.delete(String(body["refreshToken"]));
         return new Response(null, { status: 204 });
+      case "/api/account":
+        if (authorization !== `Bearer access-${serial}`) return json(401, { error: "UNAUTHENTICATED" });
+        if (body["password"] !== "right password") return json(401, { error: "INVALID_CREDENTIALS" });
+        live.clear();
+        return new Response(null, { status: 204 });
       case "/api/thing":
         return authorization === `Bearer access-${serial}` ? json(200, { ok: true }) : json(401, { error: "UNAUTHENTICATED" });
       default:
@@ -264,5 +269,41 @@ describe("signing out", () => {
     await manager.signIn("ana@example.test", "right password");
     await manager.signOut();
     expect(seen).toEqual(["signedIn", "signedOut"]);
+  });
+});
+
+describe("deleting the account", () => {
+  it("sends the password with the bearer, and on success forgets the session everywhere", async () => {
+    const store = memoryStore();
+    const { manager, server } = setup(store);
+    await manager.signIn("ana@example.test", "right password");
+    const outcome = await manager.deleteAccount("right password");
+    expect(outcome).toEqual({ ok: true });
+    expect(server.calls.at(-1)).toMatchObject({
+      path: "/api/account",
+      body: { password: "right password" },
+      authorization: "Bearer access-1",
+    });
+    expect(store.data[REFRESH_KEY]).toBeUndefined();
+    expect(manager.state()).toEqual({ status: "signedOut", user: null });
+  });
+
+  it("reports a wrong password once, without retrying it, and stays signed in", async () => {
+    const { manager, server } = setup();
+    await manager.signIn("ana@example.test", "right password");
+    const before = server.calls.length;
+    const outcome = await manager.deleteAccount("wrong password");
+    expect(outcome).toEqual({ ok: false, error: "INVALID_CREDENTIALS" });
+    // One request: a retry would spend a second lockout strike on the same typo.
+    expect(server.calls.slice(before).filter((c) => c.path === "/api/account")).toHaveLength(1);
+    expect(manager.state().status).toBe("signedIn");
+  });
+
+  it("reports NETWORK when the server cannot be reached, and stays signed in", async () => {
+    const { manager, server } = setup();
+    await manager.signIn("ana@example.test", "right password");
+    server.setOffline(true);
+    expect(await manager.deleteAccount("right password")).toEqual({ ok: false, error: "NETWORK" });
+    expect(manager.state().status).toBe("signedIn");
   });
 });

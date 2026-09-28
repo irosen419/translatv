@@ -241,6 +241,13 @@ describe("the account screens speak each dialect's register", () => {
     expect(copyFor("es-ES").t("auth.sub")).toBe(copyFor("es").t("auth.sub"));
   });
 
+  it("asks for the password to delete an account in each register", () => {
+    expect(copyFor("es").t("account.delete.password")).toContain("Escribe tu contraseña");
+    expect(copyFor("es-AR").t("account.delete.password")).toContain("Escribí tu contraseña");
+    expect(copyFor("es-CO").t("account.delete.password")).toContain("Escriba su contraseña");
+    expect(copyFor("es-CO").t("account.delete.lead")).toContain("su cuenta");
+  });
+
   it("keeps the password minimum as a placeholder in every language", () => {
     for (const dialect of ["en-US", "es", "es-AR", "es-CO", "es-ES"]) {
       expect(copyFor(dialect).t("auth.error.WEAK_PASSWORD", { min: 10 })).toContain("10");

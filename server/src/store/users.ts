@@ -58,3 +58,13 @@ export function syncOwner(store: Store, ownerEmail: string | null): void {
     .prepare("UPDATE users SET is_owner = CASE WHEN email = ? THEN 1 ELSE 0 END")
     .run(ownerEmail ?? "");
 }
+
+/**
+ * Delete an account. Every row that belongs to it goes with it through ON DELETE CASCADE
+ * (refresh tokens, preferences, glossary, its own call history), and every row that merely
+ * MENTIONS it is kept with the mention nulled (invites it made or used, other people's call
+ * history). True when a row was deleted.
+ */
+export function deleteUser(store: Store, id: string): boolean {
+  return Number(store.db.prepare("DELETE FROM users WHERE id = ?").run(id).changes) === 1;
+}

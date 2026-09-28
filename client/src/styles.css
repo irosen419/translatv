@@ -916,3 +916,10 @@ dialog p { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 1
   .gear-button svg { transition: none; }
   .control-drawer { transition: none; }
 }
+
+/* Deleting the account: opens in place of its link, full width inside the account strip. The two
+   buttons wrap onto their own lines rather than shrink, since "Conservar mi cuenta" and "Eliminar
+   mi cuenta" are each longer than the English and neither may ever be cut short. */
+.delete-account { width: 100%; font-size: 13px; }
+.delete-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.delete-actions > button { flex: 1 1 auto; }

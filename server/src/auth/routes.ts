@@ -1,4 +1,5 @@
-// The account API: /api/auth/* and /api/invites.
+// The account API: /api/auth/*, /api/invites, and (M5) the per user data under /api/me/* and
+// DELETE /api/account.
 //
 // Thin on purpose. AuthService decides; this maps its answers to status codes, parses and bounds
 // the body, and applies the per IP limits. Every error body is `{ error: <code> }` and nothing
@@ -10,6 +11,7 @@
 import express, { type NextFunction, type Request, type Response, type Router } from "express";
 import type { AuthErrorCode } from "@translatv/shared";
 
+import type { AccountService } from "../account/service.js";
 import type { Config } from "../config.js";
 import { log } from "../log.js";
 import { TokenBuckets, type BucketConfig } from "../security/rateLimit.js";
@@ -56,7 +58,15 @@ function answer<T>(res: Response, result: AuthResult<T>, okStatus = 200): void {
   else fail(res, result.error);
 }
 
-export function createAuthRouter(config: Config, auth: AuthService): Router {
+/**
+ * The body limit for PUT /api/me/glossary, the one route whose honest body is larger than 4kb.
+ * The largest valid glossary is LIMITS.glossaryEntries entries of a 200 and a 400 character
+ * term: 24,000 characters, which JSON can spell as up to six bytes each (a backslash u escape), so about
+ * 150kb. Anything past this is refused before it is parsed.
+ */
+export const GLOSSARY_BODY_LIMIT = "256kb";
+
+export function createAuthRouter(config: Config, auth: AuthService, account?: AccountService): Router {
   const router = express.Router();
   const limiters = {
     signup: new TokenBuckets(AUTH_LIMITS.signup),
@@ -71,8 +81,16 @@ export function createAuthRouter(config: Config, auth: AuthService): Router {
     next();
   });
 
-  // Bounded hard. The largest honest body is a signup, a few hundred bytes.
-  router.use(express.json({ limit: "4kb" }));
+  // Bounded hard. The largest honest body is a signup, a few hundred bytes, except for a stored
+  // glossary, which gets its own larger limit on its own route and is the only exception.
+  const smallJson = express.json({ limit: "4kb" });
+  router.use((req, res, next) => {
+    if (req.method === "PUT" && req.path === "/me/glossary") {
+      next();
+      return;
+    }
+    smallJson(req, res, next);
+  });
 
   /** Take a token from one bucket for this address, or answer 429 and return false. */
   const limited = (kind: keyof typeof limiters) => (req: Request, res: Response, next: NextFunction) => {
@@ -139,6 +157,67 @@ export function createAuthRouter(config: Config, auth: AuthService): Router {
     log.info("invite.created", { by: userId });
     res.status(201).json(invite);
   });
+
+  // Deleting the account. On the LOGIN bucket, not the account one, because it checks a password
+  // and is therefore a guessing target; the lockout in AuthService is the wall behind it.
+  router.delete("/account", limited("login"), (req, res, next) => {
+    const userId = requireUser(req, res);
+    if (userId === null) return;
+    auth.deleteAccount(userId, req.body, Date.now()).then((result) => {
+      if (result.ok) res.status(204).end();
+      else fail(res, result.error);
+    }, next);
+  });
+
+  // Per user data (M5). Absent only in tests of the auth routes on their own.
+  if (account) {
+    router.get("/me/preferences", limited("account"), (req, res) => {
+      const userId = requireUser(req, res);
+      if (userId === null) return;
+      res.json(account.preferencesFor(userId));
+    });
+
+    router.put("/me/preferences", limited("account"), (req, res) => {
+      const userId = requireUser(req, res);
+      if (userId === null) return;
+      answer(res, account.setPreferences(userId, req.body, Date.now()));
+    });
+
+    router.get("/me/glossary", limited("account"), (req, res) => {
+      const userId = requireUser(req, res);
+      if (userId === null) return;
+      res.json({ entries: account.glossaryFor(userId) });
+    });
+
+    // The limiter and the bearer come BEFORE the large body parser, so an anonymous or flooding
+    // caller is refused without the server reading 256kb on their behalf.
+    router.put(
+      "/me/glossary",
+      limited("account"),
+      (req, res, next) => {
+        const userId = requireUser(req, res);
+        if (userId === null) return;
+        res.locals["userId"] = userId;
+        next();
+      },
+      express.json({ limit: GLOSSARY_BODY_LIMIT }),
+      (req, res) => {
+        answer(res, account.setGlossary(String(res.locals["userId"]), req.body));
+      },
+    );
+
+    router.get("/me/calls", limited("account"), (req, res) => {
+      const userId = requireUser(req, res);
+      if (userId === null) return;
+      answer(res, account.callsFor(userId, req.query));
+    });
+
+    router.get("/me/contacts", limited("account"), (req, res) => {
+      const userId = requireUser(req, res);
+      if (userId === null) return;
+      res.json(account.contactsFor(userId));
+    });
+  }
 
   // Unknown paths under /api answer a code rather than falling through to the SPA's index.html,
   // which would hand a JSON client an HTML page with a 200.

@@ -11,6 +11,7 @@ import type { Config } from "./config.js";
 import { log } from "./log.js";
 import { createAuthRouter } from "./auth/routes.js";
 import type { AuthService } from "./auth/service.js";
+import type { AccountService } from "./account/service.js";
 
 /**
  * Content Security Policy.
@@ -51,6 +52,7 @@ export function createApp(
   clientDist: string,
   translation?: TranslationStatus,
   auth?: AuthService,
+  account?: AccountService,
 ): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -70,7 +72,7 @@ export function createApp(
 
   // The account API. Absent only in tests that exercise the rest of the surface on its own; the
   // real server always passes one.
-  if (auth) app.use("/api", createAuthRouter(config, auth));
+  if (auth) app.use("/api", createAuthRouter(config, auth, account));
 
   app.get("/healthz", (_req, res) => {
     // Distinguishes "no key configured" from "the key was rejected at runtime". Both leave

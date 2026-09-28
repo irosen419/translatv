@@ -348,3 +348,105 @@ describe("invites", () => {
     expect(code).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
   });
 });
+
+describe("deleteAccount", () => {
+  /** Every value in every column of every table, so "no row mentions this id" is checked literally. */
+  function tablesHolding(value: string): string[] {
+    const tables = store.db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .all()
+      .map((row) => String(row["name"]));
+    const holding: string[] = [];
+    for (const table of tables) {
+      const columns = store.db.prepare(`PRAGMA table_info(${table})`).all().map((c) => String(c["name"]));
+      for (const column of columns) {
+        const hit = store.db.prepare(`SELECT 1 AS hit FROM ${table} WHERE ${column} = ? LIMIT 1`).get(value);
+        if (hit) holding.push(`${table}.${column}`);
+      }
+    }
+    return holding;
+  }
+
+  it("refuses the wrong password and leaves the account exactly as it was", async () => {
+    const auth = service();
+    const session = await signedUp(auth);
+    const result = await auth.deleteAccount(session.user.id, { password: "not the password" }, NOW);
+    expect(result).toEqual({ ok: false, error: "INVALID_CREDENTIALS" });
+    expect(auth.userFor(session.user.id)).not.toBeNull();
+    expect(auth.refresh({ refreshToken: session.refreshToken }, NOW).ok).toBe(true);
+  });
+
+  it("refuses a body that does not parse", async () => {
+    const auth = service();
+    const session = await signedUp(auth);
+    expect(await auth.deleteAccount(session.user.id, {}, NOW)).toEqual({ ok: false, error: "INVALID_INPUT" });
+  });
+
+  it("counts wrong passwords toward the lockout, so a stolen access token cannot guess freely", async () => {
+    const auth = service();
+    const session = await signedUp(auth);
+    for (let i = 0; i < MAX_FAILURES; i += 1) {
+      await auth.deleteAccount(session.user.id, { password: `wrong ${i} wrong` }, NOW);
+    }
+    expect(await auth.deleteAccount(session.user.id, { password: PASSWORD }, NOW)).toEqual({
+      ok: false,
+      error: "LOCKED",
+    });
+    expect(auth.userFor(session.user.id)).not.toBeNull();
+  });
+
+  it("with the right password removes every trace: no table holds the id, and no session works", async () => {
+    const auth = service({ ownerEmail: "ana@example.test" });
+    const session = await signedUp(auth, "ana@example.test");
+    const id = session.user.id;
+    // A second sign in, an invite this user minted, and one they spent (their own signup).
+    const second = await auth.login({ email: "ana@example.test", password: PASSWORD }, NOW);
+    auth.createInvite(id, NOW);
+    // Rows in every per user table.
+    store.db.prepare("INSERT INTO user_preferences (user_id, dialect, ui_dialect, updated_at) VALUES (?, 'es-AR', NULL, ?)").run(id, NOW);
+    store.db
+      .prepare("INSERT INTO user_glossary (user_id, position, source, target, source_dialect, target_dialect) VALUES (?, 0, 'a', 'b', 'es-AR', 'en-US')")
+      .run(id);
+    store.db
+      .prepare("INSERT INTO call_history (id, user_id, room_hash, peer_user_id, started_at) VALUES ('c1', ?, 'h', NULL, ?)")
+      .run(id, NOW);
+    expect(tablesHolding(id).length).toBeGreaterThan(3);
+
+    const deleted: string[] = [];
+    auth.onAccountDeleted((userId) => deleted.push(userId));
+    const result = await auth.deleteAccount(id, { password: PASSWORD }, NOW + 1);
+
+    expect(result).toEqual({ ok: true, value: null });
+    expect(tablesHolding(id)).toEqual([]);
+    expect(deleted).toEqual([id]);
+    expect((await auth.login({ email: "ana@example.test", password: PASSWORD }, NOW + 2)).ok).toBe(false);
+    expect(auth.refresh({ refreshToken: session.refreshToken }, NOW + 2)).toEqual({ ok: false, error: "INVALID_REFRESH" });
+    if (second.ok) {
+      expect(auth.refresh({ refreshToken: second.value.refreshToken }, NOW + 2).ok).toBe(false);
+    }
+    expect(auth.verifyAccess(session.accessToken, NOW + 2)).toBeNull();
+  });
+
+  it("keeps the peer's call history, with nobody on the other end", async () => {
+    const auth = service();
+    const ana = await signedUp(auth, "ana@example.test");
+    const ben = await signedUp(auth, "ben@example.test");
+    store.db
+      .prepare("INSERT INTO call_history (id, user_id, room_hash, peer_user_id, started_at, ended_at) VALUES ('b1', ?, 'h', ?, ?, ?)")
+      .run(ben.user.id, ana.user.id, NOW, NOW + 60_000);
+
+    expect((await auth.deleteAccount(ana.user.id, { password: PASSWORD }, NOW)).ok).toBe(true);
+
+    expect(store.db.prepare("SELECT user_id, room_hash, peer_user_id, started_at, ended_at FROM call_history").all()).toEqual([
+      { user_id: ben.user.id, room_hash: "h", peer_user_id: null, started_at: NOW, ended_at: NOW + 60_000 },
+    ]);
+  });
+
+  it("refuses an account that no longer exists", async () => {
+    const auth = service();
+    expect(await auth.deleteAccount("gone", { password: PASSWORD }, NOW)).toEqual({
+      ok: false,
+      error: "UNAUTHENTICATED",
+    });
+  });
+});

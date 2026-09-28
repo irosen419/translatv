@@ -3,6 +3,8 @@ import type { PublicUser } from "@translatv/shared";
 import { codeFromShared, isLikelyCode, normalizeCode } from "../lib/code.js";
 import { useCopy } from "../i18n/useCopy.js";
 import type { CopyRef } from "../i18n/copy.js";
+import type { AuthOutcome } from "../lib/session.js";
+import { DeleteAccount } from "./DeleteAccount.jsx";
 
 /** Longest thing worth keeping as a typed code, once it is clear it is not a link. */
 const MAX_TYPED = 12;
@@ -22,9 +24,20 @@ interface Props {
   onSignOut(): void;
   /** Owner only. Resolves the new code, or null when it could not be made. */
   onCreateInvite(): Promise<string | null>;
+  /** Delete the signed in account after the password is typed again. */
+  onDeleteAccount(password: string): Promise<AuthOutcome>;
 }
 
-export function Landing({ initialCode, error, user, onCreate, onJoin, onSignOut, onCreateInvite }: Props) {
+export function Landing({
+  initialCode,
+  error,
+  user,
+  onCreate,
+  onJoin,
+  onSignOut,
+  onCreateInvite,
+  onDeleteAccount,
+}: Props) {
   const [code, setCode] = useState(initialCode ?? "");
   const ready = isLikelyCode(code);
   const copy = useCopy();
@@ -112,6 +125,7 @@ export function Landing({ initialCode, error, user, onCreate, onJoin, onSignOut,
             </div>
           )}
           {invite && "failed" in invite && <p className="hint bad">{copy.t("account.invite.failed")}</p>}
+          {user && <DeleteAccount onDelete={onDeleteAccount} />}
         </div>
       </div>
     </div>

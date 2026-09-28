@@ -17,6 +17,7 @@
 
 import { createHash, createHmac, hkdfSync, randomBytes, randomInt } from "node:crypto";
 import {
+  deleteAccountRequest,
   loginRequest,
   refreshRequest,
   signupRequest,
@@ -38,6 +39,7 @@ import {
 } from "../store/refreshTokens.js";
 import type { Store } from "../store/store.js";
 import {
+  deleteUser,
   findUserByEmail,
   findUserById,
   insertUser,
@@ -123,6 +125,8 @@ export class AuthService {
   private readonly lockoutKey: Buffer;
   /** Pruning is cheap but not free; once a minute is plenty for tables this small. */
   private lastPrune = 0;
+  /** Told the id of each deleted account, after the delete commits (the socket layer listens). */
+  private readonly deletedListeners = new Set<(userId: string) => void>();
 
   constructor(
     private readonly store: Store,
@@ -276,6 +280,68 @@ export class AuthService {
   userFor(userId: string): PublicUser | null {
     const user = findUserById(this.store, userId);
     return user ? toPublic(user) : null;
+  }
+
+  // -------------------------------------------------------------------------
+  // Deleting an account
+  // -------------------------------------------------------------------------
+
+  /**
+   * Delete the signed in account, after proving the password again.
+   *
+   * Re authentication, because the access token only proves this device was signed in within
+   * fifteen minutes, and this cannot be undone. A wrong password counts toward the same lockout
+   * a login does: otherwise a stolen access token would buy an unlimited password oracle.
+   *
+   * One transaction deletes the user row, and ON DELETE does the rest (migrations.ts): refresh
+   * tokens, preferences, glossary and the user's own call history cascade, which is what revokes
+   * every session, and the rows that only MENTION the user (invites, other people's call history)
+   * keep standing with the mention nulled. Access tokens already issued die on their next use,
+   * because verifyAccess looks the account up. The spend ledger is a file this never opens.
+   *
+   * Listeners run after the commit, so the socket layer disconnects a user who is really gone.
+   */
+  async deleteAccount(userId: string, body: unknown, now: number): Promise<AuthResult<null>> {
+    const parsed = deleteAccountRequest.safeParse(body);
+    if (!parsed.success) return refuse("INVALID_INPUT");
+    const user = findUserById(this.store, userId);
+    if (!user) return refuse("UNAUTHENTICATED");
+
+    const lockKey = this.emailKey(user.email);
+    const lock = findLockout(this.store, lockKey);
+    if (lock?.lockedUntil !== null && lock?.lockedUntil !== undefined && lock.lockedUntil > now) {
+      log.warn("auth.locked", {});
+      return refuse("LOCKED");
+    }
+    if (!(await verifyPassword(parsed.data.password, user.passwordHash))) {
+      this.recordFailure(lockKey, now);
+      log.warn("account.delete_refused", { user: userId });
+      return refuse("INVALID_CREDENTIALS");
+    }
+
+    const removed = this.store.transaction(() => {
+      const gone = deleteUser(this.store, userId);
+      clearLockout(this.store, lockKey);
+      return gone;
+    });
+    // Deleted by another request during the password check. Same answer as a token for nobody.
+    if (!removed) return refuse("UNAUTHENTICATED");
+
+    log.info("account.deleted", { user: userId });
+    for (const listener of this.deletedListeners) {
+      try {
+        listener(userId);
+      } catch (error) {
+        log.error("account.deleted_listener_failed", { error: error instanceof Error ? error.message : "unknown" });
+      }
+    }
+    return { ok: true, value: null };
+  }
+
+  /** Hear about every deleted account. Returns the unsubscribe. */
+  onAccountDeleted(listener: (userId: string) => void): () => void {
+    this.deletedListeners.add(listener);
+    return () => this.deletedListeners.delete(listener);
   }
 
   // -------------------------------------------------------------------------
