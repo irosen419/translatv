@@ -103,6 +103,25 @@ export function normalizeInvite(input: string): string {
     .replace(/U/g, "V");
 }
 
+/**
+ * Mint one single use invite straight into the store, and return the code (only its hash is kept).
+ *
+ * AuthService.createInvite is this. The CLI calls it directly rather than through an AuthService,
+ * because constructing one also makes the owner flag agree with ITS OWNER_EMAIL: run from a shell
+ * where OWNER_EMAIL was not set, the CLI demoted the live owner.
+ */
+export function mintInvite(store: Store, createdBy: string | null, now: number): { code: string; expiresAt: number } {
+  const code = generateInvite();
+  const expiresAt = now + INVITE_TTL_MS;
+  insertInvite(store, {
+    codeHash: sha256(normalizeInvite(code)),
+    createdBy,
+    createdAt: now,
+    expiresAt,
+  });
+  return { code, expiresAt };
+}
+
 function generateInvite(): string {
   const groups: string[] = [];
   for (let g = 0; g < INVITE_GROUPS; g += 1) {
@@ -369,15 +388,7 @@ export class AuthService {
    * one rather than looked up.
    */
   createInvite(createdBy: string | null, now: number): { code: string; expiresAt: number } {
-    const code = generateInvite();
-    const expiresAt = now + INVITE_TTL_MS;
-    insertInvite(this.store, {
-      codeHash: sha256(normalizeInvite(code)),
-      createdBy,
-      createdAt: now,
-      expiresAt,
-    });
-    return { code, expiresAt };
+    return mintInvite(this.store, createdBy, now);
   }
 
   // -------------------------------------------------------------------------
