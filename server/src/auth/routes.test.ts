@@ -235,6 +235,19 @@ describe("/api/me", () => {
     }
   });
 
+  it("refuses an anonymous glossary upload before reading its body", async () => {
+    // The glossary PUT is the one route allowed a 256kb body, so its bearer check comes BEFORE
+    // its body parser: nobody anonymous makes the server read that much. A body that is not JSON
+    // tells the two orders apart, 401 from the bearer check and 400 from the parser.
+    const response = await fetch(`${base}/api/me/glossary`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: "{ this is not json",
+    });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "UNAUTHENTICATED" });
+  });
+
   it("round trips preferences", async () => {
     const { body } = await signup("ana@example.test");
     const token = body.accessToken;
