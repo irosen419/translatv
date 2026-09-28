@@ -49,6 +49,11 @@ const session = new SessionManager({
   clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 });
 
+// Seeded here, at load, rather than only in App's mount effect: an effect runs AFTER the first
+// paint, so a returning visitor's first frame was the sign in form while their stored session was
+// still unread. With a stored refresh token this reads "restoring", which renders the start page.
+useStore.getState().setSession(session.state());
+
 /** The signed in account's stored dialect, loaded on sign in and saved when the picker moves. */
 const preferenceSync = new PreferenceSync((path, init) => session.authorizedFetch(path, init));
 

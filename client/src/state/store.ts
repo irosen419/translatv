@@ -53,8 +53,8 @@ interface State {
   uiDialect: string;
   /**
    * Who is signed in, mirrored from the SessionManager (lib/session.ts) so screens repaint the
-   * moment someone signs in or out. Starts "signedOut" and is corrected by App on mount, before
-   * the first paint that matters, from what the session manager finds in storage.
+   * moment someone signs in or out. Starts "signedOut" and is set by App.tsx when it loads, from
+   * what the session manager finds in storage, so the first render already shows the right screen.
    *
    * NOT an authority on anything: the server decides who may do what, from the access token on
    * each request and each socket. This answers "which screen to show".
