@@ -48,7 +48,13 @@ export function Landing({
         <h1>{copy.t("landing.title")}</h1>
         <p className="sub">{copy.t("landing.sub")}</p>
 
-        {error && <div className="notice bad">{copy.ref(error)}</div>}
+        {/* Announced: after a call ends, this sentence is all that says why (the call is gone
+            from the screen, and focus with it). */}
+        {error && (
+          <div className="notice bad" role="alert">
+            {copy.ref(error)}
+          </div>
+        )}
 
         {/* Any signed in account may start a call. The server is the gate (it refuses an
             unauthenticated socket outright); this page is only ever shown to someone signed in. */}

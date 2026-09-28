@@ -96,7 +96,12 @@ export function AuthScreen({ signupMode, error, onSignIn, onSignUp }: Props) {
         <h1>{copy.t("landing.title")}</h1>
         <p className="sub">{copy.t("auth.sub")}</p>
 
-        {error && <div className="notice bad">{copy.ref(error)}</div>}
+        {/* Announced, like the form's own refusal below: it says why a call ended here. */}
+        {error && (
+          <div className="notice bad" role="alert">
+            {copy.ref(error)}
+          </div>
+        )}
 
         <h2 className="auth-title">{copy.t(mode === "signIn" ? "auth.title.signIn" : "auth.title.signUp")}</h2>
 

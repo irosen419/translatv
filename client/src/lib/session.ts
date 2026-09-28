@@ -142,6 +142,13 @@ export class SessionManager {
   private access: { token: string; expiresAt: number } | null = null;
   private user: PublicUser | null = null;
   private inflight: Promise<string | null> | null = null;
+  /**
+   * Moves on whenever this tab's session is replaced or forgotten, so a refresh already on the
+   * wire cannot bring back the session it began from. Measured in review: a sign out clicked while
+   * the page's restore was out was undone when the refresh answered, and the tab went on as the
+   * account just signed out of, able to start a call, until its access token ran out.
+   */
+  private epoch = 0;
   private timer: unknown = null;
   private readonly listeners = new Set<(state: SessionState) => void>();
 
@@ -281,6 +288,35 @@ export class SessionManager {
   }
 
   /**
+   * The token source for one call's socket, and whether that call ended because the tab moved.
+   *
+   * Every token it hands over is for the account the call was joined as. Tabs share one sign in,
+   * so a refresh (after a failed reconnect, or once a call outlives its access token) can land this
+   * tab on whichever account another tab signed in to last, and a socket opened with that token
+   * rejoined the call as it, under this account's name, and both accounts' history and contacts
+   * gained a call one of them never had (measured in review). Anything else is null, which ends
+   * the call, and moved() then tells a move apart from a sign out or a deletion. A call begun
+   * while the session was still restoring takes the account the restore lands on.
+   */
+  callTokens(): { source: (options: { force: boolean }) => Promise<string | null>; moved: () => boolean } {
+    let account = this.user?.id ?? null;
+    let moved = false;
+    return {
+      source: async (options) => {
+        if (account === null) {
+          const token = await this.accessToken(options);
+          account = this.user?.id ?? null;
+          return token;
+        }
+        const token = await this.accessTokenFor(account, options);
+        moved = token === null && this.user !== null;
+        return token;
+      },
+      moved: () => moved,
+    };
+  }
+
+  /**
    * fetch with the access token, refreshed and retried once on a 401.
    *
    * Only ever as the account this tab showed when the request was made. Tabs share one stored
@@ -346,6 +382,7 @@ export class SessionManager {
 
   private async runRefresh(): Promise<string | null> {
     const exchange = async (): Promise<string | null> => {
+      const epoch = this.epoch;
       // Read INSIDE the lock, not before it: another tab may have rotated the token while this
       // one waited, and the one it stored is the only one still good.
       const token = readRefresh(this.deps.storage);
@@ -363,6 +400,10 @@ export class SessionManager {
       } catch {
         throw new SessionUnavailable("the server could not be reached");
       }
+      // Signed out or in again while this was on the wire: its answer, a verdict or a session,
+      // is about a session this tab no longer has. What the tab holds now stands.
+      const superseded = () => this.epoch !== epoch;
+      if (superseded()) return this.access?.token ?? null;
       if (response.status === 401 || response.status === 400) {
         // A verdict: this token is spent, revoked or expired. Only clear storage if it still
         // holds the token that was refused, so a newer one another tab just stored survives.
@@ -372,6 +413,7 @@ export class SessionManager {
       }
       if (!response.ok) throw new SessionUnavailable(`refresh failed: ${response.status}`);
       const session = (await response.json()) as AuthSession;
+      if (superseded()) return this.access?.token ?? null;
       this.adopt(session);
       return session.accessToken;
     };
@@ -379,6 +421,7 @@ export class SessionManager {
   }
 
   private adopt(session: AuthSession): void {
+    this.epoch += 1;
     writeRefresh(this.deps.storage, session.refreshToken);
     this.access = { token: session.accessToken, expiresAt: session.accessExpiresAt };
     this.user = session.user;
@@ -388,6 +431,7 @@ export class SessionManager {
 
   /** Forget the session in memory, and in storage unless the caller has already decided that. */
   private drop(clearStorage = true): void {
+    this.epoch += 1;
     if (clearStorage) clearRefresh(this.deps.storage);
     this.access = null;
     this.cancelTimer();
