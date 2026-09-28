@@ -241,8 +241,16 @@ function accountOfSocket(protocols) {
   }
 }
 
-/** A notice a screen reader is told about: an alert, or a polite status. */
-const announced = (page, text) => page.locator('[role="alert"], [role="status"]').filter({ hasText: text });
+/**
+ * A notice a screen reader is told about. Each of these arrives with the screen that shows it,
+ * text and all, and a region inserted already holding its text is announced reliably only as an
+ * alert: a polite status announces changes to a region that was already there (reasoned from ARIA
+ * and how screen readers treat live regions; no screen reader was run). So only an alert counts
+ * here. Accepting a status as well let a notice inserted as one pass (measured in review), and that
+ * one is likely silent. A polite region kept mounted, with its text changed in place, would be
+ * announced, and would need this taught to recognize that region.
+ */
+const announced = (page, text) => page.locator('[role="alert"]').filter({ hasText: text });
 
 /**
  * Start `npx tsx server/src/index.ts` as a process group of its own, and stop it as one. npx does
@@ -1411,16 +1419,23 @@ try {
   // And the tab can call again, as the account it holds now: a call object kept for the page's
   // life, rather than made for each call, ended every later call at once as a move, with every
   // check above green (measured in review).
+  const socketsBeforeNewCall = await inCall.evaluate(() => window.__protocols.length);
   await inCall.getByRole("button", { name: "Start a new chat" }).click();
   await inCall.getByLabel("Your name, just for this chat").fill("Jon");
   await inCall.getByLabel("Your language and region").selectOption("en-US");
   await inCall.getByRole("button", { name: /Create and allow microphone/ }).click();
   check(
-    "and it can start a new call, as the account it holds now",
+    "and it can start a new call",
     await waitFor(
       async () => ((await inCall.locator(".code-badge").textContent().catch(() => null)) ?? "").trim().length === 8,
       "a room code in the moved tab",
     ).catch(() => false),
+  );
+  check(
+    "and that call's socket speaks for the account the tab holds now",
+    (await inCall.evaluate((before) => window.__protocols.slice(before), socketsBeforeNewCall))
+      .map(accountOfSocket)
+      .includes(jon.user.id),
   );
   await ivyBrowser.close();
   await hostContext.close();
