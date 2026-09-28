@@ -241,15 +241,20 @@ export class AuthService {
       return refuse("LOCKED");
     }
 
-    if (!user || !matches) {
+    // The account too is read again: it can be deleted (from another device) while its password
+    // was being checked, and a session issued for a row that is gone breaks its foreign key, which
+    // the route turned into a 500. Gone reads exactly as it would have before the check: no such
+    // account.
+    const current = user && matches ? findUserById(this.store, user.id) : null;
+    if (!current) {
       this.recordFailure(lockKey, now);
       log.warn("auth.refused", {});
       return refuse("INVALID_CREDENTIALS");
     }
 
     clearLockout(this.store, lockKey);
-    log.info("auth.login", { user: user.id });
-    return { ok: true, value: this.issueSession(user, randomBytes(16).toString("base64url"), now) };
+    log.info("auth.login", { user: current.id });
+    return { ok: true, value: this.issueSession(current, randomBytes(16).toString("base64url"), now) };
   }
 
   refresh(body: unknown, now: number): AuthResult<AuthSession> {
