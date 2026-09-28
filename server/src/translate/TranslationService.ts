@@ -108,21 +108,31 @@ export interface LlmClient {
     system: string;
     user: string;
     signal: AbortSignal;
+    /**
+     * No request may be sent at or after this time (milliseconds since the epoch). By then the
+     * caller has been told TIMED_OUT, so a request sent later is paid for and read by nobody.
+     */
+    sendBefore: number;
+    /**
+     * Called once for each request that was sent and may have been billed, but whose answer never
+     * came: a connection lost mid request, or an abort while it was in flight. The caller logs
+     * each as unknown, at one request's worst case, the moment it is called. A request that never
+     * left, or that the provider answered with an error, was not billed and is not reported: only
+     * the client can tell those apart, which is why it reports rather than the caller guessing
+     * from the error.
+     */
+    onLost: () => void;
   }): Promise<{ text: string; inputTokens: number; outputTokens: number }>;
-  /**
-   * The most requests one complete() can send, retries included. Each may be billed, so a call
-   * whose cost is unknown is logged at this many times one request's worst case. Absent means 1.
-   */
-  readonly attempts?: number;
 }
 
-/**
- * Whether a failed call may still have been billed. A connection lost mid request, or a failure
- * nobody classified, leaves the answer to that unknown; an error the provider answered with (a
- * status, a refusal) was not billed.
- */
-function fateUnknown(error: unknown): boolean {
-  return !(error instanceof LlmFailure) || error.reason === "connection" || error.reason === "unknown";
+/** A call on its way to the provider, from the moment it is sent until it settles. */
+interface RunningCall {
+  request: TranslateRequest;
+  controller: AbortController;
+  /** One request's worst case, or null when the model has no documented price. */
+  worstCaseUsd: number | null;
+  /** Already logged and aborted at shutdown, so nothing it reports later is logged again. */
+  abandoned: boolean;
 }
 
 /**
@@ -153,8 +163,8 @@ export class LlmFailure extends Error {
 
 export class TranslationService {
   private inFlight = 0;
-  /** Calls the caller stopped waiting for, still running to learn what they cost (settleLate). */
-  private readonly late = new Set<{ request: TranslateRequest; controller: AbortController; worstCaseUsd: number }>();
+  /** Every call still running, in time or late (settleLate), until it settles. */
+  private readonly running = new Set<RunningCall>();
   private readonly queues = new Map<string, Promise<unknown>>();
   /**
    * Set once a terminal failure proves the configuration is wrong.
@@ -327,12 +337,27 @@ export class TranslationService {
 
     const system = buildSystemPrompt(source, target, request.glossary);
     const user = buildUserMessage(request.context, request.text);
-    const worstCaseUsd = this.worstCaseUsd(system, user);
-    const controller = new AbortController();
+    const running: RunningCall = {
+      request,
+      controller: new AbortController(),
+      worstCaseUsd: this.worstCaseUsd(system, user),
+      abandoned: false,
+    };
     const client = this.client;
     this.inFlight += 1;
+    this.running.add(running);
     // Wrapped, so a client that throws rather than rejecting still releases its slot.
-    const call = (async () => client.complete({ system, user, signal: controller.signal }))();
+    const call = (async () =>
+      client.complete({
+        system,
+        user,
+        signal: running.controller.signal,
+        sendBefore: Date.now() + TIMEOUT_MS,
+        // Logged the moment it is reported, like every row: never batched to the end of a call.
+        onLost: () => {
+          if (!running.abandoned) this.record(request, { worstCaseUsd: running.worstCaseUsd }, "no answer");
+        },
+      }))();
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     const outcome = await Promise.race([
@@ -350,7 +375,7 @@ export class TranslationService {
       // Worth another try: the next sentence may land in a quieter moment. The call itself is
       // NOT aborted here, because a request the client abandons is still billed (see settleLate).
       log.warn("translation.timeout", { room: request.roomHash, lineId: request.lineId });
-      this.settleLate(request, call, controller, worstCaseUsd);
+      this.settleLate(running, call);
       return {
         ok: false,
         status: "unavailable",
@@ -359,6 +384,7 @@ export class TranslationService {
       };
     }
     this.inFlight -= 1;
+    this.running.delete(running);
 
     if ("error" in outcome) {
       const error = outcome.error;
@@ -382,11 +408,8 @@ export class TranslationService {
         };
       }
 
-      // A lost connection may have been billed or not, and nothing tells which: logged as
-      // unknown at its worst case, never as free. An error the provider answered with is not
-      // billed, so it writes nothing.
-      if (fateUnknown(error)) this.record(request, { worstCaseUsd }, "no answer");
-
+      // Nothing to log here: the client has already reported each request that was sent and
+      // lost (onLost), and one that never left or that the provider refused was not billed.
       const reason = error instanceof LlmFailure ? error.reason : "unknown";
       log.warn("translation.failed", {
         room: request.roomHash,
@@ -402,12 +425,13 @@ export class TranslationService {
     }
 
     const result = outcome.result;
+    const text = result.text.trim();
     // Log the spend BEFORE returning, so a crash between here and the caller cannot lose the
     // record of money already spent. Batching this to the end of a session is how spend goes
-    // untracked, which is the failure this whole project is built not to repeat.
-    this.record(request, result);
+    // untracked, which is the failure this whole project is built not to repeat. An empty answer
+    // was billed and reached nobody, so no user is charged for it.
+    this.record(request, result, text.length === 0 ? "empty answer" : undefined);
 
-    const text = result.text.trim();
     if (text.length === 0) {
       return {
         ok: false,
@@ -424,81 +448,76 @@ export class TranslationService {
    *
    * It is NOT aborted at the timeout. A request the client abandons is still billed (Anthropic's
    * billing terms), so the abort this used to be only hid the spend: no ledger row for money that
-   * went out. The call runs on, and what it cost is logged when it settles: its real cost if it
-   * answers, or its worst case, counted by the caps, if its connection is lost or it has not
-   * answered by LATE_CEILING_MS, when it is abandoned after all. Its slot stays taken until then,
-   * which bounds a hung provider to MAX_CONCURRENT calls of unknown cost at a time. The late
-   * translation is dropped (the line already showed its original), and none of this is billed to
-   * a user: the house pays for what never reached anyone (owner decision, 2026-09-28).
+   * went out. The call runs on, sending no new request (sendBefore), and what it cost is logged
+   * as it settles: its real cost if it answers, or, for a request that was sent and lost its
+   * answer, one request's worst case, counted by the caps. A call that has not answered by
+   * LATE_CEILING_MS is aborted after all, and the client reports its request lost. Its slot stays
+   * taken until then, which bounds a hung provider to MAX_CONCURRENT calls of unknown cost at a
+   * time. The late translation is dropped (the line already showed its original), and none of
+   * this is charged to a user: the house pays for what never reached anyone (owner decision,
+   * 2026-09-28).
    */
-  private settleLate(
-    request: TranslateRequest,
-    call: Promise<{ text: string; inputTokens: number; outputTokens: number }>,
-    controller: AbortController,
-    worstCaseUsd: number,
-  ): void {
-    const pending = { request, controller, worstCaseUsd };
-    this.late.add(pending);
-    const ceiling = setTimeout(() => controller.abort(), LATE_CEILING_MS - TIMEOUT_MS);
+  private settleLate(running: RunningCall, call: Promise<{ text: string; inputTokens: number; outputTokens: number }>): void {
+    const ceiling = setTimeout(() => running.controller.abort(), LATE_CEILING_MS - TIMEOUT_MS);
     ceiling.unref?.();
     void call
       .then(
         (result) => {
-          if (this.late.has(pending)) this.record(request, result, "answered late");
+          if (!running.abandoned) this.record(running.request, result, "answered late");
         },
-        (error: unknown) => {
-          if (this.late.has(pending) && (controller.signal.aborted || fateUnknown(error))) {
-            this.record(request, { worstCaseUsd }, "no answer");
-          }
-        },
+        // Nothing to log: the client reported each lost request itself, the one the ceiling's
+        // abort cut off included.
+        () => undefined,
       )
       .finally(() => {
         clearTimeout(ceiling);
-        this.late.delete(pending);
+        this.running.delete(running);
         this.inFlight -= 1;
       });
   }
 
   /**
-   * Log every call still running late as unknown, at its worst case, and abandon it.
+   * Log every call still running, late or in time, as one request lost at its worst case, and
+   * abort it. Returns how many.
    *
    * For shutdown: the process is about to exit, and whatever those calls end up costing would
-   * otherwise never reach the ledger.
+   * otherwise never reach the ledger. A call caught between two requests has none in flight and
+   * is counted anyway, because the harmful direction is under-counting.
    */
-  abandonLate(): number {
-    const pending = [...this.late];
-    this.late.clear();
-    for (const { request, controller, worstCaseUsd } of pending) {
-      this.record(request, { worstCaseUsd }, "no answer");
-      controller.abort();
+  abandonInFlight(): number {
+    const calls = [...this.running].filter((call) => !call.abandoned);
+    for (const call of calls) {
+      call.abandoned = true;
+      this.record(call.request, { worstCaseUsd: call.worstCaseUsd }, "no answer");
+      call.controller.abort();
     }
-    return pending.length;
+    return calls.length;
   }
 
   /**
-   * The most one call can be billed, retries included.
+   * The most one request can be billed, or null when the model has no documented price (unknown,
+   * never a zero standing in for it).
    *
    * Input: the prompt's UTF-8 bytes, since a byte level tokenizer never makes more tokens than
    * bytes, plus an allowance for the message framing. Output: MAX_OUTPUT_TOKENS, all of it. Each
-   * attempt the client may send is billed on its own. Far above a real call (about $0.0006
-   * against a worst case near $0.01), which is the point: it stands in for a cost nobody could
-   * recover, and the harmful direction is under-counting.
+   * request is logged on its own row, so a retry is its own worst case. Far above a real call
+   * (about $0.0006 against a worst case near $0.004), which is the point: it stands in for a cost
+   * nobody could recover, and the harmful direction is under-counting.
    */
-  private worstCaseUsd(system: string, user: string): number {
+  private worstCaseUsd(system: string, user: string): number | null {
     const inputTokens = Buffer.byteLength(system, "utf8") + Buffer.byteLength(user, "utf8") + FRAMING_TOKENS;
-    const attempts = Math.max(1, this.client?.attempts ?? 1);
-    return attempts * (costUsd(DEFAULT_MODEL, inputTokens, MAX_OUTPUT_TOKENS) ?? 0);
+    return costUsd(DEFAULT_MODEL, inputTokens, MAX_OUTPUT_TOKENS);
   }
 
   /**
-   * Append one call's spend. `spent` is its usage, or, when nobody can know what it was billed,
-   * its worst case. `unbilled` names why no user may be charged for it (it reached nobody); a
-   * call that answered in time leaves it out and is billable like every ordinary row.
+   * Append one request's spend. `spent` is its usage, or, when nobody can know what it was billed,
+   * its worst case. `unbilled` names why no user may be charged for it (it reached nobody); an
+   * answer delivered in time leaves it out and is billable like every ordinary row.
    */
   private record(
     request: TranslateRequest,
-    spent: { inputTokens: number; outputTokens: number } | { worstCaseUsd: number },
-    unbilled?: "answered late" | "no answer",
+    spent: { inputTokens: number; outputTokens: number } | { worstCaseUsd: number | null },
+    unbilled?: "answered late" | "no answer" | "empty answer",
   ): void {
     try {
       const program =
@@ -520,7 +539,8 @@ export class TranslationService {
             ? { worstCaseUsd: spent.worstCaseUsd }
             : { inputTokens: spent.inputTokens, outputTokens: spent.outputTokens }),
           capUsd: this.gate.capFor(program),
-          note: unbilled === undefined ? request.kind : `${request.kind}, ${unbilled}, not billed`,
+          // "not charged to a user": the provider may well have billed it, and the house pays.
+          note: unbilled === undefined ? request.kind : `${request.kind}, ${unbilled}, not charged to a user`,
           billable: unbilled === undefined,
         }),
         this.repoRoot,

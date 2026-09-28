@@ -123,9 +123,10 @@ export interface SpendRecord {
    */
   worst_case_usd?: number;
   /**
-   * Only as false: spend no user may be charged for, because nothing reached them (a call that
-   * answered after the caller gave up, or never). The house pays it (owner decision, 2026-09-28).
-   * Absent means billable, which is every ordinary row, so older rows need no rewrite.
+   * Only as false: spend no user may be charged for, because nothing reached them (a request
+   * that answered after the caller gave up, that never answered, or that answered with nothing).
+   * The house pays it (owner decision, 2026-09-28). Absent means billable, which is every ordinary
+   * row, so older rows need no rewrite.
    */
   billable?: false;
 }

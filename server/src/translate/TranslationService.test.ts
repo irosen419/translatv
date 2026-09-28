@@ -12,6 +12,7 @@ import { dialectByCode, type Dialect } from "@translatv/shared";
 
 import { PROGRAMS, SpendGate } from "../spend/caps.js";
 import { load } from "../spend/ledger.js";
+import { DEFAULT_MODEL, priceFor } from "../spend/pricing.js";
 import {
   LATE_CEILING_MS,
   LlmFailure,
@@ -567,10 +568,11 @@ describe("the per room promise chain", () => {
 describe("a translation that times out", () => {
   // A request the client abandons is still charged (Anthropic's billing terms), and the timeout
   // used to abort the call and write nothing: real spend, untracked. The call now runs on after
-  // the caller has been told TIMED_OUT. A late answer's real cost is logged; a call that never
-  // answers, or whose connection is lost, is logged as unknown with the most it could have cost,
-  // which the caps count. Neither is ever billed to a user: the house eats it (owner decision,
-  // 2026-09-28). The late translation itself is never delivered: the line already showed.
+  // the caller has been told TIMED_OUT, and every request it sent is accounted for: a late answer
+  // at its real cost, and a request that was sent and lost its answer (reported by the client,
+  // onLost) as unknown at one request's worst case, which the caps count. None of it is charged to
+  // a user: the house eats it (owner decision, 2026-09-28). The late translation itself is never
+  // delivered: the line already showed its original.
   let root: string;
   let gate: SpendGate;
 
@@ -587,35 +589,57 @@ describe("a translation that times out", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  /** A client that settles `afterMs` after it is called, unless it is aborted first. */
-  function settlesAfter(afterMs: number, outcome: "answer" | Error = "answer"): LlmClient {
-    return {
-      complete: ({ signal }) =>
-        new Promise((resolve, reject) => {
-          const timer = setTimeout(() => {
-            if (outcome === "answer") resolve({ text: "tarde", inputTokens: 800, outputTokens: 30 });
-            else reject(outcome);
-          }, afterMs);
+  /**
+   * A client that settles `afterMs` after it is called, the way the real adapter does: a request
+   * cut off by an abort, or whose connection is lost, is reported (onLost) before it rejects.
+   */
+  function settlesAfter(afterMs: number | null, outcome: "answer" | "lost" | Error = "answer"): LlmClient & { aborted: boolean } {
+    const client = {
+      aborted: false,
+      complete: ({ signal, onLost }: Parameters<LlmClient["complete"]>[0]) =>
+        new Promise<{ text: string; inputTokens: number; outputTokens: number }>((resolve, reject) => {
+          let settled = false;
+          const settle = () => {
+            settled = true;
+            if (outcome === "answer") return resolve({ text: "tarde", inputTokens: 800, outputTokens: 30 });
+            if (outcome === "lost") {
+              onLost();
+              return reject(new LlmFailure("retriable", "connection", "could not reach the translation service"));
+            }
+            reject(outcome);
+          };
+          const timer = afterMs === null ? undefined : setTimeout(settle, afterMs);
           signal.addEventListener("abort", () => {
+            // Like the real adapter, which reports only a request still in flight.
+            if (settled) return;
+            client.aborted = true;
             clearTimeout(timer);
+            onLost();
             reject(new Error("aborted"));
           });
         }),
     };
+    return client;
   }
 
-  /** A client that never answers. Only an abort ends its call. */
-  const neverAnswers: LlmClient = {
-    complete: ({ signal }) =>
-      new Promise((_resolve, reject) => {
-        signal.addEventListener("abort", () => reject(new Error("aborted")));
-      }),
-  };
+  /** A client that never answers. Only an abort ends its call, and its request is then lost. */
+  const neverAnswers = (): LlmClient & { aborted: boolean } => settlesAfter(null);
 
-  /** The least a worst case may be: the most output one call can bill, at Haiku 4.5's $5 per MTok. */
-  const MIN_WORST_CASE = (MAX_OUTPUT_TOKENS / 1_000_000) * 5;
+  /**
+   * One request's worst case, worked out here from the spec rather than the code: the prompt's
+   * UTF-8 bytes plus 64 framing tokens in, all of MAX_OUTPUT_TOKENS out, at the documented price.
+   */
+  function worstCaseOf(req: TranslateRequest): number {
+    const price = priceFor(DEFAULT_MODEL);
+    if (price === null) throw new Error(`no documented price for ${DEFAULT_MODEL}`);
+    const bytes = (text: string) => new TextEncoder().encode(text).length;
+    const system = buildSystemPrompt(dialect(req.sourceDialect), dialect(req.targetDialect), req.glossary);
+    const user = buildUserMessage(req.context, req.text);
+    const input = bytes(system) + bytes(user) + 64;
+    return Math.round(((input * price.inputUsdPerMTok + MAX_OUTPUT_TOKENS * price.outputUsdPerMTok) / 1_000_000) * 1e6) / 1e6;
+  }
 
-  it("answers TIMED_OUT at once, then logs what the late answer really cost, never billable", async () => {
+  it("answers TIMED_OUT at once, then logs what the late answer really cost, never charged to a user", async () => {
     const service = new TranslationService(settlesAfter(10_000), gate, root);
     const pending = service.translate(request());
     await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
@@ -631,15 +655,40 @@ describe("a translation that times out", () => {
     expect(rows[0]?.worst_case_usd).toBeUndefined();
   });
 
-  it("gives up on a call that never answers at the ceiling, and logs it as unknown with its worst case", async () => {
-    const service = new TranslationService(neverAnswers, gate, root);
+  it("charges an answer in time like any ordinary row: no billable field at all", async () => {
+    // Only spend that reached nobody is marked. An in time answer marked not billable would be
+    // translation given away, and nothing caught that (measured in review).
+    const service = new TranslationService(settlesAfter(1_000), gate, root);
+    const pending = service.translate(request());
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect((await pending).ok).toBe(true);
+    const rows = load({ root });
+    expect(rows).toHaveLength(1);
+    expect("billable" in (rows[0] ?? {})).toBe(false);
+  });
+
+  it("logs an empty answer at its cost, and never charges a user for it: it reached nobody", async () => {
+    const service = new TranslationService(fakeClient("   "), gate, root);
+    vi.useRealTimers();
+    const result = await service.translate(request());
+    expect(result.ok === false && result.reason).toBe("EMPTY_RESULT");
+    const rows = load({ root });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ cost_source: "logged", billable: false });
+  });
+
+  it("gives up on a call that never answers at the ceiling, and logs its request as unknown at one request's worst case", async () => {
+    const client = neverAnswers();
+    const service = new TranslationService(client, gate, root);
     const pending = service.translate(request());
     await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
     expect((await pending).ok).toBe(false);
     await vi.advanceTimersByTimeAsync(LATE_CEILING_MS - TIMEOUT_MS - 2);
     expect(load({ root })).toHaveLength(0);
+    expect(client.aborted).toBe(false);
 
     await vi.advanceTimersByTimeAsync(2);
+    expect(client.aborted).toBe(true);
     const rows = load({ root });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
@@ -648,24 +697,76 @@ describe("a translation that times out", () => {
       input_tokens: null,
       output_tokens: null,
       billable: false,
+      worst_case_usd: worstCaseOf(request()),
     });
-    expect(rows[0]?.worst_case_usd).toBeGreaterThanOrEqual(MIN_WORST_CASE);
   });
 
-  it("logs a connection lost after the timeout as unknown, with its worst case", async () => {
-    const lost = new LlmFailure("retriable", "connection", "could not reach the translation service");
-    const service = new TranslationService(settlesAfter(8_000, lost), gate, root);
+  it("prices one request's worst case on the prompt's UTF-8 bytes, framing, and all of MAX_OUTPUT_TOKENS", async () => {
+    // Every mutation of this figure review tried (no prompt, UTF-16 units instead of bytes, a
+    // shorter output, a multiplier dropped) under-counts, and only a floor was asserted, so each
+    // passed (measured in review). Exact, with text that is several bytes per character.
+    const req = request({
+      text: "¿Tenés tiempo mañana? Nos vemos en el café 🙂",
+      context: [{ username: "Bea", dialect: "es-AR", text: "¡Qué día! Llegué tardísimo." }],
+      glossary: [{ source: "Ñandú", target: "Ñandú", sourceDialect: "en-US", targetDialect: "es-AR" }],
+    });
+    const service = new TranslationService(settlesAfter(1_000, "lost"), gate, root);
+    const pending = service.translate(req);
+    await vi.advanceTimersByTimeAsync(1_001);
+    await pending;
+    const rows = load({ root });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.worst_case_usd).toBe(worstCaseOf(req));
+    expect(worstCaseOf(req)).toBeGreaterThan(worstCaseOf(request()));
+  });
+
+  it("logs each request the client reports lost, once, even when the call then answers", async () => {
+    // A retry that answers after a request whose connection dropped: both were sent, and the
+    // first may have been billed. One row each.
+    const client: LlmClient = {
+      complete: async ({ onLost }) => {
+        onLost();
+        return { text: "hola", inputTokens: 800, outputTokens: 30 };
+      },
+    };
+    const service = new TranslationService(client, gate, root);
+    vi.useRealTimers();
+    expect((await service.translate(request())).ok).toBe(true);
+    const rows = load({ root });
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ cost_usd: null, billable: false, worst_case_usd: worstCaseOf(request()) });
+    expect(rows[1]).toMatchObject({ cost_source: "logged", input_tokens: 800 });
+    expect("billable" in (rows[1] ?? {})).toBe(false);
+  });
+
+  it("tells the client no request may be sent once the caller has been told TIMED_OUT", async () => {
+    // A retry sent after that is paid for and read by nobody. The client holds to the deadline
+    // (anthropic.test.ts); this pins that the service gives it the right one.
+    let sendBefore = 0;
+    const client: LlmClient = {
+      complete: async (input) => {
+        sendBefore = input.sendBefore;
+        return { text: "hola", inputTokens: 800, outputTokens: 30 };
+      },
+    };
+    const service = new TranslationService(client, gate, root);
+    const asked = Date.now();
+    await service.translate(request());
+    expect(sendBefore).toBe(asked + TIMEOUT_MS);
+  });
+
+  it("logs a connection lost after the timeout as unknown, at one request's worst case", async () => {
+    const service = new TranslationService(settlesAfter(8_000, "lost"), gate, root);
     const pending = service.translate(request());
     await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
     expect((await pending).ok).toBe(false);
     await vi.advanceTimersByTimeAsync(2_000);
     const rows = load({ root });
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ cost_usd: null, billable: false });
-    expect(rows[0]?.worst_case_usd).toBeGreaterThanOrEqual(MIN_WORST_CASE);
+    expect(rows[0]).toMatchObject({ cost_usd: null, billable: false, worst_case_usd: worstCaseOf(request()) });
   });
 
-  it("logs nothing for an error the provider answered after the timeout: a failed request is not billed", async () => {
+  it("logs nothing for a failure the client does not report lost: an error the provider answered, or a request that never left", async () => {
     const refused = new LlmFailure("retriable", "status_500", "translation failed");
     const service = new TranslationService(settlesAfter(8_000, refused), gate, root);
     const pending = service.translate(request());
@@ -673,39 +774,72 @@ describe("a translation that times out", () => {
     expect((await pending).ok).toBe(false);
     await vi.advanceTimersByTimeAsync(LATE_CEILING_MS);
     expect(load({ root })).toHaveLength(0);
+
+    const unreachable = new LlmFailure("retriable", "connection", "could not reach the translation service");
+    const inTime = new TranslationService(settlesAfter(1_000, unreachable), gate, root);
+    const quick = inTime.translate(request({ lineId: "L2" }));
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect((await quick).ok).toBe(false);
+    expect(load({ root })).toHaveLength(0);
   });
 
   it("logs a connection lost before the timeout as unknown too: whether it was billed cannot be known", async () => {
-    const lost = new LlmFailure("retriable", "connection", "could not reach the translation service");
-    const service = new TranslationService(settlesAfter(1_000, lost), gate, root);
+    const service = new TranslationService(settlesAfter(1_000, "lost"), gate, root);
     const pending = service.translate(request());
     await vi.advanceTimersByTimeAsync(1_001);
     const result = await pending;
     expect(result.ok === false && result.reason).toBe("PROVIDER_ERROR");
     const rows = load({ root });
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ cost_usd: null, billable: false });
-    expect(rows[0]?.worst_case_usd).toBeGreaterThanOrEqual(MIN_WORST_CASE);
+    expect(rows[0]).toMatchObject({ cost_usd: null, billable: false, worst_case_usd: worstCaseOf(request()) });
   });
 
-  it("logs every call still running late as unknown at shutdown, once, and abandons it", async () => {
-    // The process is about to exit, and what those calls cost would never reach the ledger.
-    const service = new TranslationService(neverAnswers, gate, root);
-    const pending = service.translate(request());
+  it("at shutdown, logs every call still running, late or in time, as unknown, once, and aborts it", async () => {
+    // The process is about to exit, and what those calls cost would never reach the ledger. An in
+    // time call lost its row on SIGTERM before (measured in review, with a real server process).
+    const late = neverAnswers();
+    const inTime = neverAnswers();
+    const service = new TranslationService(late, gate, root);
+    const pending = service.translate(request({ roomHash: "lateroom00000000" }));
     await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
     expect((await pending).ok).toBe(false);
+    const other = new TranslationService(inTime, gate, root);
+    const running = other.translate(request({ roomHash: "intimeroom000000" }));
+    await vi.advanceTimersByTimeAsync(1_000);
 
-    expect(service.abandonLate()).toBe(1);
+    expect(service.abandonInFlight()).toBe(1);
+    expect(other.abandonInFlight()).toBe(1);
+    expect(late.aborted && inTime.aborted).toBe(true);
+    expect((await running).ok).toBe(false);
     await vi.advanceTimersByTimeAsync(LATE_CEILING_MS);
     const rows = load({ root });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ cost_usd: null, billable: false });
-    expect(rows[0]?.worst_case_usd).toBeGreaterThanOrEqual(MIN_WORST_CASE);
-    expect(service.abandonLate()).toBe(0);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row).toMatchObject({ cost_usd: null, billable: false });
+    expect(service.abandonInFlight() + other.abandonInFlight()).toBe(0);
+  });
+
+  it("does not log a call that answered in time again at shutdown", async () => {
+    const service = new TranslationService(settlesAfter(1_000), gate, root);
+    const pending = service.translate(request());
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect((await pending).ok).toBe(true);
+    expect(service.abandonInFlight()).toBe(0);
+    expect(load({ root })).toHaveLength(1);
+  });
+
+  it("does not log a late call again at shutdown once it has settled", async () => {
+    const service = new TranslationService(settlesAfter(10_000), gate, root);
+    const pending = service.translate(request());
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
+    await pending;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(load({ root })).toHaveLength(1);
+    expect(service.abandonInFlight()).toBe(0);
+    expect(load({ root })).toHaveLength(1);
   });
 
   it("keeps a late call's slot until it settles, so a hung provider cannot pile up unknown spend", async () => {
-    const service = new TranslationService(neverAnswers, gate, root);
+    const service = new TranslationService(neverAnswers(), gate, root);
     const room = (i: number) => `late${String(i).padStart(12, "0")}`;
     const first = Array.from({ length: MAX_CONCURRENT }, (_, i) => service.translate(request({ roomHash: room(i) })));
     await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
@@ -722,4 +856,3 @@ describe("a translation that times out", () => {
     expect(settled.ok === false && settled.reason).toBe("TIMED_OUT");
   });
 });
-

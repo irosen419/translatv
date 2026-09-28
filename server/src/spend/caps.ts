@@ -125,7 +125,7 @@ export class SpendGate {
         roomSpentUsd,
         message:
           `daily cap reached: $${dailySpentUsd.toFixed(4)} of ` +
-          `$${this.config.dailyCapUsd.toFixed(2)} spent today`,
+          `$${this.config.dailyCapUsd.toFixed(2)} counted today (unknown costs at their worst case)`,
       };
     }
 
@@ -137,7 +137,7 @@ export class SpendGate {
         roomSpentUsd,
         message:
           `room cap reached: $${roomSpentUsd.toFixed(4)} of ` +
-          `$${this.config.roomCapUsd.toFixed(2)} spent in this room`,
+          `$${this.config.roomCapUsd.toFixed(2)} counted in this room (unknown costs at their worst case)`,
       };
     }
 

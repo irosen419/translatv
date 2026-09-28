@@ -159,6 +159,55 @@ describe("SpendGate", () => {
     }
   });
 
+  /** A row whose cost is unknown, with the fields a hand edit could leave on it. */
+  function unknown(room: string | null, fields: Record<string, unknown>): void {
+    append(
+      {
+        ...entry({
+          program: PROGRAMS.runtimeTranslation,
+          kind: "translation",
+          model: "claude-haiku-4-5",
+          room,
+          project: "gate",
+          capUsd: CONFIG.roomCapUsd,
+        }),
+        ...fields,
+      },
+      root,
+    );
+  }
+
+  it("counts worst cases against the daily cap too, across rooms each under its own cap", () => {
+    // Only the room cap's arithmetic was reached before, so a daily cap that ignored worst
+    // cases passed every test (measured in review).
+    seedEmptyLedger();
+    for (const room of ["A", "B", "C"]) unknown(roomHash(room), { worst_case_usd: 0.4, billable: false });
+    const decision = new SpendGate(root, CONFIG, "gate").check(roomHash("D"));
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) {
+      expect(decision.reason).toBe("daily_cap");
+      expect(decision.dailySpentUsd).toBe(1.2);
+    }
+  });
+
+  it("counts a row that has a cost at its cost, even if a hand edit left a worst case beside it", () => {
+    // entry() refuses to write the two together; the gate still reads what the file holds.
+    seedEmptyLedger();
+    unknown(ROOM, { cost_usd: 0.1, cost_source: "logged", worst_case_usd: 5 });
+    const decision = new SpendGate(root, CONFIG, "gate").check(ROOM);
+    expect(decision.allowed).toBe(true);
+    expect(decision.roomSpentUsd).toBe(0.1);
+  });
+
+  it("never counts a negative worst case as a credit against the caps", () => {
+    seedEmptyLedger();
+    spend(0.6, ROOM);
+    unknown(ROOM, { worst_case_usd: -5 });
+    const decision = new SpendGate(root, CONFIG, "gate").check(ROOM);
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) expect(decision.roomSpentUsd).toBe(0.6);
+  });
+
   it("survives a restart, because it reads the ledger and not a counter", () => {
     // A fresh gate object is what a restarted process looks like. If spend lived in memory,
     // this would wrongly allow the call and the day's budget would reset on every deploy.

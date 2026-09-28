@@ -83,6 +83,14 @@ describe("load", () => {
     expect(() => entry({ ...base, worstCaseUsd: -0.01 })).toThrow(RangeError);
   });
 
+  it("refuses a worst case that is not a finite amount", () => {
+    // Infinity would lock every cap for good, and NaN would compare as neither over nor under.
+    const base = { program: "p", kind: "translation" as const, model: "claude-haiku-4-5" };
+    for (const worstCaseUsd of [Number.POSITIVE_INFINITY, Number.NaN]) {
+      expect(() => entry({ ...base, worstCaseUsd })).toThrow(RangeError);
+    }
+  });
+
   it("reads every data record", () => {
     expect(fixture()).toHaveLength(EXPECTED_ENTRIES);
   });

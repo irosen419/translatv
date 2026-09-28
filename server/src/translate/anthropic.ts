@@ -27,6 +27,7 @@
 
 import Anthropic, {
   APIConnectionError,
+  APIConnectionTimeoutError,
   APIError,
   AuthenticationError,
   BadRequestError,
@@ -41,14 +42,104 @@ export { MAX_OUTPUT_TOKENS };
 export const TEMPERATURE = 0.2;
 
 /**
- * SDK level retries.
+ * Retries after the first request, made here rather than by the SDK.
  *
- * The default is 2, which is right for a batch job and wrong for a live subtitle: three attempts
- * with backoff can consume the whole 6 second timeout before our own handler ever runs, and the
- * user gets a blank line instead of a fast, honest fallback to the original text. One retry
- * absorbs a single blip; beyond that, showing the original beats a late translation.
+ * The SDK's default is 2, which is right for a batch job and wrong for a live subtitle: three
+ * attempts with backoff can consume the whole 6 second timeout before our own handler ever runs,
+ * and the user gets a blank line instead of a fast, honest fallback to the original text. One
+ * retry absorbs a single blip; beyond that, showing the original beats a late translation.
+ *
+ * The SDK used to make that retry, and nothing held it to the caller's deadline: its wait cannot
+ * be interrupted, so a retry went out after the caller had been told TIMED_OUT, a second paid
+ * request whose answer nobody would read (measured in review: a 429 asking for ten seconds put it
+ * four seconds past the timeout). Here a retry is sent only if it can start before the deadline,
+ * and the SDK is told to make none of its own.
  */
 export const MAX_RETRIES = 1;
+
+/**
+ * Codes that mean a request never left this machine: the host did not resolve, it refused or
+ * could not route the connection, or the connection was never made in time. Nothing was sent, so
+ * nothing was billed. Reported as lost, each was logged at its worst case and counted by the caps,
+ * so an outage filled a room's cap in 182 lines with nothing spent (measured in review).
+ * ECONNREFUSED and ENOTFOUND were measured through this SDK, and UND_ERR_CONNECT_TIMEOUT through
+ * Node's fetch (a TLS handshake that never finished, 10.5 s); the others are the same connect
+ * phase failures in Node's documentation. Every other connection failure may have come after the
+ * request went out.
+ */
+const NEVER_SENT = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
+
+/** The code on an error, and on every cause and aggregated error beneath it. */
+function codesOf(error: unknown, depth = 0): string[] {
+  if (depth > 8 || typeof error !== "object" || error === null) return [];
+  const { code, errors, cause } = error as { code?: unknown; errors?: unknown; cause?: unknown };
+  return [
+    ...(typeof code === "string" ? [code] : []),
+    ...(Array.isArray(errors) ? errors.flatMap((inner) => codesOf(inner, depth + 1)) : []),
+    ...codesOf(cause, depth + 1),
+  ];
+}
+
+/**
+ * Whether a failed request may have been billed: it was sent, and no answer came back. A request
+ * that never left (NEVER_SENT) and one the provider answered with a status were not.
+ */
+function maybeBilled(error: unknown): boolean {
+  if (error instanceof APIConnectionError) {
+    // The SDK's own timeout carries no cause, so where it gave up is unknown.
+    if (error instanceof APIConnectionTimeoutError) return true;
+    const codes = codesOf(error.cause);
+    return !(codes.length > 0 && codes.every((code) => NEVER_SENT.has(code)));
+  }
+  // Anthropic does not bill a request it answered with an error.
+  if (error instanceof APIError && typeof error.status === "number") return false;
+  // Nobody classified it, so nobody can say it was not billed.
+  return true;
+}
+
+/**
+ * How long to wait before the retry, or null when this failure does not deserve one. The rules
+ * the SDK's retries followed: what the server says (x-should-retry), else request timeouts, lock
+ * timeouts, rate limits and server errors; as long as retry-after asks when that is under a
+ * minute, else half a second, less up to a quarter for jitter.
+ */
+function retryDelayMs(error: unknown): number | null {
+  const backoff = 500 * (1 - Math.random() * 0.25);
+  if (error instanceof APIConnectionError) return backoff;
+  if (!(error instanceof APIError) || typeof error.status !== "number") return null;
+  const said = error.headers?.get("x-should-retry");
+  const status = error.status;
+  const retryable = said === "true" || (said !== "false" && (status === 408 || status === 409 || status === 429 || status >= 500));
+  if (!retryable) return null;
+  const asked = retryAfterMs(error.headers);
+  return asked !== null && asked >= 0 && asked < 60_000 ? asked : backoff;
+}
+
+function retryAfterMs(headers: Headers | undefined): number | null {
+  const ms = Number.parseFloat(headers?.get("retry-after-ms") ?? "");
+  if (Number.isFinite(ms)) return ms;
+  const after = headers?.get("retry-after");
+  if (!after) return null;
+  const seconds = Number.parseFloat(after);
+  if (Number.isFinite(seconds)) return seconds * 1000;
+  const at = Date.parse(after);
+  return Number.isFinite(at) ? at - Date.now() : null;
+}
+
+/** Wait, unless the call is aborted first. Nothing is in flight meanwhile, so an abort loses nothing. */
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const stop = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new Error("aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", stop);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", stop, { once: true });
+  });
+}
 
 /**
  * Classify an SDK error into something TranslationService can act on.
@@ -103,30 +194,56 @@ function classify(error: unknown): LlmFailure {
   return new LlmFailure("retriable", "unknown", "translation failed");
 }
 
-export function createAnthropicClient(apiKey: string): LlmClient {
-  const anthropic = new Anthropic({ apiKey, maxRetries: MAX_RETRIES });
+/**
+ * @param options.fetch Stands in for the network, so the adapter's handling of each request can be
+ *   tested against the real SDK with no key and no spend (anthropic.test.ts).
+ */
+export function createAnthropicClient(apiKey: string, options: { fetch?: typeof fetch } = {}): LlmClient {
+  const send = options.fetch ?? globalThis.fetch;
+  const anthropic = new Anthropic({
+    apiKey,
+    maxRetries: 0,
+    // The SDK turns any failure that reads as a timeout into an error with no cause, so a
+    // connection never made (a network that swallows packets) would look like a request lost in
+    // flight and be counted at its worst case. Passed on under its code alone, it stays itself.
+    fetch: (url, init) =>
+      send(url, init).catch((error: unknown) => {
+        if (!codesOf(error).includes("UND_ERR_CONNECT_TIMEOUT")) throw error;
+        throw Object.assign(new TypeError("fetch failed: the connection was never made"), { code: "UND_ERR_CONNECT_TIMEOUT" });
+      }),
+  });
 
   return {
-    // The SDK's own retries each send the request again, and each may be billed.
-    attempts: 1 + MAX_RETRIES,
-    async complete({ system, user, signal }) {
+    async complete({ system, user, signal, sendBefore, onLost }) {
       let response;
-      try {
-        response = await anthropic.messages.create(
-          {
-            model: DEFAULT_MODEL,
-            max_tokens: MAX_OUTPUT_TOKENS,
-            temperature: TEMPERATURE,
-            system,
-            messages: [{ role: "user", content: user }],
-          },
-          { signal },
-        );
-      } catch (error) {
-        // An abort is our own timeout, not a provider fault. Rethrow it untouched so the caller
-        // can tell the two apart; wrapping it would make a timeout look like an API failure.
-        if (signal.aborted) throw error;
-        throw classify(error);
+      for (let attempt = 0; ; attempt += 1) {
+        if (signal.aborted) throw signal.reason ?? new Error("aborted");
+        try {
+          response = await anthropic.messages.create(
+            {
+              model: DEFAULT_MODEL,
+              max_tokens: MAX_OUTPUT_TOKENS,
+              temperature: TEMPERATURE,
+              system,
+              messages: [{ role: "user", content: user }],
+            },
+            { signal },
+          );
+          break;
+        } catch (error) {
+          // Aborted in flight: the request went out, and its answer will never be read. The abort
+          // is the caller's own, not a provider fault, so it is rethrown untouched; wrapping it
+          // would make a timeout look like an API failure.
+          if (signal.aborted) {
+            onLost();
+            throw error;
+          }
+          if (maybeBilled(error)) onLost();
+          const failure = classify(error);
+          const delay = attempt < MAX_RETRIES && failure.kind === "retriable" ? retryDelayMs(error) : null;
+          if (delay === null || Date.now() + delay >= sendBefore) throw failure;
+          await pause(delay, signal);
+        }
       }
 
       const text = response.content
