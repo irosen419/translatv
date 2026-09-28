@@ -179,7 +179,8 @@ and coding runs in cloud sessions wherever possible. Those are not reopened here
 - **Store.** SQLite through Node's built in `node:sqlite` (`DatabaseSync`), with no native
   dependency. Measured working on Node 22.22.2 in the planning container, with an experimental
   warning. Node 20 reached end of life in April 2026, so the server moves to **Node 22 LTS**:
-  - `engines` becomes ">=22.13";
+  - `engines` becomes ">=22.16" (">=22.13" as first planned, raised in review: `isOpen` and
+    `isTransaction` on `DatabaseSync`, which the store uses, arrive in 22.15 and 22.16);
   - the Dockerfile moves to `node:22-alpine`;
   - CI moves to Node 22.
 

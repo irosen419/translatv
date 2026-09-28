@@ -34,8 +34,9 @@ plan of record for the multi-user server and the iOS app.
 
 ## Stack and layout
 
-- Node 22.13+ (22 LTS; the store uses the built in `node:sqlite`) and npm workspaces: `shared` (wire protocol), `server` (Express plus ws), `client`
-  (React 18 plus Vite). TypeScript strict everywhere.
+- Node 22.16+ (22 LTS; the store uses the built in `node:sqlite`, and 22.16 is the first 22
+  release with `DatabaseSync#isTransaction`) and npm workspaces: `shared` (wire protocol),
+  `server` (Express plus ws), `client` (React 18 plus Vite). TypeScript strict everywhere.
 - `shared/src/protocol.ts` is the SINGLE source of truth for the WebSocket wire format. Both sides
   derive their types from its zod schemas, and those same schemas are the server's input validation
   layer. Never hand-write a duplicate type for a message.
