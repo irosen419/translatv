@@ -197,6 +197,53 @@ describe("signing the socket in", () => {
       }
     }));
 
+  it("backs off and retries when a token cannot be had right now, rather than giving up", () =>
+    withFakeSocket(async () => {
+      // A refresh that could not reach the server (a blip mid call) throws. That is not "signed
+      // out", and a call must come back from it on its own once the server answers again.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+      try {
+        const events: string[] = [];
+        let asked = 0;
+        const client = new SignalingSocket(
+          "ws://localhost:5173/ws",
+          {
+            ...quiet,
+            onClose: ({ terminal }) => events.push(`close:${terminal}`),
+            onReconnecting: (attempt) => events.push(`reconnecting:${attempt}`),
+          },
+          async () => {
+            asked += 1;
+            if (asked === 1) throw new Error("the server could not be reached");
+            return "token-2";
+          },
+        );
+        client.connect();
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(events.slice(0, 2)).toEqual(["close:false", "reconnecting:1"]);
+        expect(FakeWebSocket.made).toHaveLength(1);
+        expect(FakeWebSocket.made[0]?.protocols).toEqual(["translatv.v1", "bearer.token-2"]);
+        client.close();
+      } finally {
+        vi.useRealTimers();
+      }
+    }));
+
+  it("opens nothing when closed while its token was still being fetched", () =>
+    withFakeSocket(async () => {
+      let release: (token: string) => void = () => {};
+      const client = new SignalingSocket(
+        "ws://localhost:5173/ws",
+        quiet,
+        () => new Promise<string>((resolve) => (release = resolve)),
+      );
+      client.connect();
+      client.close();
+      release("late.token");
+      await flush();
+      expect(FakeWebSocket.made).toHaveLength(0);
+    }));
+
   it("stops, and says signed out, when there is no session to connect with", () =>
     withFakeSocket(async () => {
       const events: string[] = [];
