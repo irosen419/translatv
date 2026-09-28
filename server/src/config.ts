@@ -72,6 +72,11 @@ export interface Config {
   ownerEmail: string | null;
   dailyCapUsd: number;
   roomCapUsd: number;
+  /**
+   * Per account ceiling per UTC day (USER_DAILY_CAP_USD, default 1.0), charged to the room's
+   * host. Checked beside the two caps above and never instead of them (docs/PLAN.md, D10).
+   */
+  userDailyCapUsd: number;
   iceServers: RTCIceServerConfig[];
   isProduction: boolean;
   /**
@@ -181,6 +186,7 @@ export function loadConfig(repoRoot: string): Config {
     ownerEmail: ownerEmail.length > 0 ? ownerEmail : null,
     dailyCapUsd: num("ANTHROPIC_DAILY_CAP_USD", 10),
     roomCapUsd: num("ROOM_CAP_USD", 1.5),
+    userDailyCapUsd: num("USER_DAILY_CAP_USD", 1.0),
     iceServers,
     isProduction: process.env["NODE_ENV"] === "production",
     trustProxy: (process.env["TRUST_PROXY"] ?? "").trim() === "1",
@@ -225,7 +231,8 @@ export function describeConfig(config: Config): string[] {
   } else {
     lines.push(
       `translation enabled, caps: $${config.dailyCapUsd.toFixed(2)}/day, ` +
-        `$${config.roomCapUsd.toFixed(2)}/room`,
+        `$${config.roomCapUsd.toFixed(2)}/room, ` +
+        `$${config.userDailyCapUsd.toFixed(2)}/user/day`,
     );
   }
 

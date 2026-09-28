@@ -88,6 +88,13 @@ export const MEMBER_DEFAULTS = {
 export interface Room {
   code: string;
   members: Member[];
+  /**
+   * The account that created the room, which is who pays for its translation (docs/PLAN.md, D9
+   * and D10). Fixed at create and never reassigned, so it is a fact about the ROOM rather than a
+   * lookup over its members: the answer cannot depend on which seats happen to be held at the
+   * moment a translation is booked, and nothing a guest does can move the bill onto them.
+   */
+  readonly hostUserId: string;
   /** When the room is destroyed if nobody returns. Null while occupied. */
   destroyDeadline: number | null;
   createdAt: number;
@@ -197,7 +204,13 @@ export class RoomManager {
       isHost: true,
       ...MEMBER_DEFAULTS,
     };
-    const room: Room = { code, members: [member], destroyDeadline: null, createdAt: now };
+    const room: Room = {
+      code,
+      members: [member],
+      hostUserId: userId,
+      destroyDeadline: null,
+      createdAt: now,
+    };
     this.rooms.set(code, room);
     return { room, member, resumeToken };
   }

@@ -17,6 +17,7 @@
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import {
+  attributedUser,
   LedgerNotFound,
   ledgerPath,
   load,
@@ -49,15 +50,31 @@ export interface CapConfig {
   dailyCapUsd: number;
   /** Per room ceiling. Roughly three hours of continuous conversation at the default. */
   roomCapUsd: number;
+  /**
+   * Per account ceiling per UTC day, summed over the rows attributed to that account (user_id),
+   * which is the room's HOST (docs/PLAN.md, D9 and D10).
+   *
+   * It exists because the global cap is shared: without it one account could spend the whole
+   * day's budget and leave every other account with nothing. It can only ever TIGHTEN. check()
+   * requires all three caps to pass, so no value here, however large, lets through a call the
+   * global or room cap refuses.
+   */
+  userDailyCapUsd: number;
 }
 
+/**
+ * userSpentUsd is null when the call is attributed to nobody (no user cap was consulted) or when
+ * the ledger could not be read. It is never 0 for either: 0 would claim a figure that was not
+ * measured.
+ */
 export type CapDecision =
-  | { allowed: true; dailySpentUsd: number; roomSpentUsd: number }
+  | { allowed: true; dailySpentUsd: number; roomSpentUsd: number; userSpentUsd: number | null }
   | {
       allowed: false;
-      reason: "daily_cap" | "room_cap" | "ledger_unreadable";
+      reason: "daily_cap" | "room_cap" | "user_cap" | "ledger_unreadable";
       dailySpentUsd: number | null;
       roomSpentUsd: number | null;
+      userSpentUsd: number | null;
       message: string;
     };
 
@@ -90,9 +107,16 @@ export class SpendGate {
   /**
    * Decide whether one more paid call is allowed.
    *
-   * roomHash is the truncated sha256 the ledger stores, never the room code itself.
+   * roomHash is the truncated sha256 the ledger stores, never the room code itself. userId is the
+   * opaque account id the call will be attributed to (the room's host), or null for spend that
+   * belongs to no account, such as verification. Required rather than optional so that every
+   * caller decides who pays, instead of an omitted argument quietly skipping the per user cap.
+   *
+   * The caps are checked in a fixed order (global, room, user) and the FIRST one that refuses
+   * names the reason. Every one of them is a refusal on its own: a call is allowed only when all
+   * three pass.
    */
-  check(roomHash: string): CapDecision {
+  check(roomHash: string, userId: string | null): CapDecision {
     let records: SpendRecord[];
     try {
       records = this.records();
@@ -105,6 +129,7 @@ export class SpendGate {
           reason: "ledger_unreadable",
           dailySpentUsd: null,
           roomSpentUsd: null,
+          userSpentUsd: null,
           message:
             "spend ledger is missing, so spend to date is unknown. Refusing to spend " +
             "against a cap that cannot be read. Create the ledger, then retry.",
@@ -116,6 +141,13 @@ export class SpendGate {
     const today = new Date().toISOString().slice(0, 10);
     const dailySpentUsd = sum(records.filter((r) => dayOf(r) === today));
     const roomSpentUsd = sum(records.filter((r) => r.room === roomHash));
+    // Only rows that NAME this account count. An unattributed row (every row written before
+    // user_id existed, and verification spend) is real money that already counts toward the day
+    // and the room, and charging it to whoever happens to ask next would be inventing a debt.
+    const userSpentUsd =
+      userId === null
+        ? null
+        : sum(records.filter((r) => dayOf(r) === today && attributedUser(r) === userId));
 
     if (dailySpentUsd >= this.config.dailyCapUsd) {
       return {
@@ -123,6 +155,7 @@ export class SpendGate {
         reason: "daily_cap",
         dailySpentUsd,
         roomSpentUsd,
+        userSpentUsd,
         message:
           `daily cap reached: $${dailySpentUsd.toFixed(4)} of ` +
           `$${this.config.dailyCapUsd.toFixed(2)} spent today`,
@@ -135,13 +168,30 @@ export class SpendGate {
         reason: "room_cap",
         dailySpentUsd,
         roomSpentUsd,
+        userSpentUsd,
         message:
           `room cap reached: $${roomSpentUsd.toFixed(4)} of ` +
           `$${this.config.roomCapUsd.toFixed(2)} spent in this room`,
       };
     }
 
-    return { allowed: true, dailySpentUsd, roomSpentUsd };
+    if (userSpentUsd !== null && userSpentUsd >= this.config.userDailyCapUsd) {
+      // The message names no account. It is written for an operator reading logs, and the log
+      // line that carries it already has the room hash; the account id adds nothing a reader
+      // of that line needs.
+      return {
+        allowed: false,
+        reason: "user_cap",
+        dailySpentUsd,
+        roomSpentUsd,
+        userSpentUsd,
+        message:
+          `user daily cap reached: $${userSpentUsd.toFixed(4)} of ` +
+          `$${this.config.userDailyCapUsd.toFixed(2)} spent today by this room's host`,
+      };
+    }
+
+    return { allowed: true, dailySpentUsd, roomSpentUsd, userSpentUsd };
   }
 
   /**

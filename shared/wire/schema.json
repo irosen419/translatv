@@ -1057,6 +1057,7 @@
         "TOO_FAST",
         "DAILY_CAP",
         "ROOM_CAP",
+        "USER_CAP",
         "LEDGER_UNREADABLE",
         "LEDGER_UNWRITABLE",
         "UNRESOLVED_DIALECT",

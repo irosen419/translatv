@@ -33,6 +33,7 @@ function config(): Config {
     ownerEmail: "owner@example.test",
     dailyCapUsd: 10,
     roomCapUsd: 1.5,
+    userDailyCapUsd: 1,
     iceServers: [],
     isProduction: false,
     trustProxy: false,

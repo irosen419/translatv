@@ -123,7 +123,10 @@ const { TranslationService } = await import(`${REPO}/server/src/translate/Transl
 const { SpendGate, roomHash } = await import(`${REPO}/server/src/spend/caps.ts`);
 const { append, entry } = await import(`${REPO}/server/src/spend/ledger.ts`);
 
-const NO_CAP = { dailyCapUsd: 1e9, roomCapUsd: 1e9 };
+const NO_CAP = { dailyCapUsd: 1e9, roomCapUsd: 1e9, userDailyCapUsd: 1e9 };
+// A host, so the gate does the per user filter a real runtime call does and the measurement
+// includes it.
+const HOST = "latencyHost00000000000";
 const ROOM = roomHash("LATENCY1");
 
 /** A ledger of a given length, in a temporary root. Never the repo's own. */
@@ -178,6 +181,7 @@ function translateRequest(index) {
     context: [],
     glossary: [],
     roomHash: ROOM,
+    userId: HOST,
     kind: "translation",
   };
 }
@@ -197,7 +201,7 @@ async function planeB() {
     const gate = new SpendGate(root, NO_CAP);
     gateSamples[size] = timeSync(() => {
       gate.invalidate();
-      gate.check(ROOM);
+      gate.check(ROOM, HOST);
     }, 20);
     console.log(`  spend gate, ${size} rows: measured`);
   }

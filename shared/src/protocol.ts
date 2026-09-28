@@ -249,6 +249,13 @@ export const translationFailureCode = z.enum([
   "TOO_FAST",
   "DAILY_CAP",
   "ROOM_CAP",
+  /**
+   * The room's HOST has spent their own daily allowance (docs/PLAN.md, D10), although the
+   * server's global budget and this room's budget may still have room. Its own code because it is
+   * a different fact for the reader: it is about the host's account and resets with the UTC day,
+   * where ROOM_CAP is about this call and DAILY_CAP is about everyone.
+   */
+  "USER_CAP",
   /** The spend ledger could not be read, so spending was refused rather than risked. */
   "LEDGER_UNREADABLE",
   /**

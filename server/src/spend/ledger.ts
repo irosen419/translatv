@@ -107,6 +107,17 @@ export interface SpendRecord {
   model: string | null;
   /** A truncated sha256 of the room code. NEVER the code, and never transcript text. */
   room: string | null;
+  /**
+   * The opaque account id this spend is attributed to: the room's HOST, whoever spoke the line
+   * (docs/PLAN.md, D9 and D10). Never an email or a display name. null for spend that belongs to
+   * no account (verification, eval).
+   *
+   * OPTIONAL in the type because the ledger is append only: every row written before this field
+   * existed has no key at all, and those rows must still parse and still total. An absent key and
+   * a null read the same, "unattributed", in both readers. Read it through attributedUser(),
+   * never directly, so the two cannot drift.
+   */
+  user_id?: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
   unit_cost_in_usd_per_mtok: number | null;
@@ -131,6 +142,18 @@ export interface ProgramTotal {
   entries: number;
 }
 
+/**
+ * One account's share of the ledger, or the unattributed remainder.
+ *
+ * Carries its own unparsed_rows for the same reason the whole total does: an account with an
+ * unrecoverable row has spent AT LEAST spent_usd, and the figure has to be able to say so.
+ */
+export interface UserTotal {
+  spent_usd: number;
+  unparsed_rows: number;
+  entries: number;
+}
+
 export interface Totals {
   known_usd: number;
   unparsed_rows: number;
@@ -138,6 +161,14 @@ export interface Totals {
   input_tokens: number;
   output_tokens: number;
   programs: Record<string, ProgramTotal>;
+  /** Per account totals, keyed by the opaque user_id. Only rows that name an account. */
+  users: Record<string, UserTotal>;
+  /**
+   * Every row that names no account: rows from before user_id existed, verification and eval
+   * spend. A separate bucket rather than a reserved key in users, so no real id can collide with
+   * it, and so the per user figures plus this one always add up to the whole.
+   */
+  unattributed: UserTotal;
 }
 
 /**
@@ -229,6 +260,19 @@ export function ledgerWritable(
   }
 }
 
+/**
+ * The account a record is attributed to, or null for an unattributed one.
+ *
+ * Only a non empty string counts. An absent key (a row older than the field), an explicit null,
+ * and anything corrupt (a number, an empty string) are all unattributed: attributing money on the
+ * strength of a value that is not an id would charge it to an account that never spent it.
+ * spend_log.py's attributed_user() applies the same rule.
+ */
+export function attributedUser(record: SpendRecord): string | null {
+  const value: unknown = (record as { user_id?: unknown }).user_id;
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
 function moneyText(value: number): string {
   return String(roundMoney(value));
 }
@@ -279,6 +323,8 @@ export interface EntryOptions {
   kind: SpendKind;
   model: string;
   room?: string | null;
+  /** The opaque account id the spend is attributed to (the room's host), or null for none. */
+  userId?: string | null;
   inputTokens?: number | null;
   outputTokens?: number | null;
   /** Override the computed cost. Normally omitted so the price table does the arithmetic. */
@@ -306,6 +352,7 @@ export function entry(options: EntryOptions): SpendRecord {
     kind,
     model,
     room = null,
+    userId = null,
     inputTokens = null,
     outputTokens = null,
     costUsdOverride,
@@ -344,6 +391,9 @@ export function entry(options: EntryOptions): SpendRecord {
     kind,
     model,
     room,
+    // Always written, null when unattributed, so a new row states the fact rather than leaving
+    // a reader to wonder whether it predates the field.
+    user_id: userId,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     unit_cost_in_usd_per_mtok: inRate,
@@ -522,6 +572,8 @@ export function totals(records: SpendRecord[]): Totals {
   let inputTokens = 0;
   let outputTokens = 0;
   const programs: Record<string, ProgramTotal> = {};
+  const users: Record<string, UserTotal> = {};
+  const unattributed: UserTotal = { spent_usd: 0, unparsed_rows: 0, entries: 0 };
 
   for (const record of records) {
     const cost = typeof record.cost_usd === "number" ? record.cost_usd : null;
@@ -530,6 +582,15 @@ export function totals(records: SpendRecord[]): Totals {
 
     inputTokens += record.input_tokens ?? 0;
     outputTokens += record.output_tokens ?? 0;
+
+    // Before the program bucket, which skips a row with no program: a row's account is a
+    // separate fact from its program, and a row lacking one still has (or lacks) the other.
+    const user = attributedUser(record);
+    const owner =
+      user === null ? unattributed : (users[user] ??= { spent_usd: 0, unparsed_rows: 0, entries: 0 });
+    owner.entries += 1;
+    if (cost === null) owner.unparsed_rows += 1;
+    else owner.spent_usd = roundMoney(owner.spent_usd + cost);
 
     const name = record.program;
     if (!name) continue;
@@ -552,6 +613,8 @@ export function totals(records: SpendRecord[]): Totals {
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     programs,
+    users,
+    unattributed,
   };
 }
 

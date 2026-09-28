@@ -201,6 +201,7 @@
   "failure.TOO_FAST": "Traduciendo demasiado rápido, poniéndose al día.",
   "failure.DAILY_CAP": "El presupuesto de traducción de hoy se agotó, así que ya no se traduce nada más.",
   "failure.ROOM_CAP": "Este chat agotó su presupuesto de traducción, así que ya no se traduce nada más.",
+  "failure.USER_CAP": "La persona que organiza este chat agotó su presupuesto de traducción de hoy, así que ya no se traduce nada más.",
   "failure.LEDGER_UNREADABLE": "No se puede leer el registro de gasto, así que este servidor se niega a traducir en vez de gastar sin registrarlo.",
   "failure.LEDGER_UNWRITABLE": "No se puede escribir el registro de gasto, así que este servidor dejó de traducir en vez de gastar sin registrarlo.",
   "failure.UNRESOLVED_DIALECT": "Este servidor no reconoce alguno de los idiomas de esta llamada. Elige tu idioma de nuevo en la lista.",

@@ -1,7 +1,7 @@
 {
   "t": "translation.failed",
   "lineId": "L42",
-  "status": "unavailable",
-  "retriable": true,
-  "reason": "TIMED_OUT"
+  "status": "budget_exceeded",
+  "retriable": false,
+  "reason": "USER_CAP"
 }

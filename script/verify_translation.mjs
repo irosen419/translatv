@@ -128,7 +128,11 @@ const root = REPO;
 // seven times the intended workload. It was $0.50, which allowed about 890 calls in a run that
 // intends 25, so it was a number that could not realistically stop anything (owner decision,
 // 2026-08-05).
-const gate = new SpendGate(root, { dailyCapUsd: 1.0, roomCapUsd: 0.1 });
+//
+// The per user cap never applies here: verification spend belongs to no account, so every
+// request below says userId: null and its rows are booked unattributed. The value is stated
+// anyway because SpendGate requires all three, and leaving one out would read as uncapped.
+const gate = new SpendGate(root, { dailyCapUsd: 1.0, roomCapUsd: 0.1, userDailyCapUsd: 1.0 });
 
 // Fail like everything else if there is no ledger. load() raising for a missing ledger is the
 // honesty rule working, but raising it out here, before the try below, produced a bare stack
@@ -204,6 +208,7 @@ async function translate(text, targetDialect, glossary = []) {
     context: [],
     glossary,
     roomHash: ROOM,
+    userId: null,
     kind: "verification",
   });
 }
@@ -405,7 +410,7 @@ try {
   // The daily cap is deliberately unreachable. SpendGate.check tests daily BEFORE room, so a
   // tightGate carrying a real daily cap refuses with reason "daily_cap" on any day that already
   // has spend, and this check goes green having tested nothing about the room cap it names.
-  const tightGate = new SpendGate(root, { dailyCapUsd: 1e9, roomCapUsd: 0.0001 });
+  const tightGate = new SpendGate(root, { dailyCapUsd: 1e9, roomCapUsd: 0.0001, userDailyCapUsd: 1e9 });
   const capped = new TranslationService(
     createAnthropicClient(process.env["ANTHROPIC_API_KEY"]),
     tightGate,
@@ -419,6 +424,7 @@ try {
     context: [],
     glossary: [],
     roomHash: ROOM,
+    userId: null,
     kind: "verification",
   });
   check(

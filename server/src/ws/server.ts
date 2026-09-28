@@ -976,6 +976,9 @@ export class SignalingServer {
       context: session.contextFor(text),
       glossary: session.glossaryEntries,
       roomHash: roomHash(roomCode),
+      // The HOST pays, whoever spoke (docs/PLAN.md, D9). Read off the room rather than the
+      // speaker's connection, which is exactly the mistake this line exists not to make.
+      userId: this.payerFor(roomCode),
       kind: "translation",
     });
 
@@ -1005,6 +1008,18 @@ export class SignalingServer {
       retriable: result.retriable,
       reason: result.reason,
     });
+  }
+
+  /**
+   * The account a room's translation spend is attributed to: its creator.
+   *
+   * null only for a room with no recorded creator, which the signed in create path never makes
+   * (RoomManager defaults the id to "" for its own unit tests). null skips the per user cap and
+   * books the row unattributed; the global and room caps still bind it.
+   */
+  private payerFor(roomCode: string): string | null {
+    const host = this.rooms.peek(roomCode)?.hostUserId ?? "";
+    return host === "" ? null : host;
   }
 
   private async handleRetry(connection: Connection, lineId: string, now: number): Promise<void> {
