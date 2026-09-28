@@ -268,6 +268,40 @@ describe("/api/me", () => {
     expect(await limited?.json()).toEqual({ error: "RATE_LIMITED" });
   });
 
+  it("takes the largest glossary even when its JSON escapes every character", async () => {
+    // What the 256kb limit is sized for: an encoder that writes each non ASCII character as a six
+    // byte escape, as Python's json.dumps does by default, sends about 150kb for the largest valid
+    // glossary. Express's own default limit, 100kb, would refuse it.
+    const { body } = await signup("ana@example.test");
+    const entries = Array.from({ length: LIMITS.glossaryEntries }, (_, i) => ({
+      source: `${i}`.padEnd(LIMITS.glossaryTerm, "ñ"),
+      target: "ñ".repeat(LIMITS.glossaryTranslation),
+      sourceDialect: "es-AR",
+      targetDialect: "en-US",
+    }));
+    const escaped = JSON.stringify({ entries }).replaceAll("ñ", "\\u00f1");
+    expect(escaped.length).toBeGreaterThan(100 * 1024);
+    const response = await fetch(`${base}/api/me/glossary`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", authorization: `Bearer ${String(body.accessToken)}` },
+      body: escaped,
+    });
+    expect(response.status).toBe(200);
+  });
+
+  it("refuses a signed in caller's glossary body past 256kb before parsing it", async () => {
+    // The other side of the same limit. Past it the parser refuses by length alone, so a signed in
+    // caller cannot make the server buffer and parse an arbitrarily large body either.
+    const { body } = await signup("ana@example.test");
+    const response = await fetch(`${base}/api/me/glossary`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", authorization: `Bearer ${String(body.accessToken)}` },
+      body: JSON.stringify({ entries: [], pad: "x".repeat(256 * 1024) }),
+    });
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: "INVALID_INPUT" });
+  });
+
   it("round trips preferences", async () => {
     const { body } = await signup("ana@example.test");
     const token = body.accessToken;

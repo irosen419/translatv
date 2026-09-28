@@ -9,8 +9,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openStore, type Store } from "../store/index.js";
 import { findLockout, pruneLockouts, saveLockout } from "../store/loginLockouts.js";
-import { deleteUser } from "../store/users.js";
+import { deleteUser, insertUser, newUserId } from "../store/users.js";
 import { ACCESS_TTL_MS } from "./accessTokens.js";
+import { hashPassword } from "./passwords.js";
 import { AuthService, FAILURE_WINDOW_MS, LOCK_MS, MAX_FAILURES, REFRESH_TTL_MS, type AuthOptions } from "./service.js";
 
 const NOW = 1_800_000_000_000;
@@ -297,6 +298,29 @@ describe("login", () => {
     const account = await signedUp(auth);
     const inFlight = auth.login({ email: "ana@example.test", password: PASSWORD }, NOW);
     deleteUser(store, account.user.id);
+    expect(await inFlight).toEqual({ ok: false, error: "INVALID_CREDENTIALS" });
+    expect(count("refresh_tokens")).toBe(0);
+    // And counted like any refusal, as an email with no account would be.
+    expect(store.db.prepare("SELECT failures FROM login_lockouts").all()).toEqual([{ failures: 1 }]);
+  });
+
+  it("never hands an in-flight login the account that took its email meanwhile", async () => {
+    // Deleted, and signed up again with the same email, while the old password was being checked.
+    // That check proved the OLD account's password, so a session for the new one would belong to
+    // someone who never proved anything about it. The account is read again by id, not by email.
+    const auth = service();
+    const account = await signedUp(auth);
+    const otherHash = await hashPassword("somebody else's password");
+    const inFlight = auth.login({ email: "ana@example.test", password: PASSWORD }, NOW);
+    deleteUser(store, account.user.id);
+    insertUser(store, {
+      id: newUserId(),
+      email: "ana@example.test",
+      passwordHash: otherHash,
+      displayName: "Not Ana",
+      isOwner: false,
+      createdAt: NOW,
+    });
     expect(await inFlight).toEqual({ ok: false, error: "INVALID_CREDENTIALS" });
     expect(count("refresh_tokens")).toBe(0);
   });

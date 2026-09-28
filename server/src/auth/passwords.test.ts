@@ -46,8 +46,11 @@ describe("the dummy hash a login for a missing account verifies against", () => 
   // test there catches a dummy that costs nothing; these catch the subtler ones, which it cannot:
   // a dummy rebuilt per call (two scrypts, double the time) or made with cheaper parameters (half
   // the time) both leave "no account" measurably different, and both passed a quarter margin.
-  it("is made once and then reused, so a missing account pays one scrypt, not two", () => {
-    expect(dummyHash()).toBe(dummyHash());
+  it("is made once and then reused, so a missing account pays one scrypt, not two", async () => {
+    // Compared by value, not by promise identity. A dummy rebuilt on every call hashes a fresh
+    // random password with a fresh salt, so it never comes out the same twice. An async function
+    // caching the string (what a lint autofix produces) is just as cheap, and must pass.
+    expect(await dummyHash()).toBe(await dummyHash());
   });
 
   it("uses exactly the parameters a real password is hashed with today", async () => {
