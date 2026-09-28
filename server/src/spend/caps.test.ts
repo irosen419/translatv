@@ -135,6 +135,30 @@ describe("SpendGate", () => {
     expect(gate.check(roomHash("B")).allowed).toBe(true);
   });
 
+  it("counts a call whose cost is unknown at its worst case", () => {
+    // A call that never answered may still have been billed, so a null cost counted as nothing
+    // let the caps be approached blind. The row carries the most it could have cost.
+    seedEmptyLedger();
+    append(
+      entry({
+        program: PROGRAMS.runtimeTranslation,
+        kind: "translation",
+        model: "claude-haiku-4-5",
+        room: ROOM,
+        worstCaseUsd: 0.6,
+        billable: false,
+        project: "gate",
+      }),
+      root,
+    );
+    const decision = new SpendGate(root, CONFIG, "gate").check(ROOM);
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) {
+      expect(decision.reason).toBe("room_cap");
+      expect(decision.roomSpentUsd).toBe(0.6);
+    }
+  });
+
   it("survives a restart, because it reads the ledger and not a counter", () => {
     // A fresh gate object is what a restarted process looks like. If spend lived in memory,
     // this would wrongly allow the call and the day's budget would reset on every deploy.

@@ -35,9 +35,9 @@ import Anthropic, {
   RateLimitError,
 } from "@anthropic-ai/sdk";
 import { DEFAULT_MODEL } from "../spend/pricing.js";
-import { LlmFailure, type LlmClient } from "./TranslationService.js";
+import { LlmFailure, MAX_OUTPUT_TOKENS, type LlmClient } from "./TranslationService.js";
 
-export const MAX_OUTPUT_TOKENS = 512;
+export { MAX_OUTPUT_TOKENS };
 export const TEMPERATURE = 0.2;
 
 /**
@@ -107,6 +107,8 @@ export function createAnthropicClient(apiKey: string): LlmClient {
   const anthropic = new Anthropic({ apiKey, maxRetries: MAX_RETRIES });
 
   return {
+    // The SDK's own retries each send the request again, and each may be billed.
+    attempts: 1 + MAX_RETRIES,
     async complete({ system, user, signal }) {
       let response;
       try {

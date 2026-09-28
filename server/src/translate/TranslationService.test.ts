@@ -13,7 +13,11 @@ import { dialectByCode, type Dialect } from "@translatv/shared";
 import { PROGRAMS, SpendGate } from "../spend/caps.js";
 import { load } from "../spend/ledger.js";
 import {
+  LATE_CEILING_MS,
   LlmFailure,
+  MAX_CONCURRENT,
+  MAX_OUTPUT_TOKENS,
+  TIMEOUT_MS,
   TranslationService,
   type LlmClient,
   type TranslateRequest,
@@ -559,3 +563,163 @@ describe("the per room promise chain", () => {
     rmSync(root, { recursive: true, force: true });
   });
 });
+
+describe("a translation that times out", () => {
+  // A request the client abandons is still charged (Anthropic's billing terms), and the timeout
+  // used to abort the call and write nothing: real spend, untracked. The call now runs on after
+  // the caller has been told TIMED_OUT. A late answer's real cost is logged; a call that never
+  // answers, or whose connection is lost, is logged as unknown with the most it could have cost,
+  // which the caps count. Neither is ever billed to a user: the house eats it (owner decision,
+  // 2026-09-28). The late translation itself is never delivered: the line already showed.
+  let root: string;
+  let gate: SpendGate;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "translate-late-"));
+    mkdirSync(join(root, "out", "translatv"), { recursive: true });
+    writeFileSync(join(root, "out", "translatv", "spend_log.jsonl"), "", "utf8");
+    gate = new SpendGate(root, CAPS);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  /** A client that settles `afterMs` after it is called, unless it is aborted first. */
+  function settlesAfter(afterMs: number, outcome: "answer" | Error = "answer"): LlmClient {
+    return {
+      complete: ({ signal }) =>
+        new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            if (outcome === "answer") resolve({ text: "tarde", inputTokens: 800, outputTokens: 30 });
+            else reject(outcome);
+          }, afterMs);
+          signal.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(new Error("aborted"));
+          });
+        }),
+    };
+  }
+
+  /** A client that never answers. Only an abort ends its call. */
+  const neverAnswers: LlmClient = {
+    complete: ({ signal }) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("aborted")));
+      }),
+  };
+
+  /** The least a worst case may be: the most output one call can bill, at Haiku 4.5's $5 per MTok. */
+  const MIN_WORST_CASE = (MAX_OUTPUT_TOKENS / 1_000_000) * 5;
+
+  it("answers TIMED_OUT at once, then logs what the late answer really cost, never billable", async () => {
+    const service = new TranslationService(settlesAfter(10_000), gate, root);
+    const pending = service.translate(request());
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
+    const result = await pending;
+    expect(result.ok === false && result.reason).toBe("TIMED_OUT");
+    expect(load({ root })).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    const rows = load({ root });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ cost_source: "logged", input_tokens: 800, output_tokens: 30, billable: false });
+    expect(rows[0]?.cost_usd).toBeCloseTo(0.00095, 9);
+    expect(rows[0]?.worst_case_usd).toBeUndefined();
+  });
+
+  it("gives up on a call that never answers at the ceiling, and logs it as unknown with its worst case", async () => {
+    const service = new TranslationService(neverAnswers, gate, root);
+    const pending = service.translate(request());
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
+    expect((await pending).ok).toBe(false);
+    await vi.advanceTimersByTimeAsync(LATE_CEILING_MS - TIMEOUT_MS - 2);
+    expect(load({ root })).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(2);
+    const rows = load({ root });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      cost_usd: null,
+      cost_source: "unparsed",
+      input_tokens: null,
+      output_tokens: null,
+      billable: false,
+    });
+    expect(rows[0]?.worst_case_usd).toBeGreaterThanOrEqual(MIN_WORST_CASE);
+  });
+
+  it("logs a connection lost after the timeout as unknown, with its worst case", async () => {
+    const lost = new LlmFailure("retriable", "connection", "could not reach the translation service");
+    const service = new TranslationService(settlesAfter(8_000, lost), gate, root);
+    const pending = service.translate(request());
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
+    expect((await pending).ok).toBe(false);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const rows = load({ root });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ cost_usd: null, billable: false });
+    expect(rows[0]?.worst_case_usd).toBeGreaterThanOrEqual(MIN_WORST_CASE);
+  });
+
+  it("logs nothing for an error the provider answered after the timeout: a failed request is not billed", async () => {
+    const refused = new LlmFailure("retriable", "status_500", "translation failed");
+    const service = new TranslationService(settlesAfter(8_000, refused), gate, root);
+    const pending = service.translate(request());
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
+    expect((await pending).ok).toBe(false);
+    await vi.advanceTimersByTimeAsync(LATE_CEILING_MS);
+    expect(load({ root })).toHaveLength(0);
+  });
+
+  it("logs a connection lost before the timeout as unknown too: whether it was billed cannot be known", async () => {
+    const lost = new LlmFailure("retriable", "connection", "could not reach the translation service");
+    const service = new TranslationService(settlesAfter(1_000, lost), gate, root);
+    const pending = service.translate(request());
+    await vi.advanceTimersByTimeAsync(1_001);
+    const result = await pending;
+    expect(result.ok === false && result.reason).toBe("PROVIDER_ERROR");
+    const rows = load({ root });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ cost_usd: null, billable: false });
+    expect(rows[0]?.worst_case_usd).toBeGreaterThanOrEqual(MIN_WORST_CASE);
+  });
+
+  it("logs every call still running late as unknown at shutdown, once, and abandons it", async () => {
+    // The process is about to exit, and what those calls cost would never reach the ledger.
+    const service = new TranslationService(neverAnswers, gate, root);
+    const pending = service.translate(request());
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
+    expect((await pending).ok).toBe(false);
+
+    expect(service.abandonLate()).toBe(1);
+    await vi.advanceTimersByTimeAsync(LATE_CEILING_MS);
+    const rows = load({ root });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ cost_usd: null, billable: false });
+    expect(rows[0]?.worst_case_usd).toBeGreaterThanOrEqual(MIN_WORST_CASE);
+    expect(service.abandonLate()).toBe(0);
+  });
+
+  it("keeps a late call's slot until it settles, so a hung provider cannot pile up unknown spend", async () => {
+    const service = new TranslationService(neverAnswers, gate, root);
+    const room = (i: number) => `late${String(i).padStart(12, "0")}`;
+    const first = Array.from({ length: MAX_CONCURRENT }, (_, i) => service.translate(request({ roomHash: room(i) })));
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
+    for (const result of await Promise.all(first)) expect(result.ok === false && result.reason).toBe("TIMED_OUT");
+
+    const refused = await service.translate(request({ roomHash: room(100) }));
+    expect(refused.ok === false && refused.reason).toBe("TOO_MANY_IN_FLIGHT");
+
+    await vi.advanceTimersByTimeAsync(LATE_CEILING_MS);
+    expect(load({ root })).toHaveLength(MAX_CONCURRENT);
+    const later = service.translate(request({ roomHash: room(101) }));
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
+    const settled = await later;
+    expect(settled.ok === false && settled.reason).toBe("TIMED_OUT");
+  });
+});
+

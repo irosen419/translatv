@@ -136,6 +136,10 @@ function shutdown(signal: string): void {
   // Last chance to leave the view agreeing with the ledger. This is what makes a local test run
   // end with a file that does not need regenerating by hand before committing.
   clearInterval(viewTimer);
+  // Calls still running past their timeout would end up costing something the ledger never
+  // hears of once the process exits: logged now as unknown, at their worst case.
+  const abandoned = translation.abandonLate();
+  if (abandoned > 0) log.warn("translation.abandoned_late", { calls: abandoned });
   flushView(repoRoot);
   signaling.close();
   server.close(() => process.exit(0));

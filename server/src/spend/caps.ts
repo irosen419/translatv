@@ -195,16 +195,22 @@ function dayOf(record: SpendRecord): string | null {
 }
 
 /**
- * Sum of recovered costs.
+ * Sum of recovered costs, with a call whose cost is unknown counted at its worst case.
  *
- * A null cost contributes nothing here, which is correct for a floor but means a cap can be
- * approached without a gate noticing when rows are unparsed. That is why the ledger refuses an
- * inconsistent cost at write time rather than storing it: keeping unparsed rows near zero is
- * what makes this sum trustworthy.
+ * A null cost with no worst case still contributes nothing, which is correct for a floor but
+ * means a cap can be approached without a gate noticing when rows are unparsed. That is why the
+ * ledger refuses an inconsistent cost at write time rather than storing it: keeping unparsed rows
+ * near zero is what makes this sum trustworthy. A call that timed out or lost its connection may
+ * still have been billed, so its row carries the most it could have cost, and that is what counts
+ * here (owner decision, 2026-09-28): the cap is spent on the pessimistic figure, never the hopeful
+ * one.
  */
 function sum(records: SpendRecord[]): number {
   return roundMoney(
-    records.reduce((total, r) => total + (typeof r.cost_usd === "number" ? r.cost_usd : 0), 0),
+    records.reduce((total, r) => {
+      if (typeof r.cost_usd === "number") return total + r.cost_usd;
+      return total + (typeof r.worst_case_usd === "number" && r.worst_case_usd > 0 ? r.worst_case_usd : 0);
+    }, 0),
   );
 }
 
