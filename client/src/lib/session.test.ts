@@ -206,7 +206,11 @@ function fakeServer(clock: { now: number }) {
 
 /**
  * navigator.locks for a test: run() waits for any hold() in place when it is called, as a tab does
- * while another tab holds the refresh lock.
+ * while another tab holds the refresh lock. The holder here stores nothing, as another tab does
+ * when its own refresh fails or is refused. One whose refresh succeeds stores its successor
+ * first, so the waiting tab reads that and lands on the holder's account: one stored token per
+ * browser, and the last tab to write it wins (measured in review). Runs are not queued against
+ * one another either; the one test that uses this makes one at a time.
  */
 function holdableLock() {
   let gate: Promise<void> = Promise.resolve();
@@ -574,6 +578,30 @@ describe("two tabs of one browser", () => {
     expect(new Set(presented).size).toBe(2);
     expect(first.state().status).toBe("signedIn");
     expect(second.state().status).toBe("signedIn");
+  });
+
+  it("keep a token another tab stored while a refusal was on the wire", async () => {
+    // A refusal is a verdict on the token this tab presented, and only that token goes. Another
+    // tab's sign in in the meantime is not this tab's to supersede, so its token is guarded by what
+    // storage holds. Cleared regardless, that tab was signed out at its next refresh, with every
+    // other test green (measured in review).
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    const tab = () => new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    await tab().signIn("ana@example.test", "right password");
+    server.deleteElsewhere("u1");
+    const [first, second] = [tab(), tab()];
+    const release = server.holdRefresh();
+    const restoring = first.restore();
+    expect(await second.signIn("ben@example.test", "right password")).toEqual({ ok: true });
+    const bens = storage.data[REFRESH_KEY];
+    release();
+    await restoring;
+
+    expect(storage.data[REFRESH_KEY]).toBe(bens);
+    expect(await second.accessToken({ force: true })).not.toBeNull();
+    expect(second.state().user?.id).toBe("u2");
   });
 });
 
