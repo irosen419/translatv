@@ -63,6 +63,18 @@ jobs:
       # the commit that broke it, rather than at deploy time.
       - name: Build the image
         run: docker build -t translatv:ci .
+      # Every mount step below, and DEPLOY.md's chown, assume the container runs as uid 1000, the
+      # image's node user. Review deleted `USER node` from the Dockerfile and every other step
+      # here stayed green, because root can write anything: the ledger, both mounts, with or
+      # without the chown. So the uid is asked directly.
+      - name: The image runs as its unprivileged node user, uid 1000
+        run: |
+          uid=$(docker run --rm translatv:ci id -u)
+          if [ "$uid" != "1000" ]; then
+            echo "the image runs as uid $uid, not 1000: the Dockerfile's USER node is gone or changed"
+            exit 1
+          fi
+          echo "the image runs as uid $uid"
       - name: The image starts and answers its health check
         run: |
           # ALLOW_EPHEMERAL_LEDGER because this run has no volume, and the image sets
@@ -195,6 +207,27 @@ jobs:
           # the repository for this), chowned as documented, bind mounted as compose mounts them.
           mkdir -p bind
           cp -r out data bind/
+          # First the same mounts owned by root, as a root clone leaves them: the server must
+          # refuse, for the ledger. That proves this step can fail whatever uid the runner has,
+          # so the chown after it is shown to be what makes the difference.
+          sudo chown -R 0:0 bind/out bind/data
+          set +e
+          refused=$(timeout 30 docker run --rm --name vt-bind-root -e ORIGIN=http://localhost:8080 \
+            -e AUTH_SECRET="$(openssl rand -hex 32)" \
+            -v "$PWD/bind/out:/app/out" -v "$PWD/bind/data:/app/data" \
+            translatv:ci 2>&1)
+          code=$?
+          set -e
+          docker rm -f vt-bind-root > /dev/null 2>&1 || true
+          echo "$refused"
+          if [ "$code" = 0 ] || [ "$code" = 124 ]; then
+            echo "the server ran on root owned mounts; it must refuse"
+            exit 1
+          fi
+          echo "$refused" | grep -q "writable ledger" || {
+            echo "it refused, but not for the ledger reason this step exists to prove"
+            exit 1
+          }
           sudo chown -R 1000:1000 bind/out bind/data
           docker run -d --name vt-bind -p 8080:8080 -e ORIGIN=http://localhost:8080 \
             -e AUTH_SECRET="$(openssl rand -hex 32)" \
