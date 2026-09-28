@@ -218,6 +218,38 @@ describe("totals", () => {
     expect(before.unattributed.entries).toBe(5);
   });
 
+  it("totals a user_id or program that is a name every plain object already has", () => {
+    // Both buckets are keyed by strings read from the ledger. In a plain {} a user_id of
+    // "constructor" found Object itself, and the next line wrote a string over Object.entries,
+    // which took the server down at the next view flush; "__proto__", "toString" and the rest
+    // dropped their row's money from every bucket, so the buckets no longer added up.
+    const names = ["__proto__", "constructor", "toString", "valueOf", "hasOwnProperty"];
+    const summary = totals(
+      names.map((name) => ({ program: name, cost_usd: 0.25, user_id: name })) as unknown as SpendRecord[],
+    );
+    expect(typeof Object.entries).toBe("function");
+    expect(Object.keys(summary.users).sort()).toEqual([...names].sort());
+    expect(Object.keys(summary.programs).sort()).toEqual([...names].sort());
+    for (const name of names) {
+      expect(summary.users[name]).toEqual({ spent_usd: 0.25, unparsed_rows: 0, entries: 1 });
+      expect(summary.programs[name]?.spent_usd).toBe(0.25);
+    }
+    expect(summary.unattributed.entries).toBe(0);
+  });
+
+  it("rounds each account's total to 6 decimals, exactly", () => {
+    // Exact, not toBeCloseTo: 0.1 + 0.2 is 0.30000000000000004 unrounded, which a 9 place
+    // comparison accepts, so every per user assertion above passed with the rounding deleted.
+    const summary = totals([
+      { program: "p", cost_usd: 0.1, user_id: "someAccount" },
+      { program: "p", cost_usd: 0.2, user_id: "someAccount" },
+      { program: "p", cost_usd: 0.1 },
+      { program: "p", cost_usd: 0.2 },
+    ] as unknown as SpendRecord[]);
+    expect(summary.users["someAccount"]?.spent_usd).toBe(0.3);
+    expect(summary.unattributed.spent_usd).toBe(0.3);
+  });
+
   it("reads a corrupt user_id as unattributed rather than inventing an account", () => {
     const summary = totals([
       { program: "p", cost_usd: 1, user_id: 42 },

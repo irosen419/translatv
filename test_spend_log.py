@@ -238,6 +238,33 @@ class PerUserTotalsTest(unittest.TestCase):
         self.assertEqual(before["users"], {})
         self.assertEqual(before["unattributed"]["entries"], 5)
 
+    def test_each_accounts_total_is_rounded_to_6_decimals_exactly(self):
+        # assertEqual, not assertAlmostEqual: 0.1 + 0.2 unrounded is within 9 places of 0.3, so
+        # every per user assertion above passed with the rounding deleted.
+        summary = spend_log.totals(
+            [
+                {"program": "p", "cost_usd": 0.1, "user_id": "someAccount"},
+                {"program": "p", "cost_usd": 0.2, "user_id": "someAccount"},
+                {"program": "p", "cost_usd": 0.1},
+                {"program": "p", "cost_usd": 0.2},
+            ]
+        )
+        self.assertEqual(summary["users"]["someAccount"]["spent_usd"], 0.3)
+        self.assertEqual(summary["unattributed"]["spent_usd"], 0.3)
+
+    def test_names_a_javascript_object_already_has_are_ordinary_accounts(self):
+        # The TypeScript reader once lost these (ledger.test.ts says how). Asserted here too, so
+        # the two readers are held to the same answer for them.
+        names = ["__proto__", "constructor", "toString", "valueOf", "hasOwnProperty"]
+        summary = spend_log.totals(
+            [{"program": name, "cost_usd": 0.25, "user_id": name} for name in names]
+        )
+        self.assertEqual(sorted(summary["users"]), sorted(names))
+        for name in names:
+            self.assertEqual(
+                summary["users"][name], {"spent_usd": 0.25, "unparsed_rows": 0, "entries": 1}
+            )
+
     def test_a_corrupt_user_id_is_unattributed_rather_than_an_invented_account(self):
         summary = spend_log.totals(
             [
@@ -294,6 +321,13 @@ class TotalsReportTest(unittest.TestCase):
         )
         # Users come after programs, so the old lines keep their place at the top.
         self.assertLess(text.index("program "), text.index("user "))
+
+    def test_no_unattributed_line_when_every_row_names_an_account(self):
+        lines = self.report(
+            [{"program": "p", "cost_usd": 0.5, "user_id": "someAccount"}], malformed=0
+        )
+        self.assertTrue(any(line.startswith("user    someAccount") for line in lines))
+        self.assertFalse(any("(unattributed)" in line for line in lines))
 
 
 class RenderMarkdownTest(unittest.TestCase):

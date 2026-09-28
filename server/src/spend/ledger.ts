@@ -571,8 +571,12 @@ export function totals(records: SpendRecord[]): Totals {
   let unparsed = 0;
   let inputTokens = 0;
   let outputTokens = 0;
-  const programs: Record<string, ProgramTotal> = {};
-  const users: Record<string, UserTotal> = {};
+  // Keyed by strings read from the ledger, so neither map may inherit anything. In a plain {}, a
+  // user_id or program of "constructor" found Object itself (and the next line wrote a string over
+  // Object.entries), and "__proto__" or "toString" silently dropped the row's money from the
+  // buckets. The Python reader's dicts never had the problem.
+  const programs: Record<string, ProgramTotal> = Object.create(null);
+  const users: Record<string, UserTotal> = Object.create(null);
   const unattributed: UserTotal = { spent_usd: 0, unparsed_rows: 0, entries: 0 };
 
   for (const record of records) {
