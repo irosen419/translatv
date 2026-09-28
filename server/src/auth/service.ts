@@ -70,6 +70,9 @@ export const LOCK_MS = 15 * 60 * 1000;
 
 /** Failures older than this stop counting, so ten typos spread over a month do not lock anyone. */
 export const FAILURE_WINDOW_MS = 15 * 60 * 1000;
+/** How often, and how many times, a deleted account's erase is retried while the database is busy. */
+export const ERASE_RETRY_MS = 60 * 1000;
+export const ERASE_ATTEMPTS = 60;
 
 /** Invite codes: Crockford base32, the same alphabet as room codes, in three groups of four. */
 const INVITE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -81,6 +84,8 @@ export interface AuthOptions {
   signupMode: SignupMode;
   /** Already normalized (trimmed, lowercased), or null for no owner. */
   ownerEmail: string | null;
+  /** Runs a retry later. Tests pass their own; the default is a timer that never holds the process open. */
+  schedule?: (run: () => void, ms: number) => void;
 }
 
 export type AuthResult<T> = { ok: true; value: T } | { ok: false; error: AuthErrorCode };
@@ -146,6 +151,7 @@ export class AuthService {
   private lastPrune = 0;
   /** Told the id of each deleted account, after the delete commits (the socket layer listens). */
   private readonly deletedListeners = new Set<(userId: string) => void>();
+  private readonly schedule: (run: () => void, ms: number) => void;
 
   constructor(
     private readonly store: Store,
@@ -154,6 +160,11 @@ export class AuthService {
     this.signingKey = accessKey(options.secret);
     this.lockoutKey = Buffer.from(hkdfSync("sha256", options.secret, "", "translatv lockout v1", 32));
     syncOwner(store, options.ownerEmail);
+    this.schedule =
+      options.schedule ??
+      ((run, ms) => {
+        setTimeout(run, ms).unref();
+      });
   }
 
   get signupMode(): SignupMode {
@@ -364,9 +375,6 @@ export class AuthService {
     });
     // Deleted by another request during the password check. Same answer as a token for nobody.
     if (!removed) return refuse("UNAUTHENTICATED");
-    // The rows are zeroed (secure_delete), and this clears the WAL's older copies of them now,
-    // rather than whenever SQLite next checkpoints on its own.
-    if (!this.store.checkpoint()) log.warn("account.deleted_checkpoint_busy", { user: userId });
 
     log.info("account.deleted", { user: userId });
     for (const listener of this.deletedListeners) {
@@ -376,7 +384,35 @@ export class AuthService {
         log.error("account.deleted_listener_failed", { error: error instanceof Error ? error.message : "unknown" });
       }
     }
+    // Last, after everything the deletion itself has to do: rewriting the files is housekeeping,
+    // and a failure in it must never skip closing the account's sockets above.
+    this.eraseDeleted(userId, 1);
     return { ok: true, value: null };
+  }
+
+  /**
+   * Rewrite the database files without a deleted account's rows (Store.erase). Never waits and
+   * never throws: while another connection holds the database it tries again a minute later, up
+   * to an hour, and any other failure is logged, because the account is already deleted.
+   */
+  private eraseDeleted(userId: string, attempt: number): void {
+    let done: boolean;
+    try {
+      done = this.store.erase();
+    } catch (error) {
+      log.error("account.erase_failed", { user: userId, attempt, error: error instanceof Error ? error.message : "unknown" });
+      return;
+    }
+    if (done) {
+      if (attempt > 1) log.info("account.erased", { user: userId, attempt });
+      return;
+    }
+    if (attempt >= ERASE_ATTEMPTS) {
+      log.warn("account.erase_gave_up", { user: userId, attempts: attempt });
+      return;
+    }
+    log.warn("account.erase_busy", { user: userId, attempt });
+    this.schedule(() => this.eraseDeleted(userId, attempt + 1), ERASE_RETRY_MS);
   }
 
   /** Hear about every deleted account. Returns the unsubscribe. */

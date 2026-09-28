@@ -5,13 +5,17 @@ import { useCopy } from "../i18n/useCopy.js";
 
 /**
  * The sentence for a refused deletion. A wrong password gets its own sentence, because the sign in
- * one ("that email and password do not match an account") names an email nobody typed here.
- * Anything without a specific sentence reads as "could not reach the server", as on AuthScreen.
+ * one ("that email and password do not match an account") names an email nobody typed here. A
+ * refused bearer (UNAUTHENTICATED) means the sign in had expired: by now the session has renewed
+ * it, so trying again works (and when the account itself is gone, the app is already on the sign
+ * in screen). Anything else reads as "could not reach the server", as on AuthScreen.
  */
 function failureKey(error: AuthFailure): CopyKey {
   switch (error) {
     case "INVALID_CREDENTIALS":
       return "account.delete.wrongPassword";
+    case "UNAUTHENTICATED":
+      return "account.delete.expired";
     case "LOCKED":
     case "RATE_LIMITED":
       return `auth.error.${error}`;

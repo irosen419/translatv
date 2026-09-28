@@ -49,6 +49,7 @@ function fakeServer(clock: { now: number }) {
   const calls: Array<{ path: string; body: Record<string, unknown>; authorization?: string }> = [];
   let offline = false;
   let gone = false;
+  let staleOnce = false;
 
   function session(): AuthSession {
     serial += 1;
@@ -86,6 +87,10 @@ function fakeServer(clock: { now: number }) {
         live.delete(String(body["refreshToken"]));
         return new Response(null, { status: 204 });
       case "/api/account":
+        if (staleOnce) {
+          staleOnce = false;
+          return json(401, { error: "UNAUTHENTICATED" });
+        }
         if (gone || authorization !== `Bearer access-${serial}`) return json(401, { error: "UNAUTHENTICATED" });
         if (body["password"] !== "right password") return json(401, { error: "INVALID_CREDENTIALS" });
         live.clear();
@@ -108,6 +113,10 @@ function fakeServer(clock: { now: number }) {
     deleteElsewhere: () => {
       gone = true;
       live.clear();
+    },
+    /** The next bearer is refused once, as an expired one is, while the refresh token stays good. */
+    refuseNextBearer: () => {
+      staleOnce = true;
     },
   };
 }
@@ -401,6 +410,20 @@ describe("deleting the account", () => {
     expect(manager.state()).toEqual({ status: "signedOut", user: null });
     // Settled by one refresh, never by a second deletion attempt.
     expect(server.calls.slice(before).map((call) => call.path)).toEqual(["/api/account", "/api/auth/refresh"]);
+  });
+
+  it("stays signed in, with no second DELETE, when the bearer is refused but the refresh works", async () => {
+    // An access token that expired between being read and being sent, or a server whose clock
+    // runs ahead: the bearer is refused while the account is fine. The refresh settles that the
+    // session is still good, so the person stays signed in, and their next try deletes.
+    const { manager, server } = setup();
+    await manager.signIn("ana@example.test", "right password");
+    server.refuseNextBearer();
+    const before = server.calls.length;
+    expect(await manager.deleteAccount("right password")).toEqual({ ok: false, error: "UNAUTHENTICATED" });
+    expect(manager.state().status).toBe("signedIn");
+    expect(server.calls.slice(before).map((call) => call.path)).toEqual(["/api/account", "/api/auth/refresh"]);
+    expect(await manager.deleteAccount("right password")).toEqual({ ok: true });
   });
 
   it("reports NETWORK when the server cannot be reached, and stays signed in", async () => {
