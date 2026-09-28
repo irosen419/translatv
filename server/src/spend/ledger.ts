@@ -160,8 +160,13 @@ export interface Totals {
   entries: number;
   input_tokens: number;
   output_tokens: number;
+  /**
+   * Per program totals. NULL PROTOTYPE, like users below: keyed by strings read from the ledger,
+   * so it inherits nothing ("constructor" is just a key). JSON, spread, for...in and Object.hasOwn
+   * work as usual; obj.hasOwnProperty(), a template string and Object.assign({}, it) do not.
+   */
   programs: Record<string, ProgramTotal>;
-  /** Per account totals, keyed by the opaque user_id. Only rows that name an account. */
+  /** Per account totals, keyed by the opaque user_id. Only rows that name an account. Null prototype. */
   users: Record<string, UserTotal>;
   /**
    * Every row that names no account: rows from before user_id existed, verification and eval
@@ -596,7 +601,9 @@ export function totals(records: SpendRecord[]): Totals {
     if (cost === null) owner.unparsed_rows += 1;
     else owner.spent_usd = roundMoney(owner.spent_usd + cost);
 
-    const name = record.program;
+    // Only a non empty string names a program. Anything else a hand edited row holds (a number, a
+    // list) reads as no program, as it does in spend_log.py, rather than as a bucket named "5".
+    const name = typeof record.program === "string" ? record.program : "";
     if (!name) continue;
 
     const bucket = (programs[name] ??= {

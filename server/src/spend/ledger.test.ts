@@ -250,6 +250,37 @@ describe("totals", () => {
     expect(summary.unattributed.spent_usd).toBe(0.3);
   });
 
+  it("counts an attributed row with no program toward its account, and still adds up", () => {
+    // The account is read BEFORE the no program skip: a row's account is a separate fact from
+    // its program. Every fixture row has a program, so moving the skip first went unnoticed.
+    const summary = totals([
+      { cost_usd: 0.25, user_id: "someAccount" },
+      { program: "p", cost_usd: 0.5, user_id: "someAccount" },
+    ] as unknown as SpendRecord[]);
+    expect(summary.users["someAccount"]).toEqual({ spent_usd: 0.75, unparsed_rows: 0, entries: 2 });
+    expect(summary.programs["p"]?.spent_usd).toBe(0.5);
+    expect(summary.known_usd).toBe(0.75);
+  });
+
+  it("rounds each program's total to 6 decimals, exactly", () => {
+    const summary = totals([
+      { program: "p", cost_usd: 0.1 },
+      { program: "p", cost_usd: 0.2 },
+    ] as unknown as SpendRecord[]);
+    expect(summary.programs["p"]?.spent_usd).toBe(0.3);
+  });
+
+  it("reads a program that is not a non empty string as no program, the way the Python reader does", () => {
+    // A hand edited row can hold anything. Its money still counts, toward the total and its
+    // account; it just has no program bucket, rather than one named "5" or "a,b".
+    const summary = totals(
+      [5, true, ["a", "b"], { x: 1 }, ""].map((program) => ({ program, cost_usd: 0.25, user_id: "someAccount" })) as unknown as SpendRecord[],
+    );
+    expect(Object.keys(summary.programs)).toEqual([]);
+    expect(summary.known_usd).toBe(1.25);
+    expect(summary.users["someAccount"]?.entries).toBe(5);
+  });
+
   it("reads a corrupt user_id as unattributed rather than inventing an account", () => {
     const summary = totals([
       { program: "p", cost_usd: 1, user_id: 42 },

@@ -260,10 +260,45 @@ class PerUserTotalsTest(unittest.TestCase):
             [{"program": name, "cost_usd": 0.25, "user_id": name} for name in names]
         )
         self.assertEqual(sorted(summary["users"]), sorted(names))
+        self.assertEqual(sorted(summary["programs"]), sorted(names))
         for name in names:
             self.assertEqual(
                 summary["users"][name], {"spent_usd": 0.25, "unparsed_rows": 0, "entries": 1}
             )
+            self.assertEqual(summary["programs"][name]["spent_usd"], 0.25)
+
+    def test_an_attributed_row_with_no_program_counts_toward_its_account(self):
+        # The account is read BEFORE the no program skip, as in the TypeScript reader.
+        summary = spend_log.totals(
+            [
+                {"cost_usd": 0.25, "user_id": "someAccount"},
+                {"program": "p", "cost_usd": 0.5, "user_id": "someAccount"},
+            ]
+        )
+        self.assertEqual(
+            summary["users"]["someAccount"], {"spent_usd": 0.75, "unparsed_rows": 0, "entries": 2}
+        )
+        self.assertEqual(summary["programs"]["p"]["spent_usd"], 0.5)
+        self.assertEqual(summary["known_usd"], 0.75)
+
+    def test_each_programs_total_is_rounded_to_6_decimals_exactly(self):
+        summary = spend_log.totals(
+            [{"program": "p", "cost_usd": 0.1}, {"program": "p", "cost_usd": 0.2}]
+        )
+        self.assertEqual(summary["programs"]["p"]["spent_usd"], 0.3)
+
+    def test_a_program_that_is_not_a_non_empty_string_is_no_program(self):
+        # One hand edited row with a list, a dict, a number or a boolean as its program used to
+        # raise TypeError here, which took down `totals`, `render` and check:spend-view with it.
+        rows = [
+            {"program": program, "cost_usd": 0.25, "user_id": "someAccount"}
+            for program in (5, True, ["a", "b"], {"x": 1}, "")
+        ]
+        summary = spend_log.totals(rows)
+        self.assertEqual(summary["programs"], {})
+        self.assertEqual(summary["known_usd"], 1.25)
+        self.assertEqual(summary["users"]["someAccount"]["entries"], 5)
+        spend_log.format_totals(summary, 0)
 
     def test_a_corrupt_user_id_is_unattributed_rather_than_an_invented_account(self):
         summary = spend_log.totals(

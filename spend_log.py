@@ -249,7 +249,10 @@ def totals(records):
             owner["spent_usd"] = _round(owner["spent_usd"] + cost)
 
         program = record.get("program")
-        if not program:
+        # Only a non empty string names a program. A list or dict here raised TypeError (it cannot
+        # key a dict), a number or boolean raised when the report sorted it, and either took down
+        # `totals`, `render` and check:spend-view. Read as no program, as ledger.ts does.
+        if not isinstance(program, str) or not program:
             continue
         bucket = programs.setdefault(
             program, {"program": program, "spent_usd": 0.0, "cap_usd": None, "entries": 0}
