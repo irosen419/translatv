@@ -40,17 +40,28 @@ export interface Store {
    */
   transaction<T>(fn: () => T): T;
   /**
-   * Copy the WAL back into the database file and truncate it to nothing. secure_delete zeroes a
-   * deleted row in the pages the delete writes, but the WAL keeps the older copies of those
-   * pages until a checkpoint, so a caller that promised a deletion runs one straight after.
-   * False when another connection's open read kept it from finishing; the copies then go at the
-   * next checkpoint instead.
+   * Rewrite the database file from its live rows (VACUUM), then empty the WAL (a TRUNCATE
+   * checkpoint), so nothing deleted stays readable in either file. secure_delete zeroes a deleted
+   * row where it stood, but SQLite reorganizing a page can leave older copies of rows in the
+   * page's unused space (review found deleted account ids there), which only a rewrite clears,
+   * and the WAL keeps older copies of every page it wrote until it is emptied.
+   *
+   * Never waits. This connection is synchronous, so waiting out busy_timeout while another
+   * connection holds the database (a backup, an operator's shell) would stall every call on the
+   * server for five seconds (measured). It returns false at once instead, having finished
+   * nothing, and the caller tries again later. Its time grows with the file: 8 ms for 1.2 MB.
    */
-  checkpoint(): boolean;
+  erase(): boolean;
   close(): void;
 }
 
 const MEMORY = ":memory:";
+
+/** SQLITE_BUSY or SQLITE_LOCKED, extended codes included: another connection holds the database. */
+function isBusy(error: unknown): boolean {
+  const code = Number((error as { errcode?: unknown } | null)?.errcode) & 0xff;
+  return code === 5 || code === 6;
+}
 
 /**
  * The table that records which migrations a database has applied. It is shipped schema like any
@@ -95,7 +106,8 @@ export function openStore(options: StoreOptions): Store {
     // A deleted row is overwritten with zeros rather than left behind as free space that a copy
     // of the file still reads. Deleting an account promises it is gone (the UI says so), and
     // without this its email, name and glossary stayed readable in translatv.db (measured in
-    // review). The WAL's older copies are the other half: see checkpoint below.
+    // review). What it cannot reach, older copies in reorganized pages and in the WAL, is erase's
+    // job (below).
     db.exec("PRAGMA secure_delete = ON");
     if (path !== MEMORY) {
       // WAL lets reads proceed during a write, and survives a crash mid write as well as the
@@ -170,7 +182,24 @@ export function openStore(options: StoreOptions): Store {
       path,
       schemaVersion,
       transaction,
-      checkpoint: () => Number(db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get()?.["busy"] ?? 0) === 0,
+      erase: () => {
+        const wait = Number(db.prepare("PRAGMA busy_timeout").get()?.["timeout"] ?? 0);
+        db.exec("PRAGMA busy_timeout = 0");
+        try {
+          try {
+            db.exec("VACUUM");
+          } catch (error) {
+            // Another connection holds the write lock. Not now; the caller retries.
+            if (isBusy(error)) return false;
+            throw error;
+          }
+          // busy, not log == checkpointed: a reader on the newest snapshot leaves those equal
+          // while the WAL still holds everything (measured in review).
+          return Number(db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get()?.["busy"] ?? 0) === 0;
+        } finally {
+          db.exec(`PRAGMA busy_timeout = ${wait}`);
+        }
+      },
       close: () => db.close(),
     };
   } catch (error) {

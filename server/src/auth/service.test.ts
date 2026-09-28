@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { LIMITS } from "@translatv/shared";
 import { AccountService } from "../account/service.js";
+import { DatabaseSync } from "../store/sqlite.js";
 import { openStore, type Store } from "../store/index.js";
 import { findLockout, pruneLockouts, saveLockout } from "../store/loginLockouts.js";
 import { deleteUser, insertUser, newUserId } from "../store/users.js";
@@ -648,7 +649,10 @@ describe("deleteAccount", () => {
     // The UI promises the account is deleted. SQLite marks a deleted row as free space rather than
     // overwriting it, and the WAL keeps older copies of every page it wrote, so after a successful
     // delete the email, the name and a glossary term were still readable in translatv.db and its
-    // WAL (measured in review). So the raw bytes of both files are read here.
+    // WAL (measured in review). So the raw bytes of both files are read here. Reorganized pages can
+    // also keep older copies of rows in their unused space, which only rewriting the file clears;
+    // review found deleted ids there after churn that one account in a fresh file cannot produce,
+    // so the rewrite itself is pinned too: a rewritten file has no free pages left.
     const dir = mkdtempSync(join(tmpdir(), "tv-erase-"));
     const path = join(dir, "translatv.db");
     const onDisk = openStore({ path });
@@ -679,9 +683,67 @@ describe("deleteAccount", () => {
 
       expect((await auth.deleteAccount(signup.value.user.id, { password: PASSWORD }, NOW + 1)).ok).toBe(true);
       expect(readable()).toEqual([]);
+      expect(onDisk.db.prepare("PRAGMA freelist_count").get()).toEqual({ freelist_count: 0 });
     } finally {
       onDisk.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("does not stall while another connection holds the database, and erases once it is free", async () => {
+    // A backup or an operator's shell holding a read. The erase must not wait it out (the whole
+    // server stalled five seconds, measured), and must still happen: it is retried later.
+    const dir = mkdtempSync(join(tmpdir(), "tv-erase-"));
+    const path = join(dir, "translatv.db");
+    const onDisk = openStore({ path });
+    const reader = new DatabaseSync(path);
+    const later: Array<() => void> = [];
+    try {
+      const marker = randomBytes(8).toString("hex");
+      const auth = new AuthService(onDisk, {
+        secret: SECRET,
+        signupMode: "open",
+        ownerEmail: null,
+        schedule: (run) => later.push(run),
+      });
+      const signup = await auth.signup(
+        { email: `erase-${marker}@example.test`, password: PASSWORD, displayName: `Name ${marker}` },
+        NOW,
+      );
+      if (!signup.ok) throw new Error(`signup failed: ${signup.error}`);
+      reader.exec("BEGIN");
+      reader.prepare("SELECT count(*) AS n FROM users").get();
+
+      const started = performance.now();
+      expect((await auth.deleteAccount(signup.value.user.id, { password: PASSWORD }, NOW + 1)).ok).toBe(true);
+      expect(performance.now() - started).toBeLessThan(2500);
+      expect(later).toHaveLength(1);
+
+      reader.exec("COMMIT");
+      later.shift()?.();
+      expect(later).toHaveLength(0);
+      expect([path, `${path}-wal`].filter((file) => existsSync(file) && readFileSync(file).includes(marker))).toEqual([]);
+    } finally {
+      reader.close();
+      onDisk.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("closes the account's sockets even when erasing the files throws", async () => {
+    // Rewriting the files is housekeeping after the delete. A failure in it must not skip what the
+    // deletion itself has to do, such as closing the account's live sockets.
+    const failing: Store = {
+      ...store,
+      erase: () => {
+        throw new Error("disk I/O error");
+      },
+    };
+    const auth = new AuthService(failing, { secret: SECRET, signupMode: "invite", ownerEmail: null });
+    const account = await signedUp(auth);
+    const deleted: string[] = [];
+    auth.onAccountDeleted((userId) => deleted.push(userId));
+    expect(await auth.deleteAccount(account.user.id, { password: PASSWORD }, NOW)).toEqual({ ok: true, value: null });
+    expect(deleted).toEqual([account.user.id]);
   });
 });

@@ -64,6 +64,29 @@ describe("openStore", () => {
     expect(store.db.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "wal" });
   });
 
+  it("erases without waiting: false at once while another connection reads, true after", () => {
+    // The server's one connection is synchronous, so an erase that waited out busy_timeout would
+    // stall every call on the server for five seconds (measured in review). A reader holding a
+    // snapshot keeps the WAL from being emptied, and the erase has to say so at once.
+    const path = join(tempDir(), "t.db");
+    const store = open({ path });
+    store.db.exec("CREATE TABLE scratch (v TEXT); INSERT INTO scratch VALUES ('a')");
+    const reader = new DatabaseSync(path);
+    try {
+      reader.exec("BEGIN");
+      reader.prepare("SELECT count(*) AS n FROM scratch").get();
+      const started = performance.now();
+      expect(store.erase()).toBe(false);
+      expect(performance.now() - started).toBeLessThan(2500);
+      reader.exec("COMMIT");
+      expect(store.erase()).toBe(true);
+      // The wait is lowered only for the erase, and put back.
+      expect(Number(store.db.prepare("PRAGMA busy_timeout").get()?.["timeout"])).toBeGreaterThanOrEqual(5000);
+    } finally {
+      reader.close();
+    }
+  });
+
   it("waits for a busy file database rather than failing at once", () => {
     // The invite CLI opens the same file while the server has it, and a writer that finds the
     // other holding the lock should wait for it (measured: a 2.6 s wait, then success). At least
