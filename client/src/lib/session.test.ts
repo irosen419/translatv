@@ -367,6 +367,40 @@ describe("authorizedFetch", () => {
       "Bearer access-3",
     ]);
   });
+
+  it("never sends or replays a request as another account", async () => {
+    // Tabs share one stored refresh token, so the refresh after a 401 can land this tab on
+    // whichever account another tab signed in to last. Replayed there, a write changed that
+    // account's data (measured in review: its stored preferences). So can the refresh a token
+    // about to expire gets on the way in, before anything is sent.
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    const tab = () => new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    const ana = tab();
+    await ana.signIn("ana@example.test", "right password");
+    const other = tab();
+    await other.restore();
+    await other.signOut();
+    await other.signIn("ben@example.test", "right password");
+
+    let before = server.calls.length;
+    const replayed = await ana.authorizedFetch("/api/thing", { method: "PUT" });
+    expect(replayed.status).toBe(409);
+    expect(ana.state().user?.id).toBe("u2");
+    expect(server.calls.slice(before).map((call) => call.path)).toEqual(["/api/thing", "/api/auth/refresh"]);
+
+    const next = tab();
+    await next.restore();
+    await next.signOut();
+    await next.signIn("ana@example.test", "right password");
+    clock.now += ACCESS_MS;
+    before = server.calls.length;
+    const renewed = await ana.authorizedFetch("/api/thing", { method: "PUT" });
+    expect(renewed.status).toBe(409);
+    expect(ana.state().user?.id).toBe("u1");
+    expect(server.calls.slice(before).map((call) => call.path)).toEqual(["/api/auth/refresh"]);
+  });
 });
 
 describe("signing out", () => {
@@ -483,6 +517,28 @@ describe("deleting the account", () => {
     // bearer now, and only the account the person confirmed is ever named with one.
     const deletes = server.calls.slice(before).filter((call) => call.path === "/api/account");
     expect(deletes.map((call) => call.body["userId"])).toEqual(["u1"]);
+  });
+
+  it("never sends another account's bearer when the token renewed on the way in belongs to it", async () => {
+    // accessToken() renews a token about to expire before handing it over, so the tab can change
+    // account inside deleteAccount before anything is sent. The check has to follow it: moved
+    // before it, every other test passed (measured in review) and the DELETE went out as Ben.
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    const tab = () => new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    const ana = tab();
+    await ana.signIn("ana@example.test", "right password");
+    const other = tab();
+    await other.restore();
+    await other.signOut();
+    await other.signIn("ben@example.test", "right password");
+    clock.now += ACCESS_MS;
+
+    const before = server.calls.length;
+    expect(await ana.deleteAccount("right password", "u1")).toEqual({ ok: false, error: "ACCOUNT_MISMATCH" });
+    expect(ana.state().user?.id).toBe("u2");
+    expect(server.calls.slice(before).map((call) => call.path)).toEqual(["/api/auth/refresh"]);
   });
 
   it("says the server could not be reached, not that the sign in expired, when the refresh cannot get through", async () => {
