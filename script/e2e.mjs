@@ -221,6 +221,18 @@ server.stderr.on("data", (d) => serverLog.push(String(d)));
 let browser;
 /** The second server, for the invite only section. Killed in finally if a step before it throws. */
 let inviteServer = null;
+
+// The servers are detached (their own process groups), so a Ctrl-C at the terminal, which goes
+// to this run's group, no longer reaches them, and Node exits on SIGINT without running the
+// finally below. Stop them on the way out whatever ends the run.
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    stopServer(inviteServer);
+    stopServer(server);
+    process.exit(130);
+  });
+}
+
 const pages = {};
 /** Set to a page's name for the one step that expects the server to answer 401. */
 let expectRefusal = null;
