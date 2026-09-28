@@ -1,12 +1,12 @@
 // Store.erase from inside: when another connection takes the write lock between its first
-// checkpoint and the rewrite, and what the erase's own connection is set to while it rewrites.
+// checkpoint and the rewrite, and what the erase's own connection is set to at each statement.
 //
 // That window is microseconds wide: a writer that already holds the lock makes the first
 // checkpoint report busy, so the rewrite never starts (measured in review). Nothing but a hook
-// between the two statements reaches it, so here the one module that loads node:sqlite hands
-// openStore a connection that runs a hook just before VACUUM, however it is sent. Everything else
-// is real SQLite, the busy error included. Its own file, because vi.mock replaces the module for
-// every test in the file.
+// between the statements reaches it, so here the one module that loads node:sqlite hands
+// openStore a connection that runs a hook just before each checkpoint and before VACUUM, however
+// they are sent. Everything else is real SQLite, the busy error included. Its own file, because
+// vi.mock replaces the module for every test in the file.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,28 +16,37 @@ import { afterEach, expect, it, vi } from "vitest";
 import { DatabaseSync } from "./sqlite.js";
 import { openStore, type Store } from "./store.js";
 
-const hook = vi.hoisted(() => ({ beforeVacuum: null as null | ((db: DatabaseSync) => void) }));
+type Hook = null | ((db: DatabaseSync) => void);
+const hook = vi.hoisted(() => ({ beforeVacuum: null as Hook, beforeCheckpoint: null as Hook }));
 
 vi.mock("./sqlite.js", async (importOriginal) => {
   const real = await importOriginal<typeof import("./sqlite.js")>();
-  // Sent through exec or a prepared statement, in any case, with or without a semicolon: a hook
-  // keyed on exec("VACUUM") alone failed both race tests when the rewrite was written another
+  // Sent through exec or a prepared statement run any way, in any case, after a comment or not: a
+  // hook keyed on exec("VACUUM") alone failed the race tests when the rewrite was written another
   // correct way (measured in review).
-  const VACUUM = /^\s*vacuum\b/i;
+  const VACUUM = /^\s*(?:(?:--[^\n]*\n|\/\*[\s\S]*?\*\/)\s*)*vacuum\b/i;
+  const CHECKPOINT = /\bwal_checkpoint\b/i;
+  const hookFor = (sql: string): Hook =>
+    VACUUM.test(sql) ? hook.beforeVacuum : CHECKPOINT.test(sql) ? hook.beforeCheckpoint : null;
   class HookedDatabaseSync extends real.DatabaseSync {
     override exec(sql: string): void {
-      if (VACUUM.test(sql)) hook.beforeVacuum?.(this);
+      hookFor(sql)?.(this);
       super.exec(sql);
     }
     override prepare(sql: string): ReturnType<DatabaseSync["prepare"]> {
       const statement = super.prepare(sql);
-      if (!VACUUM.test(sql)) return statement;
-      const run = statement.run.bind(statement);
+      if (!VACUUM.test(sql) && !CHECKPOINT.test(sql)) return statement;
+      const hooked =
+        <A extends unknown[], R>(method: (...args: A) => R) =>
+        (...args: A): R => {
+          hookFor(sql)?.(this);
+          return method(...args);
+        };
       return Object.assign(statement, {
-        run: (...params: Parameters<typeof run>) => {
-          hook.beforeVacuum?.(this);
-          return run(...params);
-        },
+        run: hooked(statement.run.bind(statement)),
+        get: hooked(statement.get.bind(statement)),
+        all: hooked(statement.all.bind(statement)),
+        iterate: hooked(statement.iterate.bind(statement)),
       });
     }
   }
@@ -47,6 +56,7 @@ vi.mock("./sqlite.js", async (importOriginal) => {
 const cleanup: Array<() => void> = [];
 afterEach(() => {
   hook.beforeVacuum = null;
+  hook.beforeCheckpoint = null;
   while (cleanup.length > 0) cleanup.pop()?.();
 });
 
@@ -94,16 +104,20 @@ it("reads a busy database's extended codes as busy too", () => {
   expect(wait(store)).toBeGreaterThanOrEqual(5000);
 });
 
-it("rewrites with no wait for a lock at all", () => {
+it("waits for no lock at any of its statements", () => {
   // Read from inside the erase, because timing can only bound a wait, and loosely: CI runners
-  // stall for hundreds of milliseconds (measured in review), and a 50 ms wait passed every bound.
+  // stall for hundreds of milliseconds (measured in review). A 50 ms wait before the rewrite, and
+  // one of 50 ms at the first checkpoint or 900 ms at the second, each passed every bound
+  // (measured in review), so the wait is read at all three.
   const { store } = fileStore();
-  let during: number | null = null;
-  hook.beforeVacuum = (db) => {
-    during = Number(db.prepare("PRAGMA busy_timeout").get()?.["timeout"]);
-  };
+  const seen: Array<[string, number]> = [];
+  const read = (kind: string) => (db: DatabaseSync) =>
+    seen.push([kind, Number(db.prepare("PRAGMA busy_timeout").get()?.["timeout"])]);
+  hook.beforeCheckpoint = read("checkpoint");
+  hook.beforeVacuum = read("rewrite");
   expect(store.erase()).toBe(true);
-  expect(during).toBe(0);
+  expect(new Set(seen.map(([kind]) => kind))).toEqual(new Set(["checkpoint", "rewrite"]));
+  expect(seen.filter(([, ms]) => ms !== 0)).toEqual([]);
   expect(wait(store)).toBeGreaterThanOrEqual(5000);
 });
 

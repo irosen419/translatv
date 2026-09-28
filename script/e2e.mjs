@@ -1299,17 +1299,23 @@ try {
     "the tab that was in a call goes to the sign in screen on its own",
     await reached(pat.getByRole("button", { name: en("auth.submit.signIn") })),
   );
+  // Saying it was signed out, not that another account took the tab: the call's end tells the two
+  // apart, and counting every end as a move put the wrong sentence here (measured in review).
+  check(
+    "and says why, as a sign out",
+    await reached(pat.getByRole("alert").filter({ hasText: en("error.UNAUTHENTICATED") })),
+  );
 
   // ---------------------------------------------------------------------
-  section("A call stays on the account it was joined as");
+  section("A call in a tab moved to another account ends, and says why");
   // A call's socket asks for a token before every connect, and tabs share one sign in, so a tab
   // another tab moved to a new account used to reconnect as that account. Measured in review:
   // after an outage past the 60 s grace window, the call took its seat back as the new account
   // under the old one's name, and both accounts' history and contacts gained a call one of them
   // never had. The damage needs the grace window; the guard does not. A reconnect that follows a
-  // failed one forces a refresh, which is where the tab changes accounts, and from there the call
-  // has to end and say why. Olga hosts. Ivy is in the call in one tab, and in another tab of the
-  // same browser she signs out and Jon signs in.
+  // failed one forces a refresh, which is where the tab changes accounts, and from there no socket
+  // may reach the server, and the call has to end and say why. Olga hosts. Ivy is in the call in
+  // one tab, and in another tab of the same browser she signs out and Jon signs in.
   const olgaHosting = await apiSignIn(INVITE_BASE, "Olga");
   const ivy = await apiInviteSignUp(INVITE_BASE, olgaHosting, "Ivy");
   await apiInviteSignUp(INVITE_BASE, olgaHosting, "Jon");
@@ -1344,6 +1350,9 @@ try {
   await inCall.locator(".room").waitFor();
   await waitFor(async () => (await host.locator(".names").textContent()).includes("Ivy"), "the host to see Ivy");
   await otherTab.goto(INVITE_BASE);
+  // Once the page has restored: Sign out shows while it restores, and a click that lands before
+  // the restore answers is a race of its own (session.test.ts).
+  await otherTab.locator(".account-state", { hasText: "Ivy" }).waitFor();
   await otherTab.getByRole("button", { name: en("account.signOut") }).click();
   await otherTab.getByLabel(en("auth.email")).fill(emailFor("Jon"));
   await otherTab.getByLabel(en("auth.password")).fill(PASSWORD);
@@ -1359,14 +1368,21 @@ try {
     for (const socket of window.__sockets) socket.close(3000, "outage");
   });
   await waitFor(async () => (await inCall.evaluate(() => window.__failedWhileOffline)) > 0, "a reconnect to fail");
-  await inCall.evaluate(() => {
+  const socketsBefore = await inCall.evaluate(() => {
     window.__offline = false;
+    return window.__sockets.length;
   });
   check(
     "when the network comes back, the call ends and says the tab is on another account now",
-    await reached(inCall.getByText(en("error.ACCOUNT_CHANGED"))),
+    await reached(inCall.getByRole("alert").filter({ hasText: en("error.ACCOUNT_CHANGED") })),
   );
   check("and the tab has left the call", (await inCall.locator(".room").count()) === 0);
+  // The property itself, not only its notice: the old token source opened one as Jon here, and
+  // was refused only because Ivy's seat was still held (measured in review).
+  check(
+    "and no socket reached the server once the tab was on another account",
+    (await inCall.evaluate((before) => window.__sockets.length - before, socketsBefore)) === 0,
+  );
   await ivyBrowser.close();
   await hostContext.close();
 
@@ -1393,6 +1409,7 @@ try {
   await tabA.getByRole("button", { name: en("account.invite.create") }).click();
   await tabA.locator(".owner-invite-code").waitFor();
   await tabB.goto(INVITE_BASE);
+  await tabB.locator(".account-state", { hasText: "Olga" }).waitFor();
   await tabB.getByRole("button", { name: en("account.signOut") }).click();
   await tabB.getByLabel(en("auth.email")).fill(emailFor("Gus"));
   await tabB.getByLabel(en("auth.password")).fill(PASSWORD);

@@ -61,6 +61,7 @@ function fakeServer(clock: { now: number }) {
   let offline = false;
   let refreshOffline = false;
   let staleOnce = false;
+  let held: Promise<void> | null = null;
 
   function session(account: AccountId = "u1"): AuthSession {
     serial += 1;
@@ -97,7 +98,9 @@ function fakeServer(clock: { now: number }) {
         const token = String(body["refreshToken"]);
         if (!live.has(token)) return json(401, { error: "INVALID_REFRESH" });
         live.delete(token);
-        return json(200, session(owner.get(token)));
+        const answer = json(200, session(owner.get(token)));
+        if (held) await held;
+        return answer;
       }
       case "/api/auth/logout":
         live.delete(String(body["refreshToken"]));
@@ -147,6 +150,20 @@ function fakeServer(clock: { now: number }) {
     refuseNextBearer: () => {
       staleOnce = true;
     },
+    /**
+     * Refreshes from now on are done at the server (the token rotated) but their answers stay on
+     * the wire until the returned release() runs.
+     */
+    holdRefresh: () => {
+      let release = () => {};
+      held = new Promise((resolve) => {
+        release = resolve;
+      });
+      return () => {
+        held = null;
+        release();
+      };
+    },
   };
 }
 
@@ -156,6 +173,116 @@ function setup(storage: TokenStore | null = memoryStore()) {
   const manager = new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
   return { clock, server, manager, storage };
 }
+
+describe("a refresh still on the wire", () => {
+  it("cannot undo a sign out that lands before it answers", async () => {
+    // Measured in review: Sign out shows while the page restores, and a click then was undone when
+    // the restore's refresh answered. The answer put its token back and set the account, and the
+    // tab went on as the account just signed out of, able to start a call, until its access token
+    // ran out.
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    await new SessionManager({ fetch: server.fetch, storage, now: () => clock.now }).signIn("ana@example.test", "right password");
+    const tab = new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    const release = server.holdRefresh();
+    const restoring = tab.restore();
+    await tab.signOut();
+    release();
+    await restoring;
+
+    expect(tab.state()).toEqual({ status: "signedOut", user: null });
+    expect(storage.data[REFRESH_KEY]).toBeUndefined();
+  });
+
+  it("cannot replace a sign in made while it was out", async () => {
+    // Signed in as someone else before the old refresh answered, with no sign out between (the
+    // test above has one): its answer is for the account the tab left.
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    await new SessionManager({ fetch: server.fetch, storage, now: () => clock.now }).signIn("ana@example.test", "right password");
+    const tab = new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    const release = server.holdRefresh();
+    const restoring = tab.restore();
+    expect(await tab.signIn("ben@example.test", "right password")).toEqual({ ok: true });
+    const bens = storage.data[REFRESH_KEY];
+    release();
+    await restoring;
+
+    expect(tab.state().user?.id).toBe("u2");
+    expect(storage.data[REFRESH_KEY]).toBe(bens);
+  });
+});
+
+describe("a call's tokens", () => {
+  it("are only ever the account the call was joined as, and say so when the tab moves", async () => {
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    const tab = () => new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    const ana = tab();
+    await ana.signIn("ana@example.test", "right password");
+    const call = ana.callTokens();
+    expect(await call.source({ force: false })).toBe("access-1");
+    expect(call.moved()).toBe(false);
+    const other = tab();
+    await other.restore();
+    await other.signOut();
+    await other.signIn("ben@example.test", "right password");
+
+    expect(await call.source({ force: true })).toBeNull();
+    expect(call.moved()).toBe(true);
+  });
+
+  it("belong to the account the restore lands on, for a call begun while the session restores", async () => {
+    // No account is shown yet when the call begins, so the first token settles it. Left unbound,
+    // the call went on with whatever account a later refresh read (measured in review).
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    const tab = () => new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    await tab().signIn("ana@example.test", "right password");
+    const ana = tab();
+    expect(ana.state().status).toBe("restoring");
+    const call = ana.callTokens();
+    expect(await call.source({ force: false })).not.toBeNull();
+    expect(ana.state().user?.id).toBe("u1");
+    const other = tab();
+    await other.restore();
+    await other.signOut();
+    await other.signIn("ben@example.test", "right password");
+
+    expect(await call.source({ force: true })).toBeNull();
+    expect(call.moved()).toBe(true);
+  });
+
+  it("end without saying the tab moved when it was signed out or deleted instead", async () => {
+    // "This tab is now signed in to another account" is only true when it is. Counting every
+    // null as a move put that sentence on the sign in screen after a sign out (measured in
+    // review).
+    for (const end of ["signOut", "deleted"] as const) {
+      const clock = { now: T0 };
+      const server = fakeServer(clock);
+      const storage = memoryStore();
+      const tab = () => new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+      const ana = tab();
+      await ana.signIn("ana@example.test", "right password");
+      const call = ana.callTokens();
+      expect(await call.source({ force: false })).toBe("access-1");
+      if (end === "signOut") {
+        const other = tab();
+        await other.restore();
+        await other.signOut();
+      } else {
+        server.deleteElsewhere("u1");
+      }
+
+      expect(await call.source({ force: true })).toBeNull();
+      expect(call.moved()).toBe(false);
+    }
+  });
+});
 
 describe("signing in", () => {
   it("keeps the refresh token in localStorage under translatv.refresh, and the access token only in memory", async () => {
@@ -386,6 +513,27 @@ describe("authorizedFetch", () => {
     await other.signIn("ben@example.test", "right password");
 
     expect(await ana.accessTokenFor("u1", { force: true })).toBeNull();
+    expect(ana.state().user?.id).toBe("u2");
+  });
+
+  it("hands a call nothing once the tab's own refresh has moved it, forced or not", async () => {
+    // A dropped socket that had opened reconnects without force, and a call that outlives one
+    // access token refreshes on its own, from the same shared storage. Checking the account only
+    // on a forced refresh passed every test, the e2e included, and then gave that reconnect the
+    // other account's token (measured in review).
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    const tab = () => new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    const ana = tab();
+    await ana.signIn("ana@example.test", "right password");
+    const other = tab();
+    await other.restore();
+    await other.signOut();
+    await other.signIn("ben@example.test", "right password");
+    clock.now = T0 + ACCESS_MS - REFRESH_MARGIN_MS;
+
+    expect(await ana.accessTokenFor("u1")).toBeNull();
     expect(ana.state().user?.id).toBe("u2");
   });
 
