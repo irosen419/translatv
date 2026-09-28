@@ -229,6 +229,17 @@ redeploy deletes every account, so the server **refuses to start** in production
 directory is on the image layer, printing `the database is on the image layer`. If that is
 genuinely intended, set `ALLOW_EPHEMERAL_DATA=1`.
 
+Both mounted directories have to be writable by the container's user, `node`, which is uid 1000.
+`out/` and `data/` are both in the repository, so a clone made by a uid 1000 account already has
+them with the right owner. A directory that does not exist when `docker compose up` runs is created
+by the Docker daemon as **root** instead, and the server then refuses to start with `the database
+could not be opened` (or, for the ledger, `production requires a writable ledger`). On a host where
+the checkout belongs to a different account, hand both directories over once:
+
+```bash
+sudo chown -R 1000:1000 out data
+```
+
 ## 6. Accounts: set AUTH_SECRET, or the server will not start
 
 Every call needs a signed in account. Accounts live in the SQLite database (section 5), and a

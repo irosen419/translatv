@@ -103,6 +103,25 @@ export function normalizeInvite(input: string): string {
     .replace(/U/g, "V");
 }
 
+/**
+ * Mint one single use invite straight into the store, and return the code (only its hash is kept).
+ *
+ * AuthService.createInvite is this. The CLI calls it directly rather than through an AuthService,
+ * because constructing one also makes the owner flag agree with ITS OWNER_EMAIL: run from a shell
+ * where OWNER_EMAIL was not set, the CLI demoted the live owner.
+ */
+export function mintInvite(store: Store, createdBy: string | null, now: number): { code: string; expiresAt: number } {
+  const code = generateInvite();
+  const expiresAt = now + INVITE_TTL_MS;
+  insertInvite(store, {
+    codeHash: sha256(normalizeInvite(code)),
+    createdBy,
+    createdAt: now,
+    expiresAt,
+  });
+  return { code, expiresAt };
+}
+
 function generateInvite(): string {
   const groups: string[] = [];
   for (let g = 0; g < INVITE_GROUPS; g += 1) {
@@ -202,8 +221,7 @@ export class AuthService {
     this.pruneAt(now);
 
     const lockKey = this.emailKey(email);
-    const lock = findLockout(this.store, lockKey);
-    if (lock?.lockedUntil !== null && lock?.lockedUntil !== undefined && lock.lockedUntil > now) {
+    if (this.isLocked(lockKey, now)) {
       log.warn("auth.locked", {});
       return refuse("LOCKED");
     }
@@ -212,6 +230,16 @@ export class AuthService {
     // An email with no account still pays for one full verification, so the time a refusal takes
     // says nothing about whether the account exists.
     const matches = await verifyPassword(password, user?.passwordHash ?? (await dummyHash()));
+
+    // Read the lock again, because the verification awaited and other requests for this email ran
+    // meanwhile. Checking only before it answered every guess already in flight when the tenth
+    // failure landed, and each wrong one wrote a fresh count over the lock (recordFailure), so a
+    // wave of concurrent guesses was never capped. A right password is refused here too: whether
+    // it was right must not reach anyone once the account is locked.
+    if (this.isLocked(lockKey, now)) {
+      log.warn("auth.locked", {});
+      return refuse("LOCKED");
+    }
 
     if (!user || !matches) {
       this.recordFailure(lockKey, now);
@@ -308,12 +336,17 @@ export class AuthService {
     if (!user) return refuse("UNAUTHENTICATED");
 
     const lockKey = this.emailKey(user.email);
-    const lock = findLockout(this.store, lockKey);
-    if (lock?.lockedUntil !== null && lock?.lockedUntil !== undefined && lock.lockedUntil > now) {
+    if (this.isLocked(lockKey, now)) {
       log.warn("auth.locked", {});
       return refuse("LOCKED");
     }
-    if (!(await verifyPassword(parsed.data.password, user.passwordHash))) {
+    const matches = await verifyPassword(parsed.data.password, user.passwordHash);
+    // Again after the await, for the reason login gives.
+    if (this.isLocked(lockKey, now)) {
+      log.warn("auth.locked", {});
+      return refuse("LOCKED");
+    }
+    if (!matches) {
       this.recordFailure(lockKey, now);
       log.warn("account.delete_refused", { user: userId });
       return refuse("INVALID_CREDENTIALS");
@@ -355,15 +388,7 @@ export class AuthService {
    * one rather than looked up.
    */
   createInvite(createdBy: string | null, now: number): { code: string; expiresAt: number } {
-    const code = generateInvite();
-    const expiresAt = now + INVITE_TTL_MS;
-    insertInvite(this.store, {
-      codeHash: sha256(normalizeInvite(code)),
-      createdBy,
-      createdAt: now,
-      expiresAt,
-    });
-    return { code, expiresAt };
+    return mintInvite(this.store, createdBy, now);
   }
 
   // -------------------------------------------------------------------------
@@ -395,6 +420,18 @@ export class AuthService {
     return createHmac("sha256", this.lockoutKey).update(email).digest("hex");
   }
 
+  /** Is the email behind this key locked at `now`? */
+  private isLocked(lockKey: string, now: number): boolean {
+    const lockedUntil = findLockout(this.store, lockKey)?.lockedUntil ?? null;
+    return lockedUntil !== null && lockedUntil > now;
+  }
+
+  /**
+   * Count one failure, locking at MAX_FAILURES.
+   *
+   * It writes a fresh count with no lock below the limit, so a caller must have seen isLocked
+   * say false with no await in between: recorded over a live lock, a failure would erase it.
+   */
   private recordFailure(lockKey: string, now: number): void {
     const previous = findLockout(this.store, lockKey);
     const recent = previous !== null && now - previous.lastFailureAt < FAILURE_WINDOW_MS;

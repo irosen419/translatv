@@ -9,12 +9,16 @@
 // its hash is stored, so a lost code is replaced by running this again.
 //
 // In the container, where there is no tsx: `node server/dist/cli/invite.js`.
+//
+// It mints through mintInvite, NOT through an AuthService. Constructing an AuthService makes the
+// owner flag agree with OWNER_EMAIL, and this runs from whatever shell the owner has open, so it
+// demoted the live owner whenever that shell had no OWNER_EMAIL. Ownership is the server's to set
+// at boot. Minting also needs no AUTH_SECRET: a code is random, and only its hash is stored.
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveAuthSecret } from "../auth/secret.js";
-import { AuthService } from "../auth/service.js";
+import { mintInvite } from "../auth/service.js";
 import { loadConfig } from "../config.js";
 import { openStore } from "../store/index.js";
 
@@ -25,13 +29,7 @@ const repoRoot = join(here, "..", "..", "..");
 const config = loadConfig(repoRoot);
 const store = openStore({ path: config.databasePath });
 try {
-  // Minting an invite signs nobody in, so the secret only has to exist, not match the server's.
-  const auth = new AuthService(store, {
-    secret: resolveAuthSecret(config.authSecret).secret,
-    signupMode: config.signupMode,
-    ownerEmail: config.ownerEmail,
-  });
-  const invite = auth.createInvite(null, Date.now());
+  const invite = mintInvite(store, null, Date.now());
   process.stdout.write(
     `${invite.code}\n` +
       `Single use, expires ${new Date(invite.expiresAt).toISOString()}. ` +

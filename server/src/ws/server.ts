@@ -176,7 +176,9 @@ interface Connection {
   /**
    * The account this socket was opened by, proved by the access token on the upgrade. Fixed for
    * the life of the socket: a token that expires mid call does not end the call, and the next
-   * reconnect has to present a fresh one.
+   * reconnect has to present a fresh one. The same holds for revocation: signing out, or a
+   * refresh family revoked for reuse, ends future sessions but leaves an open socket open. Only
+   * deleting the account closes one (disconnectUser).
    */
   userId: string | null;
   /** Set once the connection is in a room. */

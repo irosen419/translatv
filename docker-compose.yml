@@ -48,6 +48,8 @@ services:
       - ./out:/app/out
       # Persist the SQLite database (accounts, tokens, invites from M3 onward). Without this a
       # redeploy deletes every account, and the server refuses to start in production rather
-      # than let that happen quietly.
+      # than let that happen quietly. Like ./out, ./data is in the repository (data/.gitkeep) so
+      # the clone creates it with its own owner; the container runs as uid 1000 and must be able
+      # to write both. DEPLOY.md section 5 has the one command for a host where it cannot.
       - ./data:/app/data
     restart: unless-stopped

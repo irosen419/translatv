@@ -213,11 +213,12 @@ export function describeConfig(config: Config): string[] {
   lines.push(
     config.signupMode === "open"
       ? "signup is OPEN: anyone who can reach this server can create an account and start calls"
-      : "signup is invite only: mint invites with `npm run invite` or as the owner",
+      : "signup is invite only: mint invites with `npm run invite` (in the image, " +
+        "`node server/dist/cli/invite.js`) or as the owner",
   );
   lines.push(
     config.ownerEmail === null
-      ? "OWNER_EMAIL is not set: no account is the owner, so only `npm run invite` can mint invites"
+      ? "OWNER_EMAIL is not set: no account is the owner, so only the invite CLI can mint invites"
       : "an owner account is configured (OWNER_EMAIL)",
   );
 

@@ -9,7 +9,7 @@ app is fully usable without one, and says so plainly at boot.
 
 | Thing | Why |
 |---|---|
-| **Node 22.13 or newer** | The only hard requirement to RUN the app. Check with `node --version`. |
+| **Node 22.16 or newer** | The only hard requirement to RUN the app. Check with `node --version`. |
 | **Chrome** | Subtitles use the Web Speech API. **Firefox does not have it at all**, so the call and typed chat work there but subtitles never appear. |
 | **Python 3** | ONLY for the Python test suite and the spend CLI. Not needed to run the app. |
 

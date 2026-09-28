@@ -165,3 +165,23 @@ jobs:
             exit 1
           }
           echo "refused for the right reason"
+
+      - name: The server starts in production with the ledger and the database on volumes
+        run: |
+          # The other half of the two guards above: a real deploy has to get through them. No
+          # ALLOW_EPHEMERAL_* here. Every other step either sets the overrides or expects a refusal,
+          # so a guard that looked at the wrong directory, and refused every mounted deploy, passed
+          # all of them. Named volumes, because Docker fills a new one from the image (the ledger,
+          # and a data/ directory owned by node), which is the state a first deploy starts from.
+          docker run -d --name vt-volumes -p 8080:8080 -e ORIGIN=http://localhost:8080 \
+            -e AUTH_SECRET="$(openssl rand -hex 32)" \
+            -v vt-out:/app/out -v vt-data:/app/data \
+            translatv:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/healthz; then echo; docker rm -f vt-volumes; exit 0; fi
+            sleep 1
+          done
+          echo "the container never answered /healthz with the ledger and the database mounted"
+          docker logs vt-volumes
+          docker rm -f vt-volumes
+          exit 1

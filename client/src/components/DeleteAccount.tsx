@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AuthFailure, AuthOutcome } from "../lib/session.js";
 import type { CopyKey } from "../i18n/copy.js";
 import { useCopy } from "../i18n/useCopy.js";
@@ -35,10 +35,20 @@ export function DeleteAccount({ onDelete }: Props) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<AuthFailure | null>(null);
+  // Opening swaps the focused button for the form and Cancel swaps it back, and focus left in a
+  // node that is gone falls to <body>: a keyboard user was dropped at the top of the page both
+  // ways. Opening moves focus to the password field (autoFocus below), cancelling to this button.
+  const openButton = useRef<HTMLButtonElement>(null);
+  const focusOpenButton = useRef(false);
+  useEffect(() => {
+    if (open || !focusOpenButton.current) return;
+    focusOpenButton.current = false;
+    openButton.current?.focus();
+  }, [open]);
 
   if (!open) {
     return (
-      <button type="button" className="linklike" onClick={() => setOpen(true)}>
+      <button ref={openButton} type="button" className="linklike" onClick={() => setOpen(true)}>
         {copy.t("account.delete.open")}
       </button>
     );
@@ -66,6 +76,7 @@ export function DeleteAccount({ onDelete }: Props) {
         <label htmlFor="delete-password">{copy.t("account.delete.password")}</label>
         <input
           id="delete-password"
+          autoFocus
           type="password"
           autoComplete="current-password"
           value={password}
@@ -77,6 +88,7 @@ export function DeleteAccount({ onDelete }: Props) {
         <button
           type="button"
           onClick={() => {
+            focusOpenButton.current = true;
             setOpen(false);
             setPassword("");
             setFailure(null);

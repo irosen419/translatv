@@ -47,8 +47,10 @@ export function openStore(options: StoreOptions): Store {
   const db = new DatabaseSync(path);
 
   try {
-    // Off by default in SQLite, per connection, and silently: a REFERENCES clause is decoration
-    // until this is on.
+    // SQLite itself leaves foreign keys off, per connection, and silently: a REFERENCES clause is
+    // decoration until they are on, and every ON DELETE in migrations.ts with it. node:sqlite's
+    // DatabaseSync happens to turn them on by default (enableForeignKeyConstraints); set here
+    // anyway, so the account deletion cascade does not rest on a library default.
     db.exec("PRAGMA foreign_keys = ON");
     if (path !== MEMORY) {
       // WAL lets reads proceed during a write, and survives a crash mid write as well as the
@@ -71,14 +73,19 @@ export function openStore(options: StoreOptions): Store {
               "first await and write the rest outside the transaction",
           );
         }
-        depth -= 1;
         db.exec(outer ? "COMMIT" : `RELEASE ${savepoint}`);
         return result;
       } catch (error) {
-        depth -= 1;
-        if (outer) db.exec("ROLLBACK");
-        else db.exec(`ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`);
+        // Only when something is still open. SQLite ends the whole transaction by itself on some
+        // failures (a full disk, an I/O error), and a ROLLBACK after that fails with "no
+        // transaction is active": thrown from here, it would replace the error that says what
+        // actually went wrong.
+        if (db.isTransaction) db.exec(outer ? "ROLLBACK" : `ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`);
         throw error;
+      } finally {
+        // Once per call, whichever way it ends. Decrementing before COMMIT and again in the catch
+        // left depth at -1 after a failed COMMIT, and every later call then ran "SAVEPOINT sp_-1".
+        depth -= 1;
       }
     };
 

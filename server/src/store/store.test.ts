@@ -177,4 +177,47 @@ describe("transaction", () => {
     ).toThrow(/synchronous/);
     expect(count(store)).toBe(0);
   });
+
+  it("stays usable after a COMMIT fails, at the outer level and nested", () => {
+    // A COMMIT can fail after the callback returned: here a deferred foreign key, in production a
+    // full disk. The depth counter used to be decremented once before COMMIT and again in the
+    // catch, so it ended at -1 and every later call ran "SAVEPOINT sp_-1", a syntax error, until
+    // the process restarted: no sign in, refresh or signup would work.
+    const store = open({
+      path: ":memory:",
+      migrations: [
+        `CREATE TABLE parent (id INTEGER PRIMARY KEY);
+         CREATE TABLE child (parent_id INTEGER NOT NULL REFERENCES parent (id) DEFERRABLE INITIALLY DEFERRED)`,
+      ],
+    });
+    const orphan = () => store.db.prepare("INSERT INTO child (parent_id) VALUES (42)").run();
+
+    expect(() => store.transaction(orphan)).toThrow(/FOREIGN KEY/);
+    expect(store.db.isTransaction).toBe(false);
+
+    expect(store.transaction(() => store.transaction(() => "nested"))).toBe("nested");
+    expect(() => store.transaction(() => store.transaction(orphan))).toThrow(/FOREIGN KEY/);
+    expect(store.transaction(() => "after")).toBe("after");
+    expect(Number(store.db.prepare("SELECT count(*) AS c FROM child").get()?.["c"])).toBe(0);
+  });
+
+  it("rethrows the error that failed the transaction when SQLite has already rolled it back", () => {
+    // SQLite ends a transaction itself on some errors, a full database among them, and the
+    // ROLLBACK that follows then fails with "no transaction is active". Thrown from the catch,
+    // that second error replaced the one that says what went wrong.
+    const store = withTable();
+    store.db.exec("CREATE TABLE big (b BLOB NOT NULL)");
+    const pages = Number(store.db.prepare("PRAGMA page_count").get()?.["page_count"]);
+    store.db.exec(`PRAGMA max_page_count = ${pages + 2}`);
+
+    expect(() =>
+      store.transaction(() => {
+        for (let i = 0; i < 64; i += 1) store.db.prepare("INSERT INTO big (b) VALUES (zeroblob(4096))").run();
+      }),
+    ).toThrow(/full/);
+    expect(store.db.isTransaction).toBe(false);
+
+    store.db.exec("PRAGMA max_page_count = 1073741823");
+    expect(store.transaction(() => "after")).toBe("after");
+  });
 });

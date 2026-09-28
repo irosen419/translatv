@@ -8,6 +8,7 @@ import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openStore, type Store } from "../store/index.js";
+import { saveLockout } from "../store/loginLockouts.js";
 import { ACCESS_TTL_MS } from "./accessTokens.js";
 import { AuthService, LOCK_MS, MAX_FAILURES, REFRESH_TTL_MS, type AuthOptions } from "./service.js";
 
@@ -65,6 +66,20 @@ describe("signup in invite mode", () => {
       NOW,
     );
     expect(result).toMatchObject({ ok: false, error: "INVITE_INVALID" });
+  });
+
+  it("spends an invite exactly once when two signups race for it", async () => {
+    // Both pass the usable check before either finishes hashing its password, which awaits. The
+    // conditional UPDATE in consumeInvite is what refuses the second, and nothing else would.
+    const auth = service();
+    const invite = auth.createInvite(null, NOW);
+    const [first, second] = await Promise.all([
+      auth.signup({ invite: invite.code, email: "a@example.test", password: PASSWORD, displayName: "A" }, NOW),
+      auth.signup({ invite: invite.code, email: "b@example.test", password: PASSWORD, displayName: "B" }, NOW),
+    ]);
+    expect([first.ok, second.ok].filter(Boolean)).toHaveLength(1);
+    expect(first.ok ? second : first).toMatchObject({ ok: false, error: "INVITE_INVALID" });
+    expect(count("users")).toBe(1);
   });
 
   it("spends an invite exactly once", async () => {
@@ -159,6 +174,10 @@ describe("the owner", () => {
     expect(before.user.isOwner).toBe(false);
     const after = service({ ownerEmail: "owner@example.test" });
     expect(after.userFor(before.user.id)?.isOwner).toBe(true);
+
+    // And away again: the role moves, it is not kept by whoever held it first.
+    const moved = service({ ownerEmail: "someone.else@example.test" });
+    expect(moved.userFor(before.user.id)?.isOwner).toBe(false);
   });
 });
 
@@ -179,6 +198,29 @@ describe("login", () => {
     expect(wrong).toMatchObject({ ok: false, error: "INVALID_CREDENTIALS" });
   });
 
+  it("makes an email with no account cost a full password check, so timing cannot tell them apart", async () => {
+    // The uniform error code above is half of the defense. Without the dummy hash in login, "no
+    // such account" answers in well under a millisecond and "wrong password" in tens of them,
+    // and that gap is the existence oracle. The gap is a whole scrypt against almost nothing, so
+    // a quarter of it survives a loaded machine. Each email stays under MAX_FAILURES, because a
+    // locked email answers without any check at all.
+    const auth = service();
+    await signedUp(auth);
+    const cost = async (email: string): Promise<number> => {
+      const start = performance.now();
+      await auth.login({ email, password: "wrong wrong" }, NOW);
+      return performance.now() - start;
+    };
+    await cost("nobody@example.test"); // the dummy hash is made once per process: not timed
+    const real = Math.min(await cost("ana@example.test"), await cost("ana@example.test"), await cost("ana@example.test"));
+    const nobody = Math.min(
+      await cost("nobody@example.test"),
+      await cost("nobody@example.test"),
+      await cost("nobody@example.test"),
+    );
+    expect(nobody).toBeGreaterThan(real / 4);
+  });
+
   it(`locks the account after ${MAX_FAILURES} failures, even against the right password`, async () => {
     const auth = service();
     await signedUp(auth);
@@ -193,6 +235,58 @@ describe("login", () => {
     // And lets them back in once the lock has run out.
     const later = await auth.login({ email: "ana@example.test", password: PASSWORD }, NOW + MAX_FAILURES + LOCK_MS);
     expect(later.ok).toBe(true);
+  });
+
+  it("answers at most MAX_FAILURES of a wave of concurrent guesses, and stays locked", async () => {
+    // Every guess in a wave passes the first lock check before any of them finishes, because the
+    // check awaits scrypt. Guesses still in flight when the tenth failure locked the account used
+    // to be answered anyway, and each wrong one wrote a fresh count over the lock it landed on:
+    // eleven at once left the account unlocked with one failure counted, so waves of nineteen
+    // were never capped at all.
+    const auth = service();
+    await signedUp(auth);
+    const wave = await Promise.all(
+      Array.from({ length: 2 * MAX_FAILURES - 1 }, () =>
+        auth.login({ email: "ana@example.test", password: "wrong wrong" }, NOW),
+      ),
+    );
+    const answered = wave.filter((result) => !result.ok && result.error === "INVALID_CREDENTIALS");
+    expect(answered).toHaveLength(MAX_FAILURES);
+    expect(wave.filter((result) => !result.ok && result.error === "LOCKED")).toHaveLength(MAX_FAILURES - 1);
+    expect(await auth.login({ email: "ana@example.test", password: PASSWORD }, NOW + 1)).toMatchObject({
+      ok: false,
+      error: "LOCKED",
+    });
+  });
+
+  it("refuses the right password when the lock lands while that password is being checked", async () => {
+    const auth = service();
+    await signedUp(auth);
+    await auth.login({ email: "ana@example.test", password: "wrong wrong" }, NOW);
+    const key = String(store.db.prepare("SELECT email_hash FROM login_lockouts").get()?.["email_hash"]);
+
+    const inFlight = auth.login({ email: "ana@example.test", password: PASSWORD }, NOW);
+    // What the tenth failure of a concurrent wave writes, landing while scrypt is still running.
+    saveLockout(store, key, { failures: 0, lastFailureAt: NOW, lockedUntil: NOW + LOCK_MS });
+
+    expect(await inFlight).toMatchObject({ ok: false, error: "LOCKED" });
+    expect(await auth.login({ email: "ana@example.test", password: PASSWORD }, NOW + 1)).toMatchObject({
+      error: "LOCKED",
+    });
+  });
+
+  it("keeps a live lock through the once a minute prune", async () => {
+    // Every other lockout test finishes inside a minute, so the prune never ran during any of
+    // them, and a prune that deleted live locks would have ended every lock after one minute.
+    const auth = service();
+    await signedUp(auth);
+    for (let i = 0; i < MAX_FAILURES; i += 1) {
+      await auth.login({ email: "ana@example.test", password: "wrong wrong" }, NOW);
+    }
+    expect(await auth.login({ email: "ana@example.test", password: PASSWORD }, NOW + 2 * 60_000)).toMatchObject({
+      ok: false,
+      error: "LOCKED",
+    });
   });
 
   it("locks an email with no account exactly as it locks a real one", async () => {
@@ -252,6 +346,22 @@ describe("refresh", () => {
 
     // The descendant, which was valid a moment ago, is revoked with it.
     expect(auth.refresh({ refreshToken: rotated.value.refreshToken }, NOW + 3)).toMatchObject({
+      ok: false,
+      error: "INVALID_REFRESH",
+    });
+  });
+
+  it("still catches a reused token after the once a minute prune has run", async () => {
+    // A spent token has to outlive the prune, or presenting it again reads as a token nobody
+    // issued: refused, but with the family left alive, so the thief's rotation keeps working.
+    const auth = service();
+    const session = await signedUp(auth);
+    const rotated = auth.refresh({ refreshToken: session.refreshToken }, NOW + 1);
+    if (!rotated.ok) throw new Error("first rotation failed");
+
+    const later = NOW + 2 * 60_000;
+    expect(auth.refresh({ refreshToken: session.refreshToken }, later)).toMatchObject({ ok: false });
+    expect(auth.refresh({ refreshToken: rotated.value.refreshToken }, later + 1)).toMatchObject({
       ok: false,
       error: "INVALID_REFRESH",
     });
@@ -392,6 +502,35 @@ describe("deleteAccount", () => {
       ok: false,
       error: "LOCKED",
     });
+    expect(auth.userFor(session.user.id)).not.toBeNull();
+  });
+
+  it("stays locked through a wave of concurrent wrong passwords", async () => {
+    // The same wave as login's: guesses in flight when the lock lands must not clear it.
+    const auth = service();
+    const session = await signedUp(auth);
+    await Promise.all(
+      Array.from({ length: 2 * MAX_FAILURES - 1 }, (_, i) =>
+        auth.deleteAccount(session.user.id, { password: `wrong ${i} wrong` }, NOW),
+      ),
+    );
+    expect(await auth.deleteAccount(session.user.id, { password: PASSWORD }, NOW + 1)).toEqual({
+      ok: false,
+      error: "LOCKED",
+    });
+    expect(auth.userFor(session.user.id)).not.toBeNull();
+  });
+
+  it("refuses the right password when the lock lands while that password is being checked", async () => {
+    const auth = service();
+    const session = await signedUp(auth);
+    await auth.deleteAccount(session.user.id, { password: "wrong wrong" }, NOW);
+    const key = String(store.db.prepare("SELECT email_hash FROM login_lockouts").get()?.["email_hash"]);
+
+    const inFlight = auth.deleteAccount(session.user.id, { password: PASSWORD }, NOW);
+    saveLockout(store, key, { failures: 0, lastFailureAt: NOW, lockedUntil: NOW + LOCK_MS });
+
+    expect(await inFlight).toEqual({ ok: false, error: "LOCKED" });
     expect(auth.userFor(session.user.id)).not.toBeNull();
   });
 
