@@ -62,6 +62,7 @@ function fakeServer(clock: { now: number }) {
   let refreshOffline = false;
   let staleOnce = false;
   let held: Promise<void> | null = null;
+  let lateBody: { requested: () => void; arrived: Promise<void> } | null = null;
 
   function session(account: AccountId = "u1"): AuthSession {
     serial += 1;
@@ -96,10 +97,28 @@ function fakeServer(clock: { now: number }) {
       case "/api/auth/refresh": {
         if (refreshOffline) throw new TypeError("fetch failed");
         const token = String(body["refreshToken"]);
-        if (!live.has(token)) return json(401, { error: "INVALID_REFRESH" });
-        live.delete(token);
-        const answer = json(200, session(owner.get(token)));
+        let answer: Response;
+        if (live.has(token)) {
+          live.delete(token);
+          answer = json(200, session(owner.get(token)));
+        } else {
+          answer = json(401, { error: "INVALID_REFRESH" });
+        }
         if (held) await held;
+        if (lateBody && answer.ok) {
+          const { requested, arrived } = lateBody;
+          lateBody = null;
+          // The status is in, and the body is still on its way.
+          return {
+            ok: true,
+            status: 200,
+            json: async () => {
+              requested();
+              await arrived;
+              return answer.json();
+            },
+          } as unknown as Response;
+        }
         return answer;
       }
       case "/api/auth/logout":
@@ -151,8 +170,26 @@ function fakeServer(clock: { now: number }) {
       staleOnce = true;
     },
     /**
-     * Refreshes from now on are done at the server (the token rotated) but their answers stay on
-     * the wire until the returned release() runs.
+     * The next refresh that succeeds answers at once, but its body arrives only on release().
+     * `requested` settles once the session has begun to read it.
+     */
+    holdBody: () => {
+      let requested = () => {};
+      let release = () => {};
+      const read = new Promise<void>((resolve) => {
+        requested = resolve;
+      });
+      lateBody = {
+        requested: () => requested(),
+        arrived: new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+      };
+      return { requested: read, release: () => release() };
+    },
+    /**
+     * Refreshes from now on are done at the server (the token rotated, or refused) but their
+     * answers stay on the wire until the returned release() runs.
      */
     holdRefresh: () => {
       let release = () => {};
@@ -163,6 +200,24 @@ function fakeServer(clock: { now: number }) {
         held = null;
         release();
       };
+    },
+  };
+}
+
+/**
+ * navigator.locks for a test: run() waits for any hold() in place when it is called, as a tab does
+ * while another tab holds the refresh lock.
+ */
+function holdableLock() {
+  let gate: Promise<void> = Promise.resolve();
+  return {
+    run: <T>(_name: string, fn: () => Promise<T>): Promise<T> => gate.then(fn),
+    hold: () => {
+      let release = () => {};
+      gate = new Promise((resolve) => {
+        release = resolve;
+      });
+      return release;
     },
   };
 }
@@ -213,6 +268,66 @@ describe("a refresh still on the wire", () => {
     expect(tab.state().user?.id).toBe("u2");
     expect(storage.data[REFRESH_KEY]).toBe(bens);
   });
+
+  it("cannot drop a sign in with a refusal that answers after it", async () => {
+    // A verdict about the token the tab held before, not the one it holds now. Heeded, it signed
+    // out the account signed in meanwhile (measured in review: the tab went back to restoring).
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    await new SessionManager({ fetch: server.fetch, storage, now: () => clock.now }).signIn("ana@example.test", "right password");
+    const tab = new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    server.deleteElsewhere("u1");
+    const release = server.holdRefresh();
+    const restoring = tab.restore();
+    expect(await tab.signIn("ben@example.test", "right password")).toEqual({ ok: true });
+    release();
+    await restoring;
+
+    expect(tab.state().user?.id).toBe("u2");
+  });
+
+  it("cannot undo a sign out that lands while its answer is still arriving", async () => {
+    // The status is in and the body is not: a sign out in that gap was undone once the body came
+    // (measured in review, with the check before reading the body in place and the one after it
+    // removed).
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    await new SessionManager({ fetch: server.fetch, storage, now: () => clock.now }).signIn("ana@example.test", "right password");
+    const tab = new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    const body = server.holdBody();
+    const restoring = tab.restore();
+    await body.requested;
+    await tab.signOut();
+    body.release();
+    await restoring;
+
+    expect(tab.state()).toEqual({ status: "signedOut", user: null });
+    expect(storage.data[REFRESH_KEY]).toBeUndefined();
+  });
+
+  it("keeps what it is given when a sign in lands while it waits for the lock", async () => {
+    // It reads the token inside the lock, so it spends the one the sign in stored, and the server
+    // answers with that token's successor. Judged against the sign in that came before it, the
+    // answer was thrown away and the tab kept a spent token: its next refresh was refused and
+    // signed it out (measured in review, with the epoch read before the lock).
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    const lock = holdableLock();
+    const tab = new SessionManager({ fetch: server.fetch, storage, now: () => clock.now, lock: lock.run });
+    await tab.signIn("ana@example.test", "right password");
+    clock.now = T0 + ACCESS_MS - REFRESH_MARGIN_MS;
+    const release = lock.hold();
+    const renewing = tab.accessToken();
+    expect(await tab.signIn("ben@example.test", "right password")).toEqual({ ok: true });
+    release();
+    await renewing;
+
+    expect(await tab.accessToken({ force: true })).not.toBeNull();
+    expect(tab.state().user?.id).toBe("u2");
+  });
 });
 
 describe("a call's tokens", () => {
@@ -255,6 +370,32 @@ describe("a call's tokens", () => {
 
     expect(await call.source({ force: true })).toBeNull();
     expect(call.moved()).toBe(true);
+  });
+
+  it("each say only why their own call ended", async () => {
+    // Kept on the session rather than on each call, a move stayed reported: after it, a new call
+    // as the account the tab moved to, ended by that account's deletion, said the tab had moved
+    // again (measured in review).
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    const tab = () => new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    const ana = tab();
+    await ana.signIn("ana@example.test", "right password");
+    const first = ana.callTokens();
+    expect(await first.source({ force: false })).not.toBeNull();
+    const other = tab();
+    await other.restore();
+    await other.signOut();
+    await other.signIn("ben@example.test", "right password");
+    expect(await first.source({ force: true })).toBeNull();
+    expect(first.moved()).toBe(true);
+
+    const second = ana.callTokens();
+    expect(await second.source({ force: false })).not.toBeNull();
+    server.deleteElsewhere("u2");
+    expect(await second.source({ force: true })).toBeNull();
+    expect(second.moved()).toBe(false);
   });
 
   it("end without saying the tab moved when it was signed out or deleted instead", async () => {
