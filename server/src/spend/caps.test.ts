@@ -200,11 +200,32 @@ describe("SpendGate", () => {
     });
 
     it("counts only this user's spend from TODAY", () => {
+      // MORE than the whole user cap, on another day, so the day filter is the only thing that
+      // can allow this. At $0.29 against the $0.30 cap it passed with the filter deleted, and a
+      // host whose lifetime spend passed the cap would have been refused forever.
       seedEmptyLedger();
       const gate = new SpendGate(root, CONFIG, "gate");
-      spend(0.29, roomHash("A"), "gate", "2020-01-01T00:00:00.000Z", HOST);
+      spend(0.35, roomHash("A"), "gate", "2020-01-01T00:00:00.000Z", HOST);
       gate.invalidate();
       expect(gate.check(roomHash("B"), HOST).allowed).toBe(true);
+    });
+
+    it("names the FIRST cap that refuses, in the order global, room, user", () => {
+      // The reason picks the sentence the room reads (DAILY_CAP, ROOM_CAP or USER_CAP), so when
+      // several caps are past at once, which one is named is visible, not an implementation detail.
+      seedEmptyLedger();
+      const gate = new SpendGate(root, CONFIG, "gate");
+      spend(0.6, ROOM, "gate", undefined, HOST); // room and user both past
+      gate.invalidate();
+      const both = gate.check(ROOM, HOST);
+      expect(both.allowed).toBe(false);
+      if (!both.allowed) expect(both.reason).toBe("room_cap");
+
+      spend(0.5, roomHash("B"), "gate", undefined, HOST); // and now the day too
+      gate.invalidate();
+      const all = gate.check(ROOM, HOST);
+      expect(all.allowed).toBe(false);
+      if (!all.allowed) expect(all.reason).toBe("daily_cap");
     });
 
     it("never counts an unattributed row toward any user", () => {
