@@ -23,6 +23,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { createServer } from "node:net";
 import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -162,6 +163,65 @@ async function apiDeleteAccount(base, session) {
     body: JSON.stringify({ password: PASSWORD, userId: session.user.id }),
   });
   return response.status;
+}
+
+/**
+ * Make an account called `name` on an invite only server, with an invite `owner` mints through the
+ * API. Resolves the sign up's answer: its tokens and user.
+ */
+async function apiInviteSignUp(base, owner, name) {
+  const invite = await fetch(`${base}/api/invites`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${owner.accessToken}` },
+  }).then((response) => response.json());
+  const response = await fetch(`${base}/api/auth/signup`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: emailFor(name), password: PASSWORD, displayName: name, invite: invite.code }),
+  });
+  if (response.status !== 201) throw new Error(`signup for ${name} answered ${response.status}`);
+  return response.json();
+}
+
+/** A context that starts signed in with `refreshToken`, kept where the client keeps it. */
+function contextSignedInWith(base, refreshToken, options = {}) {
+  return browser.newContext({
+    ...options,
+    storageState: {
+      cookies: [],
+      origins: [{ origin: base, localStorage: [{ name: "translatv.refresh", value: refreshToken }] }],
+    },
+  });
+}
+
+/** A local port nothing listens on: the OS picks a free one, and it is released again. */
+async function closedPort() {
+  const probe = createServer();
+  await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const { port } = probe.address();
+  await new Promise((resolve) => probe.close(resolve));
+  return port;
+}
+
+/**
+ * Installed before a page loads: an outage the test switches on, for the page's sockets alone.
+ * Every socket the page opens is kept, so the test can drop them. While `__offline` is set, a new
+ * one goes to `deadUrl`, where nothing listens, so it never opens: from inside the app that is an
+ * outage, and also how a refused token looks. `__failedWhileOffline` counts those.
+ */
+function socketOutageSwitch(deadUrl) {
+  const Real = window.WebSocket;
+  window.__sockets = [];
+  window.__offline = false;
+  window.__failedWhileOffline = 0;
+  window.WebSocket = class extends Real {
+    constructor(url, protocols) {
+      const offline = window.__offline;
+      super(offline ? deadUrl : url, protocols);
+      if (offline) this.addEventListener("close", () => (window.__failedWhileOffline += 1));
+      window.__sockets.push(this);
+    }
+  };
 }
 
 /**
@@ -1241,6 +1301,76 @@ try {
   );
 
   // ---------------------------------------------------------------------
+  section("A call stays on the account it was joined as");
+  // A call's socket asks for a token before every connect, and tabs share one sign in, so a tab
+  // another tab moved to a new account used to reconnect as that account. Measured in review:
+  // after an outage past the 60 s grace window, the call took its seat back as the new account
+  // under the old one's name, and both accounts' history and contacts gained a call one of them
+  // never had. The damage needs the grace window; the guard does not. A reconnect that follows a
+  // failed one forces a refresh, which is where the tab changes accounts, and from there the call
+  // has to end and say why. Olga hosts. Ivy is in the call in one tab, and in another tab of the
+  // same browser she signs out and Jon signs in.
+  const olgaHosting = await apiSignIn(INVITE_BASE, "Olga");
+  const ivy = await apiInviteSignUp(INVITE_BASE, olgaHosting, "Ivy");
+  await apiInviteSignUp(INVITE_BASE, olgaHosting, "Jon");
+  const hostContext = await contextSignedInWith(INVITE_BASE, olgaHosting.refreshToken, { permissions: ["microphone"] });
+  const host = await hostContext.newPage();
+  host.on("pageerror", (e) => errors.push(`host: ${e.message}`));
+  await host.goto(INVITE_BASE);
+  await host.getByRole("button", { name: "Start a new chat" }).click();
+  await host.getByLabel("Your name, just for this chat").fill("Olga");
+  await host.getByLabel("Your language and region").selectOption("en-US");
+  await host.getByRole("button", { name: /Create and allow microphone/ }).click();
+  const callCode = await waitFor(
+    async () => {
+      const text = await host.locator(".code-badge").textContent().catch(() => null);
+      return text && text.trim().length === 8 ? text.trim() : null;
+    },
+    "a room code on the invite only server",
+  );
+  const ivyBrowser = await contextSignedInWith(INVITE_BASE, ivy.refreshToken, { permissions: ["microphone"] });
+  await ivyBrowser.addInitScript(socketOutageSwitch, `ws://127.0.0.1:${await closedPort()}/`);
+  const inCall = await ivyBrowser.newPage();
+  const otherTab = await ivyBrowser.newPage();
+  for (const [name, page] of [["the tab in the call", inCall], ["the other tab", otherTab]]) {
+    page.on("pageerror", (e) => errors.push(`${name}: ${e.message}`));
+  }
+  await inCall.goto(INVITE_BASE);
+  await inCall.getByLabel("Room code").fill(callCode);
+  await inCall.getByRole("button", { name: "Join chat" }).click();
+  await inCall.getByLabel("Your name, just for this chat").fill("Ivy");
+  await inCall.getByLabel("Your language and region").selectOption("en-US");
+  await inCall.getByRole("button", { name: en("prejoin.submit.join") }).click();
+  await inCall.locator(".room").waitFor();
+  await waitFor(async () => (await host.locator(".names").textContent()).includes("Ivy"), "the host to see Ivy");
+  await otherTab.goto(INVITE_BASE);
+  await otherTab.getByRole("button", { name: en("account.signOut") }).click();
+  await otherTab.getByLabel(en("auth.email")).fill(emailFor("Jon"));
+  await otherTab.getByLabel(en("auth.password")).fill(PASSWORD);
+  await otherTab.getByRole("button", { name: en("auth.submit.signIn") }).click();
+  await otherTab.locator(".account-state", { hasText: "Jon" }).waitFor();
+  check(
+    "a tab is in a call while another tab of its browser signs in as someone else",
+    (await inCall.locator(".room").count()) === 1,
+  );
+  // A few seconds of outage: the socket drops, a reconnect fails, and the network comes back.
+  await inCall.evaluate(() => {
+    window.__offline = true;
+    for (const socket of window.__sockets) socket.close(3000, "outage");
+  });
+  await waitFor(async () => (await inCall.evaluate(() => window.__failedWhileOffline)) > 0, "a reconnect to fail");
+  await inCall.evaluate(() => {
+    window.__offline = false;
+  });
+  check(
+    "when the network comes back, the call ends and says the tab is on another account now",
+    await reached(inCall.getByText(en("error.ACCOUNT_CHANGED"))),
+  );
+  check("and the tab has left the call", (await inCall.locator(".room").count()) === 0);
+  await ivyBrowser.close();
+  await hostContext.close();
+
+  // ---------------------------------------------------------------------
   section("Two tabs of one browser share one sign in");
   // Tabs share the stored refresh token, so signing in as someone else in one tab moves every
   // other tab to that account at its next refresh. Nothing the tab left behind shows for its old
@@ -1251,22 +1381,8 @@ try {
   // not the owner. On this server, so its accounts do not spend the main server's signup limit.
   // Olga is the owner, and ends this section deleted: nothing after it uses her.
   const olgaSession = await apiSignIn(INVITE_BASE, "Olga");
-  const invite = await fetch(`${INVITE_BASE}/api/invites`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${olgaSession.accessToken}` },
-  }).then((response) => response.json());
-  const gusMade = await fetch(`${INVITE_BASE}/api/auth/signup`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: emailFor("Gus"), password: PASSWORD, displayName: "Gus", invite: invite.code }),
-  });
-  if (gusMade.status !== 201) throw new Error(`signup for Gus answered ${gusMade.status}`);
-  const sharedBrowser = await browser.newContext({
-    storageState: {
-      cookies: [],
-      origins: [{ origin: INVITE_BASE, localStorage: [{ name: "translatv.refresh", value: olgaSession.refreshToken }] }],
-    },
-  });
+  await apiInviteSignUp(INVITE_BASE, olgaSession, "Gus");
+  const sharedBrowser = await contextSignedInWith(INVITE_BASE, olgaSession.refreshToken);
   const tabA = await sharedBrowser.newPage();
   const tabB = await sharedBrowser.newPage();
   for (const [name, page] of [["tab A", tabA], ["tab B", tabB]]) {

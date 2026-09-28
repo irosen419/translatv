@@ -272,6 +272,15 @@ export class SessionManager {
   }
 
   /**
+   * accessToken(), but only ever `account`'s: null once this tab holds another account. For a
+   * call, which has to go on as the account it was joined as or not at all (App's socket).
+   */
+  async accessTokenFor(account: string, options: { force?: boolean } = {}): Promise<string | null> {
+    const token = await this.accessToken(options);
+    return token !== null && this.user?.id === account ? token : null;
+  }
+
+  /**
    * fetch with the access token, refreshed and retried once on a 401.
    *
    * Only ever as the account this tab showed when the request was made. Tabs share one stored

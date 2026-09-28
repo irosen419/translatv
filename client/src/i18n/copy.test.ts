@@ -139,6 +139,26 @@ function sweep(dialect: string, forbidden: string[]): void {
   expect(found).toEqual([]);
 }
 
+/**
+ * sweep() for a run of words. "vuelve" alone is also the third person ("it comes back"), which a
+ * legitimate line may say; "vuelve a" plus a verb is the tú imperative that eleven base Spanish
+ * lines use, and a regional file that forgets to override one of them reads it in the wrong
+ * register (review removed one override with every gate green once the word sweep was dropped).
+ */
+function phraseSweep(dialect: string, phrases: string[][]): void {
+  const found: string[] = [];
+  for (const [key, text] of copyFor(dialect).all()) {
+    if (key.startsWith(QUOTES_OTHER_DIALECTS)) continue;
+    const said = words(text);
+    for (const phrase of phrases) {
+      for (let i = 0; i + phrase.length <= said.length; i += 1) {
+        if (phrase.every((word, j) => said[i + j] === word)) found.push(`${key}: ${phrase.join(" ")}`);
+      }
+    }
+  }
+  expect(found).toEqual([]);
+}
+
 describe("Argentine Spanish (es-AR)", () => {
   const copy = copyFor("es-AR");
 
@@ -159,6 +179,10 @@ describe("Argentine Spanish (es-AR)", () => {
   // The catalog's instruction, verbatim: NEVER use tu or tienes or puedes.
   it("never addresses the reader as tu", () => {
     sweep("es-AR", ["tú", "tienes", "puedes", "quieres", "eres", "vienes"]);
+  });
+
+  it("says volvé a, never the tú imperative vuelve a", () => {
+    phraseSweep("es-AR", [["vuelve", "a"]]);
   });
 
   it("uses ustedes for plural you, never vosotros", () => {
@@ -199,6 +223,10 @@ describe("Colombian Spanish (es-CO)", () => {
     // "tu" too: the possessive of tú. Usted's is "su", and a key es-CO forgets to override
     // inherits base Spanish's "tu" (review reverted an es-CO override with every gate green).
     sweep("es-CO", ["tú", "tu", "vos", "tienes", "puedes", "tenés", "quieres", "escribe", "recarga"]);
+  });
+
+  it("says vuelva a, never the tú imperative vuelve a", () => {
+    phraseSweep("es-CO", [["vuelve", "a"]]);
   });
 
   it("still uses ustedes for plural you, not vosotros", () => {
