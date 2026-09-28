@@ -68,38 +68,35 @@ export const MAX_RETRIES = 1;
  * (both measured). Each miss logged a worst case for a request never sent, and an outage filled a
  * room's cap in 182 lines with nothing spent, which shut the room's translation off for the day.
  *
- * undici publishes on these diagnostics channels for every request, a documented interface
- * (https://undici.nodejs.org/#/docs/api/DiagnosticsChannel). "undici:client:sendHeaders" fires as
- * a request's headers are written to its socket. "undici:request:error" fires with the error the
- * request failed with, the same object fetch then gives as its TypeError's cause (measured on Node
- * 22). The headers message carries the API key, so only the request object is kept, as a weak
- * key, and nothing here is logged.
+ * undici says it directly, on a documented diagnostics channel
+ * (https://undici.nodejs.org/#/docs/api/DiagnosticsChannel). "undici:client:connectError" fires
+ * with the error a connection failed with: refused, a lookup, the TLS handshake, the connect
+ * timeout, or setting up either protocol on the socket. undici then fails the requests waiting on
+ * that connection with the same object, which fetch gives as its TypeError's cause (measured on
+ * Node 22), and only while none is in flight, so none of them was written (read in the undici that
+ * Node 22.22.2 bundles). That is positive evidence. The first version of this inferred "never
+ * written" from the absence of "undici:client:sendHeaders", which only HTTP/1 publishes, so over
+ * HTTP/2 a request sent and then lost would have read as never sent: the harmful direction (found
+ * in review). Should undici stop publishing connectError, every failure counts as sent, the safe
+ * direction, and the loopback tests in anthropic.test.ts go red.
  */
-const writtenRequests = new WeakSet<object>();
-/** Errors that failed a request after its headers were written, and errors that failed one before. */
-const failedWritten = new WeakSet<object>();
-const failedUnwritten = new WeakSet<object>();
+const connectErrors = new WeakSet<object>();
 
 const isObject = (value: unknown): value is object => typeof value === "object" && value !== null;
 
-subscribe("undici:client:sendHeaders", (message) => {
-  const { request } = message as { request?: unknown };
-  if (isObject(request)) writtenRequests.add(request);
-});
-subscribe("undici:request:error", (message) => {
-  const { request, error } = message as { request?: unknown; error?: unknown };
-  if (isObject(request) && isObject(error)) (writtenRequests.has(request) ? failedWritten : failedUnwritten).add(error);
+subscribe("undici:client:connectError", (message) => {
+  const { error } = message as { error?: unknown };
+  if (isObject(error)) connectErrors.add(error);
 });
 
 /**
- * Whether undici failed this fetch before writing any of its request. One error can fail several
- * requests at once (a connection's queue), so it counts as written if any of them was. An error
- * undici never reported, such as fetch refusing a URL before undici saw it, counts as written
- * too: nobody can say it was not sent.
+ * Whether undici failed this fetch before writing any of its request: its cause is an error a
+ * connection failed with. An error undici never reported as one, such as fetch refusing a URL
+ * before undici saw it, counts as written: nobody can say it was not sent.
  */
 function neverWritten(error: unknown): boolean {
   const cause = isObject(error) ? (error as { cause?: unknown }).cause : undefined;
-  return isObject(cause) && failedUnwritten.has(cause) && !failedWritten.has(cause);
+  return isObject(cause) && connectErrors.has(cause);
 }
 
 /**

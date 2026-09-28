@@ -139,17 +139,14 @@ async function failsAfterRequest(fail: (socket: net.Socket) => void) {
 }
 
 /**
- * A failure played the way undici reports one (measured on Node 22): it publishes the error for
- * each request it failed, noting first any whose headers it wrote, then fetch rejects with the
- * error as its cause.
+ * A failure played the way undici reports one (measured on Node 22), then rejected the way fetch
+ * does, with the error as its cause. A connection that failed is published as a connect error; a
+ * request that failed is published as a request error, whether or not any of it was written.
  */
-function undiciFailure(error: Error, requests: Array<"written" | "unwritten">): Answer {
+function undiciFailure(error: Error, as: "connection" | "request"): Answer {
   return () => {
-    for (const state of requests) {
-      const request = {};
-      if (state === "written") channel("undici:client:sendHeaders").publish({ request, headers: "", socket: null });
-      channel("undici:request:error").publish({ request, error });
-    }
+    if (as === "connection") channel("undici:client:connectError").publish({ connectParams: {}, connector: null, error });
+    channel("undici:request:error").publish({ request: {}, error });
     return Promise.reject(new TypeError("fetch failed", { cause: error }));
   };
 }
@@ -216,18 +213,19 @@ describe("the Anthropic adapter", () => {
       new Error("Connect Timeout Error (attempted address: api.anthropic.com:443, timeout: 10000ms)"),
       { name: "ConnectTimeoutError", code: "UND_ERR_CONNECT_TIMEOUT" },
     );
-    const { fetch, requests } = fakeFetch([undiciFailure(timedOut, ["unwritten"]), undiciFailure(timedOut, ["unwritten"])]);
+    const { fetch, requests } = fakeFetch([undiciFailure(timedOut, "connection"), undiciFailure(timedOut, "connection")]);
     const { result, lost } = complete(fetch);
     await expect(result).rejects.toMatchObject({ reason: "connection" });
     expect(requests).toHaveLength(2);
     expect(lost()).toBe(0);
   });
 
-  it("reports a request as lost when the error that failed it also failed one that was written", async () => {
-    // A connection that fails takes its whole queue with it, under one error. Whichever request
-    // the error is read for, one of them was sent.
+  it("reports a request as lost when undici says only that the request failed, not the connection", async () => {
+    // What a request sent over HTTP/2 and then lost looks like: undici publishes that its headers
+    // were written only over HTTP/1, so the absence of that note is no evidence. Read as never
+    // sent, as the first version of this did, it was the harmful direction (found in review).
     const reset = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
-    const { fetch } = fakeFetch([undiciFailure(reset, ["unwritten", "written"]), undiciFailure(reset, ["written", "unwritten"])]);
+    const { fetch } = fakeFetch([undiciFailure(reset, "request"), undiciFailure(reset, "request")]);
     const { result, lost } = complete(fetch);
     await expect(result).rejects.toMatchObject({ reason: "connection" });
     expect(lost()).toBe(2);
@@ -340,6 +338,17 @@ describe("the Anthropic adapter", () => {
       await expect(result).resolves.toMatchObject({ text: "hola" });
       // 375 ms at the least, less a millisecond of timer rounding.
       expect((requests[1]?.at ?? 0) - (requests[0]?.at ?? 0)).toBeGreaterThanOrEqual(374);
+    }
+  });
+
+  it("reads retry-after only when retry-after-ms is absent or zero, as the SDK did", async () => {
+    // A negative or infinite retry-after-ms still stands in front of retry-after, and is then
+    // replaced by the backoff, which fits before the deadline. Read past, retry-after's 3 s would not.
+    for (const ms of ["-5", "Infinity"]) {
+      const { fetch, requests } = fakeFetch([status(429, { "retry-after-ms": ms, "retry-after": "3" }), ok]);
+      const { result } = complete(fetch, { sendBefore: Date.now() + 1_500 });
+      await expect(result).resolves.toMatchObject({ text: "hola" });
+      expect(requests).toHaveLength(2);
     }
   });
 
