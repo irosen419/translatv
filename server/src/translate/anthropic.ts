@@ -4,9 +4,10 @@
 // behavior) lives in TranslationService, which is provider agnostic and tested against a fake.
 // Swapping providers should be a new file this size, not a rewrite.
 //
-// This file owns ONE thing TranslationService cannot: classifying the provider's errors. Only
-// the adapter knows the SDK's exception types, so it translates them into LlmFailure and the
-// service stays free of any SDK import.
+// This file owns what TranslationService cannot see: the SDK's exception types, and each request
+// on the wire. So it classifies the provider's errors into LlmFailure, makes the one retry, and
+// says which failed requests may have been billed (onLost), and the service stays free of any SDK
+// import.
 //
 // Model choices worth stating, because getting them wrong is silent rather than loud:
 //   claude-haiku-4-5   the current alias. Aliases are the recommended form over dated ids.
@@ -27,7 +28,6 @@
 
 import Anthropic, {
   APIConnectionError,
-  APIConnectionTimeoutError,
   APIError,
   AuthenticationError,
   BadRequestError,
@@ -35,6 +35,7 @@ import Anthropic, {
   PermissionDeniedError,
   RateLimitError,
 } from "@anthropic-ai/sdk";
+import { subscribe } from "node:diagnostics_channel";
 import { DEFAULT_MODEL } from "../spend/pricing.js";
 import { LlmFailure, MAX_OUTPUT_TOKENS, type LlmClient } from "./TranslationService.js";
 
@@ -58,50 +59,86 @@ export const TEMPERATURE = 0.2;
 export const MAX_RETRIES = 1;
 
 /**
- * Codes that mean a request never left this machine: the host did not resolve, it refused or
- * could not route the connection, or the connection was never made in time. Nothing was sent, so
- * nothing was billed. Reported as lost, each was logged at its worst case and counted by the caps,
- * so an outage filled a room's cap in 182 lines with nothing spent (measured in review).
- * ECONNREFUSED and ENOTFOUND were measured through this SDK, and UND_ERR_CONNECT_TIMEOUT through
- * Node's fetch (a TLS handshake that never finished, 10.5 s); the others are the same connect
- * phase failures in Node's documentation. Every other connection failure may have come after the
- * request went out.
+ * Whether a failed request ever left this machine, as undici, which runs Node's fetch, saw it.
+ *
+ * That one fact decides whether a failed request may have been billed, and error codes cannot
+ * give it. They were tried, and each round of review found failures they missed: refused
+ * connections and hosts that did not resolve, then certificates the client rejected. A reset
+ * during the TLS handshake carries the same ECONNRESET as a reset after the request went out
+ * (both measured). Each miss logged a worst case for a request never sent, and an outage filled a
+ * room's cap in 182 lines with nothing spent, which shut the room's translation off for the day.
+ *
+ * undici publishes on these diagnostics channels for every request, a documented interface
+ * (https://undici.nodejs.org/#/docs/api/DiagnosticsChannel). "undici:client:sendHeaders" fires as
+ * a request's headers are written to its socket. "undici:request:error" fires with the error the
+ * request failed with, the same object fetch then gives as its TypeError's cause (measured on Node
+ * 22). The headers message carries the API key, so only the request object is kept, as a weak
+ * key, and nothing here is logged.
  */
-const NEVER_SENT = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
+const writtenRequests = new WeakSet<object>();
+/** Errors that failed a request after its headers were written, and errors that failed one before. */
+const failedWritten = new WeakSet<object>();
+const failedUnwritten = new WeakSet<object>();
 
-/** The code on an error, and on every cause and aggregated error beneath it. */
-function codesOf(error: unknown, depth = 0): string[] {
-  if (depth > 8 || typeof error !== "object" || error === null) return [];
-  const { code, errors, cause } = error as { code?: unknown; errors?: unknown; cause?: unknown };
-  return [
-    ...(typeof code === "string" ? [code] : []),
-    ...(Array.isArray(errors) ? errors.flatMap((inner) => codesOf(inner, depth + 1)) : []),
-    ...codesOf(cause, depth + 1),
-  ];
+const isObject = (value: unknown): value is object => typeof value === "object" && value !== null;
+
+subscribe("undici:client:sendHeaders", (message) => {
+  const { request } = message as { request?: unknown };
+  if (isObject(request)) writtenRequests.add(request);
+});
+subscribe("undici:request:error", (message) => {
+  const { request, error } = message as { request?: unknown; error?: unknown };
+  if (isObject(request) && isObject(error)) (writtenRequests.has(request) ? failedWritten : failedUnwritten).add(error);
+});
+
+/**
+ * Whether undici failed this fetch before writing any of its request. One error can fail several
+ * requests at once (a connection's queue), so it counts as written if any of them was. An error
+ * undici never reported, such as fetch refusing a URL before undici saw it, counts as written
+ * too: nobody can say it was not sent.
+ */
+function neverWritten(error: unknown): boolean {
+  const cause = isObject(error) ? (error as { cause?: unknown }).cause : undefined;
+  return isObject(cause) && failedUnwritten.has(cause) && !failedWritten.has(cause);
+}
+
+/**
+ * A request undici failed before writing any of it: nothing was sent, so nothing was billed.
+ *
+ * It replaces the error fetch gave, which the SDK cannot be handed as it is. The SDK reads a
+ * failure as its own timeout when its text or its cause's says it timed out, and a connect
+ * timeout's does: that is what a network that swallows packets gives. The SDK's timeout error
+ * does not say where the request failed, so it would be counted lost with nothing sent.
+ */
+class NeverSent extends TypeError {
+  constructor() {
+    super("fetch failed before any of the request was written");
+    this.name = "NeverSent";
+  }
 }
 
 /**
  * Whether a failed request may have been billed: it was sent, and no answer came back. A request
- * that never left (NEVER_SENT) and one the provider answered with a status were not.
+ * undici failed before writing any of it (NeverSent) and one the provider answered with a status
+ * were not.
  */
 function maybeBilled(error: unknown): boolean {
-  if (error instanceof APIConnectionError) {
-    // The SDK's own timeout carries no cause, so where it gave up is unknown.
-    if (error instanceof APIConnectionTimeoutError) return true;
-    const codes = codesOf(error.cause);
-    return !(codes.length > 0 && codes.every((code) => NEVER_SENT.has(code)));
-  }
+  if (error instanceof APIConnectionError && error.cause instanceof NeverSent) return false;
   // Anthropic does not bill a request it answered with an error.
   if (error instanceof APIError && typeof error.status === "number") return false;
-  // Nobody classified it, so nobody can say it was not billed.
+  // Everything else was or may have been sent: a connection that failed after the request was
+  // written, the SDK's own timeout (it carries no cause, so where it gave up is unknown), an
+  // answer that could not be read, or anything nobody classified.
   return true;
 }
 
 /**
- * How long to wait before the retry, or null when this failure does not deserve one. The rules
- * the SDK's retries followed: what the server says (x-should-retry), else request timeouts, lock
- * timeouts, rate limits and server errors; as long as retry-after asks when that is under a
- * minute, else half a second, less up to a quarter for jitter.
+ * How long to wait before the retry, or null when this failure does not get one. The rules are
+ * the SDK's own, read from its source (0.65.0), so that moving the retry here changed only when it
+ * may go out. A retry is due when the server says so (x-should-retry), else for any connection
+ * failure, a request timeout, a lock timeout, a rate limit or a server error. The wait is what
+ * retry-after-ms asks, else retry-after in seconds or as a date, when that is more than zero and
+ * under a minute; otherwise half a second, less up to a quarter for jitter.
  */
 function retryDelayMs(error: unknown): number | null {
   const backoff = 500 * (1 - Math.random() * 0.25);
@@ -112,18 +149,23 @@ function retryDelayMs(error: unknown): number | null {
   const retryable = said === "true" || (said !== "false" && (status === 408 || status === 409 || status === 429 || status >= 500));
   if (!retryable) return null;
   const asked = retryAfterMs(error.headers);
-  return asked !== null && asked >= 0 && asked < 60_000 ? asked : backoff;
+  return asked !== undefined && asked > 0 && asked < 60_000 ? asked : backoff;
 }
 
-function retryAfterMs(headers: Headers | undefined): number | null {
+/**
+ * The wait the provider asked for, read as the SDK reads it. A retry-after-ms of zero is no answer,
+ * so retry-after is read next, as the SDK does.
+ */
+function retryAfterMs(headers: Headers | undefined): number | undefined {
+  let wait: number | undefined;
   const ms = Number.parseFloat(headers?.get("retry-after-ms") ?? "");
-  if (Number.isFinite(ms)) return ms;
+  if (!Number.isNaN(ms)) wait = ms;
   const after = headers?.get("retry-after");
-  if (!after) return null;
-  const seconds = Number.parseFloat(after);
-  if (Number.isFinite(seconds)) return seconds * 1000;
-  const at = Date.parse(after);
-  return Number.isFinite(at) ? at - Date.now() : null;
+  if (after && !wait) {
+    const seconds = Number.parseFloat(after);
+    wait = Number.isNaN(seconds) ? Date.parse(after) - Date.now() : seconds * 1000;
+  }
+  return wait;
 }
 
 /** Wait, unless the call is aborted first. Nothing is in flight meanwhile, so an abort loses nothing. */
@@ -197,19 +239,18 @@ function classify(error: unknown): LlmFailure {
 /**
  * @param options.fetch Stands in for the network, so the adapter's handling of each request can be
  *   tested against the real SDK with no key and no spend (anthropic.test.ts).
+ * @param options.baseURL Where requests go, so the tests can point the real fetch at a loopback
+ *   server that fails the way a network does. Unset in production: the SDK's default.
  */
-export function createAnthropicClient(apiKey: string, options: { fetch?: typeof fetch } = {}): LlmClient {
+export function createAnthropicClient(apiKey: string, options: { fetch?: typeof fetch; baseURL?: string } = {}): LlmClient {
   const send = options.fetch ?? globalThis.fetch;
   const anthropic = new Anthropic({
     apiKey,
+    baseURL: options.baseURL,
     maxRetries: 0,
-    // The SDK turns any failure that reads as a timeout into an error with no cause, so a
-    // connection never made (a network that swallows packets) would look like a request lost in
-    // flight and be counted at its worst case. Passed on under its code alone, it stays itself.
     fetch: (url, init) =>
       send(url, init).catch((error: unknown) => {
-        if (!codesOf(error).includes("UND_ERR_CONNECT_TIMEOUT")) throw error;
-        throw Object.assign(new TypeError("fetch failed: the connection was never made"), { code: "UND_ERR_CONNECT_TIMEOUT" });
+        throw neverWritten(error) ? new NeverSent() : error;
       }),
   });
 
@@ -231,18 +272,30 @@ export function createAnthropicClient(apiKey: string, options: { fetch?: typeof 
           );
           break;
         } catch (error) {
-          // Aborted in flight: the request went out, and its answer will never be read. The abort
-          // is the caller's own, not a provider fault, so it is rethrown untouched; wrapping it
-          // would make a timeout look like an API failure.
+          // Aborted in flight: its answer will never be read. The SDK's abort error does not say
+          // whether any of the request was written, so it is counted lost. At the ceiling it was
+          // (a connection is given up on after 10 s, long before); at shutdown it may not have
+          // been, which over-counts, the safe direction. The abort is the caller's own, not a
+          // provider fault, so it is rethrown untouched: wrapped, a timeout would look like an API
+          // failure.
           if (signal.aborted) {
             onLost();
             throw error;
           }
+          // Reported, and so logged, before any retry goes out: every row is appended before the
+          // next call is issued (CLAUDE.md).
           if (maybeBilled(error)) onLost();
           const failure = classify(error);
-          const delay = attempt < MAX_RETRIES && failure.kind === "retriable" ? retryDelayMs(error) : null;
+          // Not only a retriable failure: the SDK retried whatever the server said to
+          // (x-should-retry), even a 400.
+          const delay = attempt < MAX_RETRIES ? retryDelayMs(error) : null;
           if (delay === null || Date.now() + delay >= sendBefore) throw failure;
           await pause(delay, signal);
+          // Checked again once the wait is over, because a busy event loop can end it late: a
+          // 700 ms stall during a 300 ms wait sent the retry 301 ms past the deadline (measured in
+          // review). From here to fetch is one turn of the event loop (measured), so no stall can
+          // land between.
+          if (Date.now() >= sendBefore) throw failure;
         }
       }
 

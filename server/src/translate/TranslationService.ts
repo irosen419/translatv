@@ -109,17 +109,20 @@ export interface LlmClient {
     user: string;
     signal: AbortSignal;
     /**
-     * No request may be sent at or after this time (milliseconds since the epoch). By then the
-     * caller has been told TIMED_OUT, so a request sent later is paid for and read by nobody.
+     * No request may be started at or after this time (milliseconds since the epoch). By then the
+     * caller has been told TIMED_OUT, so a request started later is paid for and read by nobody.
+     * One started before it can still reach the provider after it, while its connection is made,
+     * and then answers late.
      */
     sendBefore: number;
     /**
      * Called once for each request that was sent and may have been billed, but whose answer never
      * came: a connection lost mid request, or an abort while it was in flight. The caller logs
-     * each as unknown, at one request's worst case, the moment it is called. A request that never
-     * left, or that the provider answered with an error, was not billed and is not reported: only
-     * the client can tell those apart, which is why it reports rather than the caller guessing
-     * from the error.
+     * each as unknown, at one request's worst case, the moment it is called, so the client calls it
+     * before it sends any further request: the row is on disk first. A request that never left, or
+     * that the provider answered with an error, was not billed and is not reported: only the
+     * client can tell those apart, which is why it reports rather than the caller guessing from
+     * the error.
      */
     onLost: () => void;
   }): Promise<{ text: string; inputTokens: number; outputTokens: number }>;
@@ -429,8 +432,9 @@ export class TranslationService {
     // Log the spend BEFORE returning, so a crash between here and the caller cannot lose the
     // record of money already spent. Batching this to the end of a session is how spend goes
     // untracked, which is the failure this whole project is built not to repeat. An empty answer
-    // was billed and reached nobody, so no user is charged for it.
-    this.record(request, result, text.length === 0 ? "empty answer" : undefined);
+    // was billed and reached nobody, so no user is charged for it. A call abandoned at shutdown
+    // whose answer won the race with its abort is already logged, at its worst case.
+    if (!running.abandoned) this.record(request, result, text.length === 0 ? "empty answer" : undefined);
 
     if (text.length === 0) {
       return {

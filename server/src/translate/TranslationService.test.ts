@@ -625,6 +625,14 @@ describe("a translation that times out", () => {
   /** A client that never answers. Only an abort ends its call, and its request is then lost. */
   const neverAnswers = (): LlmClient & { aborted: boolean } => settlesAfter(null);
 
+  /** A client whose answer arrives `afterMs` after it is called whatever happens: it wins the race with an abort. */
+  const answersAnyway = (afterMs: number): LlmClient => ({
+    complete: () =>
+      new Promise((resolve) => {
+        setTimeout(() => resolve({ text: "tarde", inputTokens: 800, outputTokens: 30 }), afterMs);
+      }),
+  });
+
   /**
    * One request's worst case, worked out here from the spec rather than the code: the prompt's
    * UTF-8 bytes plus 64 framing tokens in, all of MAX_OUTPUT_TOKENS out, at the documented price.
@@ -816,6 +824,36 @@ describe("a translation that times out", () => {
     expect(rows).toHaveLength(2);
     for (const row of rows) expect(row).toMatchObject({ cost_usd: null, billable: false });
     expect(service.abandonInFlight() + other.abandonInFlight()).toBe(0);
+  });
+
+  it("logs a call once however many times shutdown runs", async () => {
+    // A second signal runs shutdown again before the first one's aborts have settled anything.
+    const service = new TranslationService(neverAnswers(), gate, root);
+    const pending = service.translate(request());
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(service.abandonInFlight()).toBe(1);
+    expect(service.abandonInFlight()).toBe(0);
+    expect((await pending).ok).toBe(false);
+    expect(load({ root })).toHaveLength(1);
+  });
+
+  it("logs nothing more for a call abandoned at shutdown whose answer then arrives, late or in time", async () => {
+    // Shutdown logged each at its worst case, which covers whatever it really cost. Logged again
+    // at its real cost, one request would be two rows.
+    const late = new TranslationService(answersAnyway(10_000), gate, root);
+    const lateLine = late.translate(request({ roomHash: "lateroom00000000" }));
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
+    expect((await lateLine).ok).toBe(false);
+    const inTime = new TranslationService(answersAnyway(2_000), gate, root);
+    const inTimeLine = inTime.translate(request({ roomHash: "intimeroom000000" }));
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(late.abandonInFlight() + inTime.abandonInFlight()).toBe(2);
+    await vi.advanceTimersByTimeAsync(LATE_CEILING_MS);
+    await inTimeLine;
+    const rows = load({ root });
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row).toMatchObject({ cost_usd: null, billable: false });
   });
 
   it("does not log a call that answered in time again at shutdown", async () => {
