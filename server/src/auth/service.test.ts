@@ -5,8 +5,13 @@
 // mapping and the limits over real HTTP.
 
 import { randomBytes } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { LIMITS } from "@translatv/shared";
+import { AccountService } from "../account/service.js";
 import { openStore, type Store } from "../store/index.js";
 import { findLockout, pruneLockouts, saveLockout } from "../store/loginLockouts.js";
 import { deleteUser, insertUser, newUserId } from "../store/users.js";
@@ -637,5 +642,46 @@ describe("deleteAccount", () => {
       ok: false,
       error: "UNAUTHENTICATED",
     });
+  });
+
+  it("leaves nothing of the account readable in the database files, not just in its tables", async () => {
+    // The UI promises the account is deleted. SQLite marks a deleted row as free space rather than
+    // overwriting it, and the WAL keeps older copies of every page it wrote, so after a successful
+    // delete the email, the name and a glossary term were still readable in translatv.db and its
+    // WAL (measured in review). So the raw bytes of both files are read here.
+    const dir = mkdtempSync(join(tmpdir(), "tv-erase-"));
+    const path = join(dir, "translatv.db");
+    const onDisk = openStore({ path });
+    try {
+      const marker = randomBytes(8).toString("hex");
+      const auth = new AuthService(onDisk, { secret: SECRET, signupMode: "open", ownerEmail: null });
+      const signup = await auth.signup(
+        { email: `erase-${marker}@example.test`, password: PASSWORD, displayName: `Name ${marker}` },
+        NOW,
+      );
+      if (!signup.ok) throw new Error(`signup failed: ${signup.error}`);
+      // A full glossary spans whole pages, which a delete frees outright. secure_delete FAST zeroes
+      // a row within a page but leaves a freed page's old content behind, so only ON passes here.
+      const saved = new AccountService(onDisk).setGlossary(signup.value.user.id, {
+        entries: Array.from({ length: LIMITS.glossaryEntries }, (_, i) => ({
+          source: `term${i} ${marker}`.padEnd(LIMITS.glossaryTerm, "s"),
+          target: marker.padEnd(LIMITS.glossaryTranslation, "t"),
+          sourceDialect: "es-AR",
+          targetDialect: "en-US",
+        })),
+      });
+      expect(saved.ok).toBe(true);
+      const readable = () =>
+        [path, `${path}-wal`].filter((file) => existsSync(file) && readFileSync(file).includes(marker));
+      // The control: before the delete the marker is there to be found, so "absent" below means
+      // something.
+      expect(readable().length).toBeGreaterThan(0);
+
+      expect((await auth.deleteAccount(signup.value.user.id, { password: PASSWORD }, NOW + 1)).ok).toBe(true);
+      expect(readable()).toEqual([]);
+    } finally {
+      onDisk.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

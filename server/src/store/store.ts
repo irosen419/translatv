@@ -39,6 +39,14 @@ export interface Store {
    * transaction exists to prevent. So a returned promise is refused and the work rolled back.
    */
   transaction<T>(fn: () => T): T;
+  /**
+   * Copy the WAL back into the database file and truncate it to nothing. secure_delete zeroes a
+   * deleted row in the pages the delete writes, but the WAL keeps the older copies of those
+   * pages until a checkpoint, so a caller that promised a deletion runs one straight after.
+   * False when another connection's open read kept it from finishing; the copies then go at the
+   * next checkpoint instead.
+   */
+  checkpoint(): boolean;
   close(): void;
 }
 
@@ -84,6 +92,11 @@ export function openStore(options: StoreOptions): Store {
     // DatabaseSync happens to turn them on by default (enableForeignKeyConstraints); set here
     // anyway, so the account deletion cascade does not rest on a library default.
     db.exec("PRAGMA foreign_keys = ON");
+    // A deleted row is overwritten with zeros rather than left behind as free space that a copy
+    // of the file still reads. Deleting an account promises it is gone (the UI says so), and
+    // without this its email, name and glossary stayed readable in translatv.db (measured in
+    // review). The WAL's older copies are the other half: see checkpoint below.
+    db.exec("PRAGMA secure_delete = ON");
     if (path !== MEMORY) {
       // WAL lets reads proceed during a write, and survives a crash mid write as well as the
       // default journal does. It does not apply to an in memory database.
@@ -157,6 +170,7 @@ export function openStore(options: StoreOptions): Store {
       path,
       schemaVersion,
       transaction,
+      checkpoint: () => Number(db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get()?.["busy"] ?? 0) === 0,
       close: () => db.close(),
     };
   } catch (error) {
