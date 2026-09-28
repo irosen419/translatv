@@ -12,6 +12,7 @@ import type { Config } from "../config.js";
 import { createApp } from "../http.js";
 import { AccountService } from "../account/service.js";
 import { openStore, type Store } from "../store/index.js";
+import { AUTH_LIMITS } from "./routes.js";
 import { AuthService } from "./service.js";
 
 const PASSWORD = randomBytes(12).toString("hex");
@@ -246,6 +247,25 @@ describe("/api/me", () => {
     });
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "UNAUTHENTICATED" });
+  });
+
+  it("counts a signed in glossary upload against the limit before reading its body", async () => {
+    // The limiter also comes before the 256kb parser, so a signed in caller flooding the route is
+    // refused without the server reading every body. A body that is not JSON tells the orders
+    // apart: the parser refuses it with 400 before a limiter placed after it would count it, so
+    // only a limiter in front ever answers 429. The loop only bounds the run; any 429 will do.
+    const { body } = await signup("ana@example.test");
+    let limited: Response | null = null;
+    for (let i = 0; i < AUTH_LIMITS.account.burst * 3 && !limited; i += 1) {
+      const response = await fetch(`${base}/api/me/glossary`, {
+        method: "PUT",
+        headers: { "content-type": "application/json", authorization: `Bearer ${String(body.accessToken)}` },
+        body: "{ this is not json",
+      });
+      if (response.status === 429) limited = response;
+    }
+    expect(limited).not.toBe(null);
+    expect(await limited?.json()).toEqual({ error: "RATE_LIMITED" });
   });
 
   it("round trips preferences", async () => {
