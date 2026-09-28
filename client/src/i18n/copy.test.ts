@@ -146,6 +146,9 @@ describe("Argentine Spanish (es-AR)", () => {
     expect(copy.t("composer.placeholder")).toContain("Escribí");
     expect(copy.t("panel.empty")).toContain("Decí");
     expect(copy.t("room.dialect.title")).toContain("Cambiá");
+    // Pinned by key rather than swept: "vuelve" is also the third person ("it comes back"), which
+    // a legitimate es-AR line may say, while here it would be the tú imperative.
+    expect(copy.t("account.delete.expired")).toContain("Volvé");
   });
 
   it("uses vos rather than tu for the subject pronoun", () => {
@@ -155,7 +158,7 @@ describe("Argentine Spanish (es-AR)", () => {
 
   // The catalog's instruction, verbatim: NEVER use tu or tienes or puedes.
   it("never addresses the reader as tu", () => {
-    sweep("es-AR", ["tú", "tienes", "puedes", "quieres", "eres", "vienes", "vuelve"]);
+    sweep("es-AR", ["tú", "tienes", "puedes", "quieres", "eres", "vienes"]);
   });
 
   it("uses ustedes for plural you, never vosotros", () => {
@@ -189,12 +192,13 @@ describe("Colombian Spanish (es-CO)", () => {
     expect(copy.t("overlay.you")).toBe("usted");
     expect(copy.t("composer.placeholder")).toContain("Escriba");
     expect(copy.t("panel.empty")).toContain("Diga");
+    expect(copy.t("account.delete.expired")).toContain("Vuelva");
   });
 
   it("never addresses the reader as tu or vos", () => {
     // "tu" too: the possessive of tú. Usted's is "su", and a key es-CO forgets to override
     // inherits base Spanish's "tu" (review reverted an es-CO override with every gate green).
-    sweep("es-CO", ["tú", "tu", "vos", "tienes", "puedes", "tenés", "quieres", "escribe", "recarga", "vuelve"]);
+    sweep("es-CO", ["tú", "tu", "vos", "tienes", "puedes", "tenés", "quieres", "escribe", "recarga"]);
   });
 
   it("still uses ustedes for plural you, not vosotros", () => {

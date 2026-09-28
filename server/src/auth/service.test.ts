@@ -8,7 +8,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LIMITS } from "@translatv/shared";
 import { AccountService } from "../account/service.js";
@@ -556,6 +556,27 @@ describe("deleteAccount", () => {
     expect(await auth.deleteAccount(session.user.id, {}, NOW)).toEqual({ ok: false, error: "INVALID_INPUT" });
   });
 
+  it("logs a mismatch under the bearer's own id, never the id the request named", async () => {
+    // The named id comes from the client, so it can be anything, an email included, and the
+    // logger drops an email only under the key "email": logged as the named id, one went through
+    // verbatim (measured in review). The line names the account the bearer is for.
+    const auth = service();
+    const ben = await signedUp(auth, "ben@example.test");
+    const named = "someone.else@example.test";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await auth.deleteAccount(ben.user.id, { password: PASSWORD, userId: named }, NOW)).toEqual({
+        ok: false,
+        error: "ACCOUNT_MISMATCH",
+      });
+      const lines = warn.mock.calls.map((call) => String(call[0]));
+      expect(lines.some((line) => line.includes("account.delete_mismatch") && line.includes(ben.user.id))).toBe(true);
+      expect(lines.join("\n")).not.toContain(named);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("refuses a request that does not name the account it deletes", async () => {
     const auth = service();
     const session = await signedUp(auth);
@@ -902,6 +923,41 @@ describe("deleteAccount", () => {
       expect(rig.readable()).toEqual([]);
     } finally {
       rig.close();
+    }
+  });
+
+  it("keeps the erase owed after a failure, so a retry already scheduled still makes it", async () => {
+    // A failure other than a busy database schedules nothing new, but the rows are still owed.
+    // Forgetting them turned the retry already scheduled into a no-op (green in review).
+    const answers: Array<boolean | Error> = [false, new Error("disk I/O error"), true];
+    let calls = 0;
+    const later: Array<() => void> = [];
+    const scripted: Store = {
+      ...store,
+      erase: () => {
+        const answer = answers[calls] ?? true;
+        calls += 1;
+        if (answer instanceof Error) throw answer;
+        return answer;
+      },
+    };
+    const auth = new AuthService(scripted, {
+      secret: SECRET,
+      signupMode: "invite",
+      ownerEmail: null,
+      schedule: (run) => later.push(run),
+    });
+    const ana = await signedUp(auth, "ana@example.test");
+    const ben = await signedUp(auth, "ben@example.test");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect((await auth.deleteAccount(ana.user.id, { password: PASSWORD, userId: ana.user.id }, NOW)).ok).toBe(true);
+      expect(later).toHaveLength(1);
+      expect((await auth.deleteAccount(ben.user.id, { password: PASSWORD, userId: ben.user.id }, NOW)).ok).toBe(true);
+      later.shift()?.();
+      expect(calls).toBe(3);
+    } finally {
+      error.mockRestore();
     }
   });
 

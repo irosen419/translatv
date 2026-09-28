@@ -41,8 +41,6 @@ export function Landing({
   const [code, setCode] = useState(initialCode ?? "");
   const ready = isLikelyCode(code);
   const copy = useCopy();
-  const [invite, setInvite] = useState<{ code: string } | { failed: true } | null>(null);
-  const [minting, setMinting] = useState(false);
 
   return (
     <div className="center">
@@ -102,29 +100,9 @@ export function Landing({
           <button type="button" className="linklike" onClick={onSignOut}>
             {copy.t("account.signOut")}
           </button>
-          {user?.isOwner && (
-            <button
-              type="button"
-              className="linklike"
-              disabled={minting}
-              onClick={() => {
-                setMinting(true);
-                void onCreateInvite()
-                  .then((minted) => setInvite(minted ? { code: minted } : { failed: true }))
-                  .catch(() => setInvite({ failed: true }))
-                  .finally(() => setMinting(false));
-              }}
-            >
-              {copy.t("account.invite.create")}
-            </button>
-          )}
-          {invite && "code" in invite && (
-            <div className="invite-result">
-              <p className="hint">{copy.t("account.invite.lead")}</p>
-              <code className="owner-invite-code">{invite.code}</code>
-            </div>
-          )}
-          {invite && "failed" in invite && <p className="hint bad">{copy.t("account.invite.failed")}</p>}
+          {/* Keyed by the account too, with a key of its own: siblings sharing a key (both were
+              the bare account id) left this one on screen after a switch (measured in the e2e). */}
+          {user?.isOwner && <OwnerInvite key={`invite:${user.id}`} onCreateInvite={onCreateInvite} />}
           {/* Keyed by the account, so a form opened for one account never outlives it. Tabs share
               one sign in, and when another tab moves this one to another account, the form, its
               typed password and any refusal go with the old account. The deletion names the
@@ -133,5 +111,41 @@ export function Landing({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The owner's invite control, and the code it minted. A component of its own so that it goes
+ * with the owner's account: tabs share one sign in, and a code minted in this tab stayed on
+ * screen after another tab moved it to an account that is not the owner (measured in review).
+ */
+function OwnerInvite({ onCreateInvite }: { onCreateInvite(): Promise<string | null> }) {
+  const copy = useCopy();
+  const [invite, setInvite] = useState<{ code: string } | { failed: true } | null>(null);
+  const [minting, setMinting] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="linklike"
+        disabled={minting}
+        onClick={() => {
+          setMinting(true);
+          void onCreateInvite()
+            .then((minted) => setInvite(minted ? { code: minted } : { failed: true }))
+            .catch(() => setInvite({ failed: true }))
+            .finally(() => setMinting(false));
+        }}
+      >
+        {copy.t("account.invite.create")}
+      </button>
+      {invite && "code" in invite && (
+        <div className="invite-result">
+          <p className="hint">{copy.t("account.invite.lead")}</p>
+          <code className="owner-invite-code">{invite.code}</code>
+        </div>
+      )}
+      {invite && "failed" in invite && <p className="hint bad">{copy.t("account.invite.failed")}</p>}
+    </>
   );
 }

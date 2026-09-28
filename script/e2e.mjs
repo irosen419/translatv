@@ -1243,48 +1243,50 @@ try {
   // ---------------------------------------------------------------------
   section("Two tabs of one browser share one sign in");
   // Tabs share the stored refresh token, so signing in as someone else in one tab moves every
-  // other tab to that account at its next refresh. A deletion confirmed in the tab left behind
-  // must never delete the account it was moved to. Measured in review: the tab's bearer was
-  // refused (its account deleted elsewhere), its refresh read the other account's token, the form
-  // said to try again, and one Enter with the password the two shared (as every account here
-  // does) deleted the other account. On this server so its two accounts do not spend the main
-  // server's signup limit, with invites the owner mints through the API.
+  // other tab to that account at its next refresh. Nothing the tab left behind shows for its old
+  // account may act on the new one. Measured in review: the tab's bearer was refused (its account
+  // deleted elsewhere), its refresh read the other account's token, the deletion form said to try
+  // again, and one Enter with the password the two shared (as every account here does) deleted
+  // the other account; and the owner's minted invite code stayed on screen for an account that is
+  // not the owner. On this server, so its accounts do not spend the main server's signup limit.
+  // Olga is the owner, and ends this section deleted: nothing after it uses her.
   const olgaSession = await apiSignIn(INVITE_BASE, "Olga");
-  const household = [];
-  for (const name of ["Fay", "Gus"]) {
-    const invite = await fetch(`${INVITE_BASE}/api/invites`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${olgaSession.accessToken}` },
-    }).then((response) => response.json());
-    const made = await fetch(`${INVITE_BASE}/api/auth/signup`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: emailFor(name), password: PASSWORD, displayName: name, invite: invite.code }),
-    });
-    if (made.status !== 201) throw new Error(`signup for ${name} answered ${made.status}`);
-    household.push(await made.json());
-  }
+  const invite = await fetch(`${INVITE_BASE}/api/invites`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${olgaSession.accessToken}` },
+  }).then((response) => response.json());
+  const gusMade = await fetch(`${INVITE_BASE}/api/auth/signup`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: emailFor("Gus"), password: PASSWORD, displayName: "Gus", invite: invite.code }),
+  });
+  if (gusMade.status !== 201) throw new Error(`signup for Gus answered ${gusMade.status}`);
   const sharedBrowser = await browser.newContext({
     storageState: {
       cookies: [],
-      origins: [{ origin: INVITE_BASE, localStorage: [{ name: "translatv.refresh", value: household[0].refreshToken }] }],
+      origins: [{ origin: INVITE_BASE, localStorage: [{ name: "translatv.refresh", value: olgaSession.refreshToken }] }],
     },
   });
   const tabA = await sharedBrowser.newPage();
-  await tabA.goto(INVITE_BASE);
-  await tabA.locator(".account-state", { hasText: "Fay" }).waitFor();
   const tabB = await sharedBrowser.newPage();
+  for (const [name, page] of [["tab A", tabA], ["tab B", tabB]]) {
+    page.on("pageerror", (e) => errors.push(`${name}: ${e.message}`));
+  }
+  await tabA.goto(INVITE_BASE);
+  await tabA.locator(".account-state", { hasText: "Olga" }).waitFor();
+  await tabA.getByRole("button", { name: en("account.invite.create") }).click();
+  await tabA.locator(".owner-invite-code").waitFor();
   await tabB.goto(INVITE_BASE);
   await tabB.getByRole("button", { name: en("account.signOut") }).click();
   await tabB.getByLabel(en("auth.email")).fill(emailFor("Gus"));
   await tabB.getByLabel(en("auth.password")).fill(PASSWORD);
   await tabB.getByRole("button", { name: en("auth.submit.signIn") }).click();
   await tabB.locator(".account-state", { hasText: "Gus" }).waitFor();
-  const fayGone = await apiDeleteAccount(INVITE_BASE, await apiSignIn(INVITE_BASE, "Fay"));
+  const olgaGone = await apiDeleteAccount(INVITE_BASE, await apiSignIn(INVITE_BASE, "Olga"));
   check(
     "an account is deleted on another device while a tab still shows it",
-    fayGone === 204 && (await tabA.locator(".account-state").innerText()).includes("Fay"),
-    String(fayGone),
+    olgaGone === 204 && (await tabA.locator(".account-state").innerText()).includes("Olga"),
+    String(olgaGone),
   );
   await tabA.bringToFront();
   await tabA.getByRole("button", { name: en("account.delete.open") }).click();
@@ -1294,9 +1296,16 @@ try {
     "the tab left behind moves to the account the other tab signed in to",
     await reached(tabA.locator(".account-state", { hasText: "Gus" })),
   );
+  // Either way the form was opened for the old account: gone with it, or saying so. Both are
+  // right; what is not is a form that offers to go on as if nothing changed.
   check(
-    "and the deletion form opened for the old account goes with it, typed password and all",
-    (await tabA.locator("#delete-password").count()) === 0,
+    "and the deletion form opened for the old account is gone, or says the tab changed accounts",
+    (await tabA.locator("#delete-password").count()) === 0 ||
+      (await tabA.getByText(en("account.delete.changed")).isVisible()),
+  );
+  check(
+    "and the owner's invite code does not stay on screen for an account that is not the owner",
+    (await tabA.locator(".owner-invite-code").count()) === 0,
   );
   // What "try again" had them do. Given a moment to land, in case it sent anything.
   await tabA.keyboard.press("Enter");

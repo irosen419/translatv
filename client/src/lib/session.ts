@@ -271,13 +271,30 @@ export class SessionManager {
     return this.refresh();
   }
 
-  /** fetch with the access token, refreshed and retried once on a 401. */
+  /**
+   * fetch with the access token, refreshed and retried once on a 401.
+   *
+   * Only ever as the account this tab showed when the request was made. Tabs share one stored
+   * refresh token, so a refresh (the one after a 401, or one renewing a token about to expire on
+   * the way in) can land this tab on whichever account another tab signed in to last, and a
+   * write replayed there changed that account's data (measured in review: its stored
+   * preferences). Then nothing is sent, and the answer is ACCOUNT_MISMATCH, as the server gives
+   * a deletion that names another account.
+   */
   async authorizedFetch(path: string, init: RequestInit = {}): Promise<Response> {
-    const attempt = async (token: string | null) =>
-      this.deps.fetch(path, {
+    const account = this.user?.id;
+    const attempt = async (token: string | null) => {
+      if (account !== undefined && this.user?.id !== account) {
+        return new Response(JSON.stringify({ error: "ACCOUNT_MISMATCH" }), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return this.deps.fetch(path, {
         ...init,
         headers: { ...(init.headers as Record<string, string> | undefined), ...(token ? { authorization: `Bearer ${token}` } : {}) },
       });
+    };
     const first = await attempt(await this.accessToken());
     if (first.status !== 401) return first;
     return attempt(await this.accessToken({ force: true }));
