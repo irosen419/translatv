@@ -10,7 +10,8 @@ import { acquireCameraTrack, acquireMedia, LevelMeter } from "./rtc/media.js";
 import { PeerConnection } from "./rtc/PeerConnection.js";
 import { SignalingSocket, socketUrl } from "./net/socket.js";
 import { useStore } from "./state/store.js";
-import { browserStore, clearToken, readToken, writeToken } from "./lib/adminSession.js";
+import { AuthScreen } from "./components/AuthScreen.jsx";
+import { browserLock, browserStore, SessionManager } from "./lib/session.js";
 import { useCopy } from "./i18n/useCopy.js";
 import type { CopyRef } from "./i18n/copy.js";
 import { WebSpeechAdapter } from "./stt/WebSpeechAdapter.js";
@@ -34,60 +35,56 @@ function loadPreferOnDevice(): boolean {
 }
 
 /**
- * Trade the password for a token.
- *
- * Resolves false for a refusal and REJECTS for anything that never reached a verdict, so the
- * caller can tell "that password is wrong" from "the server is not answering". Collapsing the
- * two would tell someone their password was wrong during an outage, and they would change it.
- *
- * The password appears in exactly one place, the body of this request. It is never stored,
- * never logged, and never put in the URL where it would reach a proxy access log.
+ * The one session for this page. Module scope rather than component state because there is
+ * exactly one per tab and nothing about it belongs to a render: the socket asks it for a token on
+ * every connect, and the screens only need to hear when who is signed in changes.
  */
-async function adminLogin(password: string): Promise<boolean> {
-  const response = await fetch("/auth/login", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ password }),
-  });
-  // 401 is a verdict: that password is wrong. 429 is the absence of one, so it REJECTS and the
-  // caller shows "could not reach the server". Reporting a rate limit as a wrong password would
-  // tell the owner to change a password that was right.
-  if (response.status === 401) return false;
-  if (!response.ok) throw new Error(`login failed: ${response.status}`);
+const session = new SessionManager({
+  fetch: (input, init) => fetch(input, init),
+  storage: browserStore(),
+  now: () => Date.now(),
+  lock: browserLock(),
+  setTimer: (fn, ms) => setTimeout(fn, ms),
+  clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+});
 
+/**
+ * Mint an invite as the owner. The server checks ownership; this only asks.
+ * Null for any refusal, which the landing page turns into one sentence.
+ */
+async function createInvite(): Promise<string | null> {
+  const response = await session.authorizedFetch("/api/invites", { method: "POST" });
+  if (!response.ok) return null;
   const body: unknown = await response.json();
-  const token =
-    typeof body === "object" && body !== null && typeof (body as { token?: unknown }).token === "string"
-      ? (body as { token: string }).token
-      : null;
-  if (!token) throw new Error("login response carried no token");
-
-  writeToken(browserStore(), token);
-  useStore.getState().setAdminToken(token);
-  return true;
+  const code = typeof body === "object" && body !== null ? (body as { code?: unknown }).code : undefined;
+  return typeof code === "string" ? code : null;
 }
 
 export function App() {
   const store = useStore();
-  // Ask the server whether it gates anything, once. Until it answers the store assumes it does,
-  // so the Start button is never live for someone who is about to be refused.
+  // Mirror the session into the store, restore a stored one, and ask the server whether signing
+  // up needs an invite. Once, on mount.
   useEffect(() => {
+    useStore.getState().setSession(session.state());
+    const unsubscribe = session.subscribe((state) => useStore.getState().setSession(state));
+    void session.restore();
+
     let cancelled = false;
     void fetch("/healthz")
       .then((r) => (r.ok ? r.json() : null))
       .then((body: unknown) => {
         if (cancelled || typeof body !== "object" || body === null) return;
-        const required = (body as { adminRequired?: unknown }).adminRequired;
-        // Only a real boolean moves it. A server too old to answer this leaves the cautious
-        // default in place rather than being read as "no gate".
-        if (typeof required === "boolean") useStore.getState().setAdminRequired(required);
+        const mode = (body as { signup?: unknown }).signup;
+        // Only a value it knows moves it. Anything else leaves the cautious default ("invite").
+        if (mode === "invite" || mode === "open") useStore.getState().setSignupMode(mode);
       })
       .catch(() => {
-        // Unreachable server. The default already says "gated", which is the safe reading, and
-        // nothing on this page works without a server anyway.
+        // Unreachable server. The default already shows the invite field, which is the safe
+        // reading, and nothing on this page works without a server anyway.
       });
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, []);
   const copy = useCopy();
@@ -151,6 +148,17 @@ export function App() {
     setInterimText("");
     setCameraError(null);
   }, []);
+
+  /**
+   * The session ended while entering or sitting in a room. Media is released and the person lands
+   * on the sign in screen with the reason, rather than on a room that can never reconnect.
+   */
+  const signedOutOfCall = useCallback(() => {
+    socket.current?.close();
+    teardown();
+    useStore.getState().reset();
+    useStore.getState().setError({ key: "error.UNAUTHENTICATED" });
+  }, [teardown]);
 
   /** Bring up WebRTC once we know our negotiation role and have media. */
   const startPeer = useCallback(
@@ -289,6 +297,12 @@ export function App() {
           return;
 
         case "error":
+          // Only reachable if a socket got in without an account, which the upgrade refuses. Said
+          // the same way as a session that expired mid flow.
+          if (message.code === "UNAUTHENTICATED") {
+            signedOutOfCall();
+            return;
+          }
           // A stale resume token must not strand someone outside a room that is still there.
           // It happens routinely: the grace window expired while the tab was closed, or the
           // other person ended and restarted. Drop the token and try as a newcomer, once.
@@ -314,26 +328,35 @@ export function App() {
           return;
       }
     },
-    [startPeer, teardown],
+    [startPeer, teardown, signedOutOfCall],
   );
 
   const connect = useCallback(
     (onOpen: () => void) => {
-      const client = new SignalingSocket(socketUrl(), {
-        onMessage,
-        onOpen: () => {
-          useStore.getState().setSocketState("connected");
-          onOpen();
+      const client = new SignalingSocket(
+        socketUrl(),
+        {
+          onMessage,
+          onOpen: () => {
+            useStore.getState().setSocketState("connected");
+            onOpen();
+          },
+          onClose: ({ terminal }) => {
+            useStore.getState().setSocketState(terminal ? "closed" : "reconnecting");
+          },
+          onReconnecting: () => useStore.getState().setSocketState("reconnecting"),
+          // The session is gone (signed out in another tab, or the refresh token was revoked), so
+          // no socket can be opened. Back to the start, where the sign in screen says why.
+          onSignedOut: () => signedOutOfCall(),
         },
-        onClose: ({ terminal }) => {
-          useStore.getState().setSocketState(terminal ? "closed" : "reconnecting");
-        },
-        onReconnecting: () => useStore.getState().setSocketState("reconnecting"),
-      });
+        // Asked before EVERY connect, reconnects included, so a call that outlives one access
+        // token reconnects with the next. The token rides as a subprotocol, never in the URL.
+        (options) => session.accessToken(options),
+      );
       socket.current = client;
       client.connect();
     },
-    [onMessage],
+    [onMessage, signedOutOfCall],
   );
 
   /** Acquire media, wire the level meter and speech, then create or join. */
@@ -433,7 +456,7 @@ export function App() {
 
   const leave = useCallback(() => {
     // Read BEFORE teardown, which clears `me`. The notice differs because the OUTCOME differs:
-    // a guest leaving frees a seat and the room stays open, the admin leaving ends the call.
+    // a guest leaving frees a seat and the room stays open, the host leaving ends the call.
     // Telling everyone the room stays open would be a promise the server no longer keeps.
     const hosting = useStore.getState().me?.isHost === true;
     socket.current?.send({ t: "room.leave" });
@@ -441,7 +464,7 @@ export function App() {
     teardown();
     useStore.getState().setEnded({
       reason: "left",
-      notice: { key: hosting ? "app.ended.left.admin" : "app.ended.left" },
+      notice: { key: hosting ? "app.ended.left.host" : "app.ended.left" },
     });
   }, [teardown]);
 
@@ -622,6 +645,27 @@ export function App() {
     );
   }
 
+  // No session: sign in first, whatever screen was coming next. A /r/<code> link keeps its code
+  // (phase stays "prejoin"), so signing in lands straight on the join form.
+  if (store.session.status === "signedOut") {
+    return (
+      <AuthScreen
+        signupMode={store.signupMode}
+        error={error}
+        onSignIn={async (email, password) => {
+          const outcome = await session.signIn(email, password);
+          if (outcome.ok) useStore.getState().setError(null);
+          return outcome;
+        }}
+        onSignUp={async (input) => {
+          const outcome = await session.signUp(input);
+          if (outcome.ok) useStore.getState().setError(null);
+          return outcome;
+        }}
+      />
+    );
+  }
+
   if (phase === "prejoin") {
     return (
       <>
@@ -649,16 +693,9 @@ export function App() {
     <Landing
       initialCode={pendingCode}
       error={error}
-      adminRequired={store.adminRequired}
-      isAdmin={store.adminToken !== null}
-      onLogin={adminLogin}
-      onLogout={() => {
-        clearToken(browserStore());
-        // Dropped from memory as well as from storage, deliberately. clearToken swallows a
-        // storage that refuses to delete, so trusting it alone would leave someone "logged out"
-        // on screen while the next create still sent the old credential.
-        useStore.getState().setAdminToken(null);
-      }}
+      user={store.session.user}
+      onSignOut={() => void session.signOut()}
+      onCreateInvite={createInvite}
       onCreate={() => {
         setMode("create");
         useStore.getState().setError(null);

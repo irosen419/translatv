@@ -17,7 +17,7 @@ const PEER: Member = {
   username: "Ben",
   dialect: "es-AR",
   connection: "connected",
-  // A guest. Admin is the server's answer about what was proved, so the ordinary peer is not one.
+  // A guest. Host is the server's answer about who created the room, so the ordinary peer is not one.
   isHost: false,
   micEnabled: true,
   cameraEnabled: true,

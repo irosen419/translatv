@@ -25,6 +25,18 @@ import { DIALECT_CODES } from "./languages.js";
 export const WS_PATH = "/ws";
 
 /**
+ * How a BROWSER proves who it is on the socket.
+ *
+ * A browser cannot set headers on a WebSocket, so it offers two subprotocols:
+ * [WS_SUBPROTOCOL, `${WS_BEARER_PREFIX}<access token>`]. The server reads the token from the
+ * second and selects the first, so the token is never echoed back and never appears in the URL,
+ * where proxy logs and browser history would keep it. Native clients send
+ * `Authorization: Bearer <access token>` instead and need neither.
+ */
+export const WS_SUBPROTOCOL = "translatv.v1";
+export const WS_BEARER_PREFIX = "bearer.";
+
+/**
  * The version of the wire format described by this file.
  *
  * Served on /healthz so a client built separately from this server (the iOS app, which ships on

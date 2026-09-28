@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { PublicUser } from "@translatv/shared";
 import { codeFromShared, isLikelyCode, normalizeCode } from "../lib/code.js";
 import { useCopy } from "../i18n/useCopy.js";
 import type { CopyRef } from "../i18n/copy.js";
@@ -10,38 +11,25 @@ interface Props {
   initialCode: string | null;
   /** Why the last attempt failed, so someone sent back here knows what happened. */
   error: CopyRef | null;
-  /** This server gates starting a call. False means no admin is configured and anyone may. */
-  adminRequired: boolean;
-  /** This browser is holding an admin token. NOT proof: the server decides, this shapes the UI. */
-  isAdmin: boolean;
+  /**
+   * Who is signed in, or null while a stored session is still being restored. The page renders
+   * either way: a reload mid call lands here, and it must show the room code field at once rather
+   * than a blank card while one refresh request is in flight.
+   */
+  user: PublicUser | null;
   onCreate(): void;
   onJoin(code: string): void;
-  onLogin(password: string): Promise<boolean>;
-  onLogout(): void;
+  onSignOut(): void;
+  /** Owner only. Resolves the new code, or null when it could not be made. */
+  onCreateInvite(): Promise<string | null>;
 }
 
-export function Landing({
-  initialCode,
-  error,
-  adminRequired,
-  isAdmin,
-  onCreate,
-  onJoin,
-  onLogin,
-  onLogout,
-}: Props) {
-  // Two different questions. "May I start a call" is answered by the gate being off OR by
-  // holding a token; "should this page offer a login at all" is answered by the gate alone.
-  // Collapsing them into one flag is what made the ungated server unusable: the button read
-  // "no token" as "refused" on a server that refuses nobody.
-  const canCreate = !adminRequired || isAdmin;
+export function Landing({ initialCode, error, user, onCreate, onJoin, onSignOut, onCreateInvite }: Props) {
   const [code, setCode] = useState(initialCode ?? "");
   const ready = isLikelyCode(code);
   const copy = useCopy();
-  const [showLogin, setShowLogin] = useState(false);
-  const [password, setPassword] = useState("");
-  const [loginError, setLoginError] = useState<"wrong" | "unavailable" | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [invite, setInvite] = useState<{ code: string } | { failed: true } | null>(null);
+  const [minting, setMinting] = useState(false);
 
   return (
     <div className="center">
@@ -51,17 +39,9 @@ export function Landing({
 
         {error && <div className="notice bad">{copy.ref(error)}</div>}
 
-        {/* Shown to everyone and disabled for everyone who is not the admin, by owner decision:
-            a guest should see what this app is rather than a page with a hole in it. The title
-            is what turns a dead button into an explanation. The REAL gate is on the server, in
-            handleCreate; this is the courtesy that stops people pressing it. */}
-        <button
-          className="primary"
-          style={{ width: "100%" }}
-          onClick={onCreate}
-          disabled={!canCreate}
-          title={canCreate ? undefined : copy.t("landing.adminOnly")}
-        >
+        {/* Any signed in account may start a call. The server is the gate (it refuses an
+            unauthenticated socket outright); this page is only ever shown to someone signed in. */}
+        <button className="primary" style={{ width: "100%" }} onClick={onCreate}>
           {copy.t("landing.create")}
         </button>
 
@@ -100,67 +80,39 @@ export function Landing({
           </button>
         </form>
 
-        {/* Last, and quiet. Exactly one person ever needs this control and everyone else has to
-            look past it, so it sits under the thing they actually came to do. */}
-        {adminRequired && (
-        <div className="admin-strip">
-          {isAdmin ? (
-            <>
-              <span className="admin-state">{copy.t("landing.adminLoggedIn")}</span>
-              <button type="button" className="linklike" onClick={onLogout}>
-                {copy.t("landing.adminLogout")}
-              </button>
-            </>
-          ) : showLogin ? (
-            <form
-              className="admin-login"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (submitting || password.length === 0) return;
-                setSubmitting(true);
-                setLoginError(null);
-                void onLogin(password)
-                  .then((ok) => {
-                    // The password is dropped either way. Keeping it in state after a success
-                    // leaves a credential sitting in a React tree for the life of the tab.
-                    setPassword("");
-                    if (ok) setShowLogin(false);
-                    else setLoginError("wrong");
-                  })
-                  .catch(() => {
-                    setPassword("");
-                    setLoginError("unavailable");
-                  })
-                  .finally(() => setSubmitting(false));
+        {/* Last, and quiet: who you are, and the way out. The invite control is the owner's
+            alone, and the server checks that rather than trusting this button's absence. */}
+        <div className="account-strip">
+          {user && (
+            <span className="account-state">{copy.t("account.signedInAs", { name: user.displayName })}</span>
+          )}
+          <button type="button" className="linklike" onClick={onSignOut}>
+            {copy.t("account.signOut")}
+          </button>
+          {user?.isOwner && (
+            <button
+              type="button"
+              className="linklike"
+              disabled={minting}
+              onClick={() => {
+                setMinting(true);
+                void onCreateInvite()
+                  .then((minted) => setInvite(minted ? { code: minted } : { failed: true }))
+                  .catch(() => setInvite({ failed: true }))
+                  .finally(() => setMinting(false));
               }}
             >
-              <div className="field">
-                <label htmlFor="admin-password">{copy.t("landing.adminPassword")}</label>
-                <input
-                  id="admin-password"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  autoComplete="current-password"
-                  autoFocus
-                />
-              </div>
-              <button type="submit" disabled={submitting || password.length === 0}>
-                {copy.t("landing.adminSubmit")}
-              </button>
-              {loginError && (
-                <p className="hint bad">
-                  {copy.t(loginError === "wrong" ? "landing.adminWrong" : "landing.adminUnavailable")}
-                </p>
-              )}
-            </form>
-          ) : (
-            <button type="button" className="linklike" onClick={() => setShowLogin(true)}>
-              {copy.t("landing.adminLogin")}
+              {copy.t("account.invite.create")}
             </button>
           )}
+          {invite && "code" in invite && (
+            <div className="invite-result">
+              <p className="hint">{copy.t("account.invite.lead")}</p>
+              <code className="invite-code">{invite.code}</code>
+            </div>
+          )}
+          {invite && "failed" in invite && <p className="hint bad">{copy.t("account.invite.failed")}</p>}
         </div>
-        )}
       </div>
     </div>
   );

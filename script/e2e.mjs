@@ -12,6 +12,13 @@
 // it verifies everything except the browser's speech engine itself, which needs a real
 // microphone and a human voice. That gap is what script/spike.html exists for.
 //
+// Accounts (M4): every call needs a signed in account. The server runs with SIGNUP_MODE=open so
+// this harness can make its own. Ana and Ben sign up through the real sign up screen (and Ben
+// signs out and back in through the sign in screen), because those screens are part of what is
+// being verified. Everyone after them gets an account through the API and starts signed in, with
+// the refresh token placed in their browser's storage exactly where the client keeps it, because
+// clicking through the same form six more times would test nothing new.
+//
 // Run with: node script/e2e.mjs
 
 import { spawn } from "node:child_process";
@@ -20,6 +27,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { chromiumLaunchOptions, chromiumSource } from "./chromium.mjs";
+import { accountsEnv, emailFor, PASSWORD, signedInContext as signedInContextFor } from "./accounts.mjs";
 import { copyFor } from "./copy.mjs";
 
 /**
@@ -100,6 +108,22 @@ async function waitFor(fn, description, timeoutMs = 15_000) {
   throw new Error(`timed out waiting for ${description}: ${JSON.stringify(last)?.slice(0, 200)}`);
 }
 
+/** A context that starts signed in as a fresh account, made through the API. */
+function signedInContext(name, options = {}) {
+  return signedInContextFor(browser, BASE, name, options);
+}
+
+/** Sign up through the real screen, as a person would. */
+async function signUpViaScreen(page, name) {
+  await page.goto(BASE);
+  await page.getByRole("button", { name: en("auth.switch.toSignUp") }).click();
+  await page.getByLabel(en("auth.displayName"), { exact: true }).fill(name);
+  await page.getByLabel(en("auth.email")).fill(emailFor(name));
+  await page.getByLabel(en("auth.password")).fill(PASSWORD);
+  await page.getByRole("button", { name: en("auth.submit.signUp") }).click();
+  await page.getByRole("button", { name: "Start a new chat" }).waitFor();
+}
+
 // A ledger root the server can write to without touching the repo's real one.
 const root = mkdtempSync(join(tmpdir(), "e2e-"));
 mkdirSync(join(root, "out", "translatv"), { recursive: true });
@@ -117,6 +141,8 @@ const server = spawn("npx", ["tsx", "server/src/index.ts"], {
     // Deliberately NO ANTHROPIC_API_KEY. This run verifies the degraded mode end to end:
     // the call, the transcript, and the original text must all work with translation off.
     ANTHROPIC_API_KEY: "",
+    // Open signup and a throwaway database: see script/accounts.mjs.
+    ...accountsEnv(root),
   },
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -126,6 +152,8 @@ server.stderr.on("data", (d) => serverLog.push(String(d)));
 
 let browser;
 const pages = {};
+/** Set to a page's name for the one step that expects the server to answer 401. */
+let expectRefusal = null;
 const errors = [];
 try {
   PORT = await waitFor(
@@ -150,12 +178,20 @@ try {
   const ana = await contextA.newPage();
   const ben = await contextB.newPage();
 
+  // Every socket URL any page opens, to prove the access token never rides in one.
+  const socketUrls = [];
+  for (const page of [ana, ben]) page.on("websocket", (ws) => socketUrls.push(ws.url()));
+
   pages.ana = ana;
   pages.ben = ben;
   for (const [name, page] of [["ana", ana], ["ben", ben]]) {
     page.on("pageerror", (e) => errors.push(`${name}: ${e.message}`));
     page.on("console", (m) => {
-      if (m.type() === "error") errors.push(`${name} console: ${m.text()}`);
+      if (m.type() !== "error") return;
+      // The browser logs every non 2xx response as a console error. The one 401 this run asks
+      // for on purpose (a wrong password, below) is not a page fault, and is the only one let by.
+      if (expectRefusal === name && /status of 401/.test(m.text())) return;
+      errors.push(`${name} console: ${m.text()}`);
     });
     // A renderer death surfaces as "Target crashed" on whichever call happened to be in flight,
     // which names the wrong thing and cost a long investigation once already. Say plainly that
@@ -170,8 +206,56 @@ try {
   }
 
   // ---------------------------------------------------------------------
-  section("Creating a room");
+  section("Accounts");
   await ana.goto(BASE);
+  check(
+    "someone with no account is asked to sign in before anything else",
+    await ana.getByRole("button", { name: en("auth.submit.signIn") }).isVisible(),
+  );
+  check(
+    "an open server does not ask for an invite code",
+    (await ana.getByLabel(en("auth.invite")).count()) === 0,
+  );
+  await signUpViaScreen(ana, "Ana");
+  check(
+    "signing up lands on the start page, signed in",
+    (await ana.locator(".account-strip").innerText()).includes(en("account.signedInAs").replace("{name}", "Ana")),
+  );
+
+  await signUpViaScreen(ben, "Ben");
+  await ben.getByRole("button", { name: en("account.signOut") }).click();
+  check(
+    "signing out goes back to the sign in screen",
+    await ben
+      .getByRole("button", { name: en("auth.submit.signIn") })
+      .waitFor()
+      .then(() => true)
+      .catch(() => false),
+  );
+  check(
+    "and forgets the refresh token",
+    (await ben.evaluate(() => localStorage.getItem("translatv.refresh"))) === null,
+  );
+  await ben.getByLabel(en("auth.email")).fill(emailFor("Ben"));
+  await ben.getByLabel(en("auth.password")).fill("not the password");
+  expectRefusal = "ben";
+  await ben.getByRole("button", { name: en("auth.submit.signIn") }).click();
+  check(
+    "a wrong password is refused with a sentence, not a crash",
+    await ben
+      .getByText(en("auth.error.INVALID_CREDENTIALS"))
+      .waitFor()
+      .then(() => true)
+      .catch(() => false),
+  );
+  await ben.getByLabel(en("auth.password")).fill(PASSWORD);
+  await ben.getByRole("button", { name: en("auth.submit.signIn") }).click();
+  await ben.getByRole("button", { name: "Start a new chat" }).waitFor();
+  expectRefusal = null;
+  check("signing back in with the right password works", true);
+
+  // ---------------------------------------------------------------------
+  section("Creating a room");
   await ana.getByRole("button", { name: "Start a new chat" }).click();
   await ana.getByLabel("Your name, just for this chat").fill("Ana");
   await ana.getByLabel("Your language and region").selectOption("en-US");
@@ -189,7 +273,6 @@ try {
 
   // ---------------------------------------------------------------------
   section("Joining with the code");
-  await ben.goto(BASE);
 
   // Pasting a shared link into the code field has to work, because that is what people actually
   // have on the clipboard after clicking "Copy chat link". This used to leave "HTTP://LOCAL" in
@@ -484,8 +567,8 @@ try {
   // A fresh room, not Ana and Ben's: both of them joined WITH video from the start, so their room
   // can never exercise the case the disabled button used to make permanent, someone who unchecked
   // the camera box at the prejoin screen. New room, new pair.
-  const contextFin = await browser.newContext({ permissions: ["microphone", "camera"] });
-  const contextGia = await browser.newContext({ permissions: ["microphone", "camera"] });
+  const contextFin = await signedInContext("Fin", { permissions: ["microphone", "camera"] });
+  const contextGia = await signedInContext("Gia", { permissions: ["microphone", "camera"] });
   const fin = await contextFin.newPage();
   const gia = await contextGia.newPage();
   pages.fin = fin;
@@ -560,7 +643,7 @@ try {
   // the symptom is invisible to the UI. A track nobody stops is a camera light that stays on for
   // the life of the tab, long after the room is gone.
   const HELD_MS = 4_000;
-  const contextHal = await browser.newContext({ permissions: ["microphone", "camera"] });
+  const contextHal = await signedInContext("Hal", { permissions: ["microphone", "camera"] });
   await contextHal.addInitScript((heldMs) => {
     window.__cameraTracks = [];
     const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -641,7 +724,7 @@ try {
 
   // ---------------------------------------------------------------------
   section("Room capacity");
-  const cam = await (await browser.newContext({ permissions: ["microphone"] })).newPage();
+  const cam = await (await signedInContext("Cam", { permissions: ["microphone"] })).newPage();
   await cam.goto(BASE);
   await cam.getByLabel("Room code").fill(code);
   await cam.getByRole("button", { name: "Join chat" }).click();
@@ -713,7 +796,7 @@ try {
   // layout. On iOS Safari 100vh is the viewport measured as though the URL bar were hidden, so
   // the page scrolled, the settings drawer could be reached by scrolling toward it, and its last
   // row sat below the fold where it could not be tapped at all.
-  const phoneContext = await browser.newContext({
+  const phoneContext = await signedInContext("Dana", {
     viewport: { width: 390, height: 844 },
     permissions: ["microphone", "camera"],
   });
@@ -772,7 +855,7 @@ try {
   );
   check("everyone is told the chat ended, and by whom", true);
 
-  const rejoin = await browser.newContext({ permissions: ["microphone"] }).then((c) => c.newPage());
+  const rejoin = await signedInContext("Dee", { permissions: ["microphone"] }).then((c) => c.newPage());
   await rejoin.goto(BASE);
   await rejoin.getByLabel("Room code").fill(code);
   await rejoin.getByRole("button", { name: "Join chat" }).click();
@@ -787,6 +870,14 @@ try {
     "the code to be refused after ending",
   ).catch(() => null);
   check("the code is dead after ending", Boolean(dead));
+
+  // ---------------------------------------------------------------------
+  section("Credentials stay out of URLs");
+  check(
+    "the socket was opened, and no socket URL carries a token",
+    socketUrls.length > 0 && socketUrls.every((url) => !/bearer|token|access/i.test(url)),
+    socketUrls.join(" "),
+  );
 
   // ---------------------------------------------------------------------
   section("Page health");

@@ -221,3 +221,29 @@ describe("Mexican Spanish (es-MX)", () => {
     sweep("es-MX", ["vosotros", "vuestro", "vos", "tenés", "escribí"]);
   });
 });
+
+// The sign in and sign up screens arrived with accounts (M4) and address the reader on almost
+// every line, which is exactly where a register slip would show. The sweeps above already cover
+// them; these pin one line per dialect so a revert to base Spanish fails by name.
+describe("the account screens speak each dialect's register", () => {
+  it("uses voseo in Argentina", () => {
+    expect(copyFor("es-AR").t("auth.sub")).toContain("Necesitás");
+    expect(copyFor("es-AR").t("auth.switch.toSignUp")).toContain("tenés");
+  });
+
+  it("uses usted in Colombia", () => {
+    expect(copyFor("es-CO").t("auth.sub")).toContain("Necesita una cuenta");
+    expect(copyFor("es-CO").t("auth.displayName")).toBe("Su nombre");
+  });
+
+  it("uses tu in base Spanish, which is also Spain's singular", () => {
+    expect(copyFor("es").t("auth.sub")).toContain("Necesitas");
+    expect(copyFor("es-ES").t("auth.sub")).toBe(copyFor("es").t("auth.sub"));
+  });
+
+  it("keeps the password minimum as a placeholder in every language", () => {
+    for (const dialect of ["en-US", "es", "es-AR", "es-CO", "es-ES"]) {
+      expect(copyFor(dialect).t("auth.error.WEAK_PASSWORD", { min: 10 })).toContain("10");
+    }
+  });
+});

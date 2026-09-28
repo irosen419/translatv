@@ -11,12 +11,13 @@
 // the app protocol only, so the token appears once, in the request, and nowhere in the response.
 
 import type { IncomingHttpHeaders } from "node:http";
+import { WS_BEARER_PREFIX, WS_SUBPROTOCOL } from "@translatv/shared";
 
-/** The subprotocol a browser client offers and this server selects. */
-export const APP_SUBPROTOCOL = "translatv.v1";
+/** The subprotocol a browser client offers and this server selects (shared/src/protocol.ts). */
+export const APP_SUBPROTOCOL = WS_SUBPROTOCOL;
 
 /** The prefix of the subprotocol entry that carries the access token. */
-export const BEARER_SUBPROTOCOL_PREFIX = "bearer.";
+export const BEARER_SUBPROTOCOL_PREFIX = WS_BEARER_PREFIX;
 
 export function bearerFromHeader(value: string | undefined): string | null {
   if (typeof value !== "string") return null;

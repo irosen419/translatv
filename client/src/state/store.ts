@@ -14,6 +14,7 @@ import type {
   Member,
   RenderedLine,
   ServerMessage,
+  SignupMode,
   TranslationFailureCode,
   TranslationStatus,
 } from "@translatv/shared";
@@ -22,19 +23,7 @@ import type { CopyRef } from "../i18n/copy.js";
 import { errorCopyKey } from "../i18n/codes.js";
 import type { PeerState } from "../rtc/PeerConnection.js";
 import type { SttStatus } from "../stt/types.js";
-import { browserStore, readToken } from "../lib/adminSession.js";
-
-/**
- * The token this browser starts the session holding.
- *
- * Read once at store creation, which is module scope, so it goes through the same guarded
- * accessor everything else does. browserStore returns null rather than throwing when storage is
- * unavailable, which is the case that took the whole client suite down when the dialect lookup
- * read navigator here unguarded.
- */
-function initialAdminToken(): string | null {
-  return readToken(browserStore());
-}
+import type { SessionState } from "../lib/session.js";
 
 export type Phase = "landing" | "prejoin" | "room" | "ended";
 
@@ -63,23 +52,20 @@ interface State {
    */
   uiDialect: string;
   /**
-   * The admin token this browser is holding, or null.
+   * Who is signed in, mirrored from the SessionManager (lib/session.ts) so screens repaint the
+   * moment someone signs in or out. Starts "signedOut" and is corrected by App on mount, before
+   * the first paint that matters, from what the session manager finds in storage.
    *
-   * Mirrors localStorage into React so the landing page repaints the moment you log in or out.
-   * It is NOT the authority on whether you are the admin: the server decides that, and says so
-   * on `me.isAdmin` once you are in a room. This only answers "is there a credential to send",
-   * which is all the landing page needs to know before there is a room at all.
+   * NOT an authority on anything: the server decides who may do what, from the access token on
+   * each request and each socket. This answers "which screen to show".
    */
-  adminToken: string | null;
+  session: SessionState;
   /**
-   * Does this server gate anything on being the admin?
-   *
-   * Starts TRUE, before /healthz has answered, because the two wrong guesses are not equally
-   * bad. Guessing "gated" on an ungated server briefly greys a button that then comes to life.
-   * Guessing "open" on a gated one offers a live Start button to a guest, who presses it and is
-   * refused. A moment of being too careful beats a moment of lying.
+   * Whether signing up needs an invite, from /healthz. Starts "invite", before the server has
+   * answered, because the two wrong guesses are not equal: showing an invite field on an open
+   * server costs one ignored field, hiding it on an invite only one guarantees a refusal.
    */
-  adminRequired: boolean;
+  signupMode: SignupMode;
   /** Prefilled from a /r/<code> link so a shared link lands straight on the join form. */
   pendingCode: string | null;
 
@@ -130,8 +116,8 @@ interface State {
 
   setPhase(phase: Phase): void;
   setUiDialect(dialect: string): void;
-  setAdminToken(token: string | null): void;
-  setAdminRequired(required: boolean): void;
+  setSession(session: SessionState): void;
+  setSignupMode(mode: SignupMode): void;
   setPendingCode(code: string | null): void;
   apply(message: ServerMessage): void;
   reset(): void;
@@ -165,8 +151,8 @@ export function initialUiDialect(): string {
 export const useStore = create<State>((set, get) => ({
   phase: "landing",
   uiDialect: initialUiDialect(),
-  adminToken: initialAdminToken(),
-  adminRequired: true,
+  session: { status: "signedOut", user: null },
+  signupMode: "invite",
   pendingCode: null,
 
   code: null,
@@ -194,8 +180,8 @@ export const useStore = create<State>((set, get) => ({
 
   setPhase: (phase) => set({ phase }),
   setUiDialect: (uiDialect) => set({ uiDialect }),
-  setAdminToken: (adminToken) => set({ adminToken }),
-  setAdminRequired: (adminRequired) => set({ adminRequired }),
+  setSession: (session) => set({ session }),
+  setSignupMode: (signupMode) => set({ signupMode }),
   setPendingCode: (pendingCode) => set({ pendingCode }),
   setPeerState: (peerState) => set({ peerState }),
   setSttStatus: (sttStatus) => set({ sttStatus }),
