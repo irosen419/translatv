@@ -100,8 +100,10 @@ export function Landing({
           <button type="button" className="linklike" onClick={onSignOut}>
             {copy.t("account.signOut")}
           </button>
-          {/* Keyed by the account too, with a key of its own: siblings sharing a key (both were
-              the bare account id) left this one on screen after a switch (measured in the e2e). */}
+          {/* The owner's alone, so a switch to any other account unmounts it, minted code and all.
+              Its key would matter only if a second account could be the owner, and it has to
+              differ from the deletion form's: siblings sharing one (both were the bare account id)
+              left the code on screen after a switch (measured in the e2e). */}
           {user?.isOwner && <OwnerInvite key={`invite:${user.id}`} onCreateInvite={onCreateInvite} />}
           {/* Keyed by the account, so a form opened for one account never outlives it. Tabs share
               one sign in, and when another tab moves this one to another account, the form, its

@@ -368,6 +368,40 @@ describe("authorizedFetch", () => {
     ]);
   });
 
+  it("hands a call only the account it was joined as, and nothing once the tab holds another", async () => {
+    // A reconnect after a long outage forces a refresh, which reads whichever account another tab
+    // signed in to last. With that token the call rejoined as it, under this account's name, and
+    // both accounts' call history and contacts gained a call one of them never had (measured in
+    // review). null ends the call instead.
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    const tab = () => new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    const ana = tab();
+    await ana.signIn("ana@example.test", "right password");
+    expect(await ana.accessTokenFor("u1")).toBe("access-1");
+    const other = tab();
+    await other.restore();
+    await other.signOut();
+    await other.signIn("ben@example.test", "right password");
+
+    expect(await ana.accessTokenFor("u1", { force: true })).toBeNull();
+    expect(ana.state().user?.id).toBe("u2");
+  });
+
+  it("sends a request made while the session is still restoring, as the account it restores", async () => {
+    // No account is shown yet, so there is none to hold the request to. Refused, a caller that
+    // fetched during the restore would fail silently, with nothing sent (measured in review).
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    await new SessionManager({ fetch: server.fetch, storage, now: () => clock.now }).signIn("ana@example.test", "right password");
+    const reloaded = new SessionManager({ fetch: server.fetch, storage, now: () => clock.now });
+    const response = await reloaded.authorizedFetch("/api/thing");
+    expect(response.status).toBe(200);
+    expect(reloaded.state().user?.id).toBe("u1");
+  });
+
   it("never sends or replays a request as another account", async () => {
     // Tabs share one stored refresh token, so the refresh after a 401 can land this tab on
     // whichever account another tab signed in to last. Replayed there, a write changed that
@@ -387,6 +421,7 @@ describe("authorizedFetch", () => {
     let before = server.calls.length;
     const replayed = await ana.authorizedFetch("/api/thing", { method: "PUT" });
     expect(replayed.status).toBe(409);
+    expect(await replayed.json()).toEqual({ error: "ACCOUNT_MISMATCH" });
     expect(ana.state().user?.id).toBe("u2");
     expect(server.calls.slice(before).map((call) => call.path)).toEqual(["/api/thing", "/api/auth/refresh"]);
 

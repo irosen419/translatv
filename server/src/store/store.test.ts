@@ -67,10 +67,11 @@ describe("openStore", () => {
   it("erases without waiting: false at once while another connection reads, true after", () => {
     // The server's one connection is synchronous, so an erase that waited out busy_timeout would
     // stall every call on the server for five seconds (measured in review). A reader holding a
-    // snapshot keeps the WAL from being emptied, and the erase has to say so at once. Under 200 ms,
-    // not merely under the five seconds: a wait lowered to 2 s passed a 2.5 s bound and a 400 ms
-    // wait a 500 ms one (both measured in review), while no wait takes about 1 ms, and under 15
-    // with every core busy.
+    // snapshot keeps the WAL from being emptied, and the erase has to say so at once. The wait
+    // itself is read from inside the erase in eraseRace.test.ts; this bound is the backstop, under
+    // a second so a wait of seconds cannot pass, and loose enough for a CI runner's stalls (623 ms
+    // inside one test, measured in review). No wait takes about 1 ms here, and under 40 with every
+    // core busy.
     const path = join(tempDir(), "t.db");
     const store = open({ path });
     store.db.exec("CREATE TABLE scratch (v TEXT); INSERT INTO scratch VALUES ('a')");
@@ -80,7 +81,7 @@ describe("openStore", () => {
       reader.prepare("SELECT count(*) AS n FROM scratch").get();
       const started = performance.now();
       expect(store.erase()).toBe(false);
-      expect(performance.now() - started).toBeLessThan(200);
+      expect(performance.now() - started).toBeLessThan(1000);
       reader.exec("COMMIT");
       expect(store.erase()).toBe(true);
       // The wait is lowered only for the erase, and put back.
@@ -135,12 +136,40 @@ describe("openStore", () => {
       reader.prepare("SELECT count(*) AS n FROM scratch").get();
       const started = performance.now();
       expect(store.erase()).toBe(false);
-      expect(performance.now() - started).toBeLessThan(200);
+      expect(performance.now() - started).toBeLessThan(1000);
+      // It got as far as the rewrite, whose pages wait in the WAL: the second checkpoint answered,
+      // not the first. Were the first ever to turn this reader away, this test would stop reaching
+      // what it is here for, and say so.
+      expect(statSync(`${path}-wal`).size).toBeGreaterThan(0);
       reader.exec("COMMIT");
       expect(store.erase()).toBe(true);
     } finally {
       reader.close();
     }
+  });
+
+  it("zeroes deleted rows where they stood, so a deletion the erase never reaches leaves nothing", () => {
+    // The erase answers false for as long as another connection holds on (review held a reader
+    // through every attempt), and closing the database empties the WAL without rewriting the
+    // file. What keeps a deleted account unreadable then is secure_delete. Rows here fill whole
+    // pages, which a delete frees outright: FAST zeroes a row inside a page but leaves a freed page
+    // as it was, and OFF leaves both. Each passed every other test once the rewrite was added, and
+    // left the deleted account's email and name in translatv.db (250 and 445 copies, measured in
+    // review). No erase here.
+    const path = join(tempDir(), "t.db");
+    const store = open({ path });
+    const marker = `DELETED-${randomBytes(6).toString("hex")}`;
+    store.db.exec("CREATE TABLE scratch (v TEXT)");
+    const insert = store.db.prepare("INSERT INTO scratch VALUES (?)");
+    for (let i = 0; i < 40; i += 1) insert.run(`${marker} ${i} `.padEnd(3000, "x"));
+    insert.run(`${marker} small`);
+    const checkpoint = () => store.db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    const readable = () => [path, `${path}-wal`].filter((f) => existsSync(f) && readFileSync(f).includes(marker));
+    checkpoint();
+    expect(readable()).toEqual([path]); // the control
+    store.db.exec("DELETE FROM scratch");
+    checkpoint();
+    expect(readable()).toEqual([]);
   });
 
   it("leaves nothing in a page's unused space once it answers true", () => {
@@ -149,16 +178,18 @@ describe("openStore", () => {
     // format itself, so this does not hang on when SQLite happens to split a page, and only a
     // rewrite clears it. The freelist check alone passed with auto_vacuum freeing the pages
     // instead, and with a rewrite run only when pages were free (both measured in review).
+    // A table of its own, one row, so its root is a leaf page whatever the schema grows into.
     const path = join(tempDir(), "t.db");
     const first = openStore({ path });
-    first.db.exec("INSERT INTO meta (key, value) VALUES ('planted', 'x')");
+    first.db.exec("CREATE TABLE planted (v TEXT); INSERT INTO planted VALUES ('x')");
     expect(first.erase()).toBe(true);
-    const root = Number(first.db.prepare("SELECT rootpage FROM sqlite_master WHERE name = 'meta'").get()?.["rootpage"]);
+    const root = Number(first.db.prepare("SELECT rootpage FROM sqlite_master WHERE name = 'planted'").get()?.["rootpage"]);
     first.close();
 
     const marker = `PLANTED-${randomBytes(6).toString("hex")}`;
     const file = readFileSync(path);
-    const page = (root - 1) * file.readUInt16BE(16);
+    const pageSize = file.readUInt16BE(16) === 1 ? 65536 : file.readUInt16BE(16); // the header writes 64 KiB as 1
+    const page = (root - 1) * pageSize;
     expect(file[page]).toBe(13); // a leaf table page: an 8 byte header, then the cell pointers
     const gap = 8 + 2 * file.readUInt16BE(page + 3);
     expect((file.readUInt16BE(page + 5) || 65536) - gap).toBeGreaterThan(marker.length + 16);

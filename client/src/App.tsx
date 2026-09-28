@@ -179,6 +179,9 @@ export function App() {
     setCameraError(null);
   }, []);
 
+  /** Set when a call ended because this tab moved to another account, for the notice it leaves. */
+  const movedAccount = useRef(false);
+
   /**
    * The session ended while entering or sitting in a room. Media is released and the person lands
    * on the sign in screen with the reason, rather than on a room that can never reconnect.
@@ -187,7 +190,8 @@ export function App() {
     socket.current?.close();
     teardown();
     useStore.getState().reset();
-    useStore.getState().setError({ key: "error.UNAUTHENTICATED" });
+    useStore.getState().setError({ key: movedAccount.current ? "error.ACCOUNT_CHANGED" : "error.UNAUTHENTICATED" });
+    movedAccount.current = false;
   }, [teardown]);
 
   /** Bring up WebRTC once we know our negotiation role and have media. */
@@ -363,6 +367,14 @@ export function App() {
 
   const connect = useCallback(
     (onOpen: () => void) => {
+      // The account this call is on. Tabs share one sign in, so a refresh (a reconnect after a
+      // long outage forces one) can hand this tab whichever account another tab signed in to
+      // last; a socket opened with that token rejoined the call as it, under this account's name,
+      // and both accounts' history and contacts gained a call one of them never had (measured in
+      // review). So the socket only ever gets this account's token, and anything else ends the
+      // call. A call begun while the session was still restoring takes the account it restores.
+      let account = session.state().user?.id ?? null;
+      movedAccount.current = false;
       const client = new SignalingSocket(
         socketUrl(),
         {
@@ -381,7 +393,16 @@ export function App() {
         },
         // Asked before EVERY connect, reconnects included, so a call that outlives one access
         // token reconnects with the next. The token rides as a subprotocol, never in the URL.
-        (options) => session.accessToken(options),
+        async (options) => {
+          if (account === null) {
+            const token = await session.accessToken(options);
+            account = session.state().user?.id ?? null;
+            return token;
+          }
+          const token = await session.accessTokenFor(account, options);
+          if (token === null && session.state().status === "signedIn") movedAccount.current = true;
+          return token;
+        },
       );
       socket.current = client;
       client.connect();

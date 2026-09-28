@@ -196,6 +196,7 @@
   "error.NOT_IN_ROOM": "Ya no estás en ningún chat. Vuelve a entrar con el código.",
   "error.ALREADY_IN_ROOM": "Esta pestaña ya está en un chat. Sal de ese antes de entrar a otro.",
   "error.HOST_NOT_PRESENT": "Ese chat todavía no empezó, o la persona que lo organiza ya salió. Pídele que lo empiece y vuelve a intentarlo.",
+  "error.ACCOUNT_CHANGED": "Esta pestaña ahora usa otra cuenta, así que el chat terminó.",
   "error.UNAUTHENTICATED": "Primero inicia sesión y vuelve a intentarlo.",
   "failure.NOT_CONFIGURED": "Este servidor no tiene la traducción configurada, así que las líneas quedan en el idioma en que se dijeron.",
   "failure.PROVIDER_REJECTED": "El servicio de traducción rechazó a este servidor, así que la traducción está apagada. La llamada y la transcripción siguen funcionando.",

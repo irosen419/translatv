@@ -196,6 +196,7 @@
   "error.NOT_IN_ROOM": "You are not in a chat any more. Join again with the code.",
   "error.ALREADY_IN_ROOM": "This tab is already in a chat. Leave that one before joining another.",
   "error.HOST_NOT_PRESENT": "That chat has not started yet, or the person hosting it has left. Ask them to start it, then try again.",
+  "error.ACCOUNT_CHANGED": "This tab is now signed in to another account, so the chat ended.",
   "error.UNAUTHENTICATED": "Sign in first, then try again.",
   "failure.NOT_CONFIGURED": "Translation is not set up on this server, so lines stay in the language they were said in.",
   "failure.PROVIDER_REJECTED": "The translation service refused this server, so translation is off. The call and the transcript still work.",

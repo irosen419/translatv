@@ -124,11 +124,15 @@ describe("the emitted line", () => {
   });
 
   it("scrubs warnings and errors too, not only info", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Read from every console method, and require both lines: watching console.warn alone, the
+    // test passed with nothing to read once warnings went to console.error (measured in review).
+    const spies = (["log", "warn", "error"] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation(() => {}),
+    );
     log.warn("stt.retry", { text: "leaked?" });
     log.error("translate.failed", { original: "leaked?" });
-    expect(String(warn.mock.calls[0]?.[0])).not.toContain("leaked?");
-    expect(String(error.mock.calls[0]?.[0])).not.toContain("leaked?");
+    const lines = spies.flatMap((spy) => spy.mock.calls.map((call) => String(call[0])));
+    expect(lines.map((line) => JSON.parse(line).event).sort()).toEqual(["stt.retry", "translate.failed"]);
+    expect(lines.join("\n")).not.toContain("leaked?");
   });
 });

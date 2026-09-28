@@ -559,21 +559,25 @@ describe("deleteAccount", () => {
   it("logs a mismatch under the bearer's own id, never the id the request named", async () => {
     // The named id comes from the client, so it can be anything, an email included, and the
     // logger drops an email only under the key "email": logged as the named id, one went through
-    // verbatim (measured in review). The line names the account the bearer is for.
+    // verbatim (measured in review). The line names the account the bearer is for. Read from
+    // every console method: a second line at another level leaked past a test watching one, and
+    // moving warnings to another method failed it (both measured in review).
     const auth = service();
     const ben = await signedUp(auth, "ben@example.test");
     const named = "someone.else@example.test";
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const spies = (["log", "warn", "error"] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation(() => {}),
+    );
     try {
       expect(await auth.deleteAccount(ben.user.id, { password: PASSWORD, userId: named }, NOW)).toEqual({
         ok: false,
         error: "ACCOUNT_MISMATCH",
       });
-      const lines = warn.mock.calls.map((call) => String(call[0]));
+      const lines = spies.flatMap((spy) => spy.mock.calls.map((call) => String(call[0])));
       expect(lines.some((line) => line.includes("account.delete_mismatch") && line.includes(ben.user.id))).toBe(true);
       expect(lines.join("\n")).not.toContain(named);
     } finally {
-      warn.mockRestore();
+      for (const spy of spies) spy.mockRestore();
     }
   });
 
@@ -732,8 +736,9 @@ describe("deleteAccount", () => {
         NOW,
       );
       if (!signup.ok) throw new Error(`signup failed: ${signup.error}`);
-      // A full glossary spans whole pages, which a delete frees outright. secure_delete FAST zeroes
-      // a row within a page but leaves a freed page's old content behind, so only ON passes here.
+      // A full glossary spans whole pages, which a delete frees outright. The rewrite clears them
+      // here whatever secure_delete is set to; store.test.ts pins secure_delete itself, for a
+      // deletion the rewrite never reaches.
       const saved = new AccountService(onDisk).setGlossary(signup.value.user.id, {
         entries: Array.from({ length: LIMITS.glossaryEntries }, (_, i) => ({
           source: `term${i} ${marker}`.padEnd(LIMITS.glossaryTerm, "s"),
