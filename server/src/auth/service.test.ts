@@ -68,6 +68,20 @@ describe("signup in invite mode", () => {
     expect(result).toMatchObject({ ok: false, error: "INVITE_INVALID" });
   });
 
+  it("spends an invite exactly once when two signups race for it", async () => {
+    // Both pass the usable check before either finishes hashing its password, which awaits. The
+    // conditional UPDATE in consumeInvite is what refuses the second, and nothing else would.
+    const auth = service();
+    const invite = auth.createInvite(null, NOW);
+    const [first, second] = await Promise.all([
+      auth.signup({ invite: invite.code, email: "a@example.test", password: PASSWORD, displayName: "A" }, NOW),
+      auth.signup({ invite: invite.code, email: "b@example.test", password: PASSWORD, displayName: "B" }, NOW),
+    ]);
+    expect([first.ok, second.ok].filter(Boolean)).toHaveLength(1);
+    expect(first.ok ? second : first).toMatchObject({ ok: false, error: "INVITE_INVALID" });
+    expect(count("users")).toBe(1);
+  });
+
   it("spends an invite exactly once", async () => {
     const auth = service();
     const invite = auth.createInvite(null, NOW);
@@ -160,6 +174,10 @@ describe("the owner", () => {
     expect(before.user.isOwner).toBe(false);
     const after = service({ ownerEmail: "owner@example.test" });
     expect(after.userFor(before.user.id)?.isOwner).toBe(true);
+
+    // And away again: the role moves, it is not kept by whoever held it first.
+    const moved = service({ ownerEmail: "someone.else@example.test" });
+    expect(moved.userFor(before.user.id)?.isOwner).toBe(false);
   });
 });
 
@@ -257,6 +275,20 @@ describe("login", () => {
     });
   });
 
+  it("keeps a live lock through the once a minute prune", async () => {
+    // Every other lockout test finishes inside a minute, so the prune never ran during any of
+    // them, and a prune that deleted live locks would have ended every lock after one minute.
+    const auth = service();
+    await signedUp(auth);
+    for (let i = 0; i < MAX_FAILURES; i += 1) {
+      await auth.login({ email: "ana@example.test", password: "wrong wrong" }, NOW);
+    }
+    expect(await auth.login({ email: "ana@example.test", password: PASSWORD }, NOW + 2 * 60_000)).toMatchObject({
+      ok: false,
+      error: "LOCKED",
+    });
+  });
+
   it("locks an email with no account exactly as it locks a real one", async () => {
     // A lock only real accounts could reach would answer "does this email exist" to anyone
     // willing to fail ten times.
@@ -314,6 +346,22 @@ describe("refresh", () => {
 
     // The descendant, which was valid a moment ago, is revoked with it.
     expect(auth.refresh({ refreshToken: rotated.value.refreshToken }, NOW + 3)).toMatchObject({
+      ok: false,
+      error: "INVALID_REFRESH",
+    });
+  });
+
+  it("still catches a reused token after the once a minute prune has run", async () => {
+    // A spent token has to outlive the prune, or presenting it again reads as a token nobody
+    // issued: refused, but with the family left alive, so the thief's rotation keeps working.
+    const auth = service();
+    const session = await signedUp(auth);
+    const rotated = auth.refresh({ refreshToken: session.refreshToken }, NOW + 1);
+    if (!rotated.ok) throw new Error("first rotation failed");
+
+    const later = NOW + 2 * 60_000;
+    expect(auth.refresh({ refreshToken: session.refreshToken }, later)).toMatchObject({ ok: false });
+    expect(auth.refresh({ refreshToken: rotated.value.refreshToken }, later + 1)).toMatchObject({
       ok: false,
       error: "INVALID_REFRESH",
     });
