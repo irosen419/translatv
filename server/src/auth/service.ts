@@ -364,6 +364,9 @@ export class AuthService {
     });
     // Deleted by another request during the password check. Same answer as a token for nobody.
     if (!removed) return refuse("UNAUTHENTICATED");
+    // The rows are zeroed (secure_delete), and this clears the WAL's older copies of them now,
+    // rather than whenever SQLite next checkpoints on its own.
+    if (!this.store.checkpoint()) log.warn("account.deleted_checkpoint_busy", { user: userId });
 
     log.info("account.deleted", { user: userId });
     for (const listener of this.deletedListeners) {

@@ -28,18 +28,39 @@ export interface Store {
   /**
    * Run fn inside a transaction: commit when it returns, roll back and rethrow when it throws.
    * Nested calls become savepoints, so an inner failure undoes only the inner work, UNLESS SQLite
-   * itself ended the whole transaction (a full disk, an I/O error): then everything since the
-   * outer BEGIN is gone, and the outer call fails at COMMIT even if it caught the inner error.
+   * itself ended the whole transaction (a full disk, an I/O error). Then everything written
+   * before the failure is gone, and the outer call is no longer in a transaction at all: if it
+   * catches the inner error and carries on, each later write (a later nested call's included)
+   * commits on its own, and the outer call still fails at COMMIT. So an outer fn must not catch
+   * a nested failure and keep writing. No caller nests today.
    *
    * fn must be synchronous. An async fn would return at its first await, the transaction would
    * commit, and the rest of its writes would land outside it: exactly the partial write a
    * transaction exists to prevent. So a returned promise is refused and the work rolled back.
    */
   transaction<T>(fn: () => T): T;
+  /**
+   * Copy the WAL back into the database file and truncate it to nothing. secure_delete zeroes a
+   * deleted row in the pages the delete writes, but the WAL keeps the older copies of those
+   * pages until a checkpoint, so a caller that promised a deletion runs one straight after.
+   * False when another connection's open read kept it from finishing; the copies then go at the
+   * next checkpoint instead.
+   */
+  checkpoint(): boolean;
   close(): void;
 }
 
 const MEMORY = ":memory:";
+
+/**
+ * The table that records which migrations a database has applied. It is shipped schema like any
+ * migration (store.test.ts pins it the same way): a column added here would exist only in
+ * databases created after the change. Byte for byte as it first shipped, hence the indentation.
+ */
+export const MIGRATIONS_TABLE = `CREATE TABLE IF NOT EXISTS schema_migrations (
+      version    INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    ) STRICT`;
 
 /**
  * Refuse a node:sqlite with no DatabaseSync#isTransaction, which first shipped in Node 22.16.
@@ -71,6 +92,11 @@ export function openStore(options: StoreOptions): Store {
     // DatabaseSync happens to turn them on by default (enableForeignKeyConstraints); set here
     // anyway, so the account deletion cascade does not rest on a library default.
     db.exec("PRAGMA foreign_keys = ON");
+    // A deleted row is overwritten with zeros rather than left behind as free space that a copy
+    // of the file still reads. Deleting an account promises it is gone (the UI says so), and
+    // without this its email, name and glossary stayed readable in translatv.db (measured in
+    // review). The WAL's older copies are the other half: see checkpoint below.
+    db.exec("PRAGMA secure_delete = ON");
     if (path !== MEMORY) {
       // WAL lets reads proceed during a write, and survives a crash mid write as well as the
       // default journal does. It does not apply to an in memory database.
@@ -113,10 +139,7 @@ export function openStore(options: StoreOptions): Store {
       return Number(row?.["v"] ?? 0);
     };
 
-    db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-      version    INTEGER PRIMARY KEY,
-      applied_at TEXT NOT NULL
-    ) STRICT`);
+    db.exec(MIGRATIONS_TABLE);
 
     const current = schemaVersion();
     if (current > migrations.length) {
@@ -147,6 +170,7 @@ export function openStore(options: StoreOptions): Store {
       path,
       schemaVersion,
       transaction,
+      checkpoint: () => Number(db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get()?.["busy"] ?? 0) === 0,
       close: () => db.close(),
     };
   } catch (error) {

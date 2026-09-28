@@ -181,8 +181,9 @@ export class SessionManager {
    * asked for and it must happen even if the server cannot be reached; the server half revokes
    * the refresh token, so a copy of it (another tab, a stolen one) can no longer refresh. Another
    * tab is not told: it keeps the access token it holds, at most fifteen minutes, and is signed
-   * out when it next tries to refresh. If someone signs in again here before then, the other
-   * tab's refresh reads THAT account's token from the shared storage and silently becomes it.
+   * out when it next tries to refresh. If someone signs in again before then, in this tab or any
+   * other, that tab's refresh reads THAT account's token from the shared storage and silently
+   * becomes it.
    */
   async signOut(): Promise<void> {
     const token = readRefresh(this.deps.storage);
@@ -206,6 +207,12 @@ export class SessionManager {
    *
    * ONE request, never authorizedFetch's retry on a 401: a wrong password answers 401 too, and
    * retrying it would spend a second lockout strike on the same typo.
+   *
+   * UNAUTHENTICATED is different: the bearer was refused before any password was checked, which
+   * almost always means the account is already gone, deleted from another device. One refresh
+   * settles it without a second deletion attempt. Refused, the session ends here and the app goes
+   * to sign in, as it does when the account is deleted mid call; before this, the tab stayed
+   * signed in for up to fifteen minutes and said it could not reach the server.
    */
   async deleteAccount(password: string): Promise<AuthOutcome> {
     let response: Response;
@@ -220,7 +227,11 @@ export class SessionManager {
     } catch {
       return { ok: false, error: "NETWORK" };
     }
-    if (!response.ok) return { ok: false, error: await errorCode(response) };
+    if (!response.ok) {
+      const error = await errorCode(response);
+      if (error === "UNAUTHENTICATED") await this.accessToken({ force: true }).catch(() => null);
+      return { ok: false, error };
+    }
     this.drop();
     return { ok: true };
   }

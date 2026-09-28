@@ -11,19 +11,28 @@ import { openStore } from "./store.js";
 
 vi.mock("./sqlite.js", async (importOriginal) => {
   const real = await importOriginal<typeof import("./sqlite.js")>();
-  // The property is an own, non-configurable accessor on each instance, so a subclass cannot
-  // shadow it, but a proxy over a real connection can. Methods are bound to the real connection,
-  // because node:sqlite's native methods refuse any other receiver.
+  // On an old Node the property does not exist at all: undefined to read, false to `in`, and no
+  // descriptor. On a real connection it is an own, non-configurable accessor, which a subclass
+  // cannot shadow and a proxy over that connection may not deny to `in` (a proxy invariant). So
+  // this proxies an empty object and forwards every other key to a real connection, with methods
+  // bound to it, because node:sqlite's native methods refuse any other receiver.
   class DatabaseSync {
     constructor(...args: ConstructorParameters<typeof real.DatabaseSync>) {
       const db = new real.DatabaseSync(...args);
-      return new Proxy(db, {
-        get(target, key) {
-          if (key === "isTransaction") return undefined;
-          const value: unknown = Reflect.get(target, key, target);
-          return typeof value === "function" ? value.bind(target) : value;
+      const absent = (key: string | symbol) => key === "isTransaction";
+      return new Proxy(
+        {},
+        {
+          get(_, key) {
+            if (absent(key)) return undefined;
+            const value: unknown = Reflect.get(db, key, db);
+            return typeof value === "function" ? value.bind(db) : value;
+          },
+          has(_, key) {
+            return !absent(key) && Reflect.has(db, key);
+          },
         },
-      });
+      );
     }
   }
   return { ...real, DatabaseSync };

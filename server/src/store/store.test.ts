@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { MIGRATIONS } from "./migrations.js";
 import { DatabaseSync } from "./sqlite.js";
-import { assertSupportedSqlite, openStore, type Store } from "./store.js";
+import { assertSupportedSqlite, MIGRATIONS_TABLE, openStore, type Store } from "./store.js";
 
 const opened: Store[] = [];
 const dirs: string[] = [];
@@ -66,9 +66,10 @@ describe("openStore", () => {
 
   it("waits for a busy file database rather than failing at once", () => {
     // The invite CLI opens the same file while the server has it, and a writer that finds the
-    // other holding the lock should wait for it (measured: a 2.6 s wait, then success).
+    // other holding the lock should wait for it (measured: a 2.6 s wait, then success). At least
+    // five seconds, so a longer wait is a legitimate change and a shorter one is not.
     const store = open({ path: join(tempDir(), "t.db") });
-    expect(store.db.prepare("PRAGMA busy_timeout").get()).toEqual({ timeout: 5000 });
+    expect(Number(store.db.prepare("PRAGMA busy_timeout").get()?.["timeout"])).toBeGreaterThanOrEqual(5000);
   });
 
   it("refuses a Node whose node:sqlite has no isTransaction (before 22.16)", () => {
@@ -164,6 +165,11 @@ describe("migrations", () => {
   it("never changes or reorders a shipped migration: they are append only", () => {
     const hashes = MIGRATIONS.map((sql) => createHash("sha256").update(sql).digest("hex").slice(0, 16));
     expect(hashes.slice(0, SHIPPED.length)).toEqual(SHIPPED);
+  });
+
+  it("never changes the table that records them either", () => {
+    // Created IF NOT EXISTS, so a change here reaches new databases only: the same split.
+    expect(createHash("sha256").update(MIGRATIONS_TABLE).digest("hex").slice(0, 16)).toBe("b8e562b60fdc64fb");
   });
 });
 
