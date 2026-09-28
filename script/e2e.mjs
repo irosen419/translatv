@@ -23,7 +23,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { chromiumLaunchOptions, chromiumSource } from "./chromium.mjs";
@@ -170,6 +170,29 @@ function stopServer(child) {
   }
 }
 
+/** Whether the server at base answers its health check right now. */
+async function answers(base) {
+  try {
+    return (await fetch(`${base}/healthz`)).ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether the server at base stops answering within ms. Dropping `detached` above, or signalling
+ * only the npx, left both servers running after every run with every check green (measured in
+ * review), so a stop is checked rather than assumed.
+ */
+async function goneWithin(base, ms) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (!(await answers(base))) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}
+
 /**
  * Installed before a page loads: records whether the sign in form was EVER inserted. It reads the
  * mutation records rather than the live document, because React can mount the form and swap it
@@ -222,14 +245,17 @@ let browser;
 /** The second server, for the invite only section. Killed in finally if a step before it throws. */
 let inviteServer = null;
 
-// The servers are detached (their own process groups), so a Ctrl-C at the terminal, which goes
-// to this run's group, no longer reaches them, and Node exits on SIGINT without running the
-// finally below. Stop them on the way out whatever ends the run.
-for (const signal of ["SIGINT", "SIGTERM"]) {
+// The servers are detached (their own process groups), so a signal sent to this run's group, as
+// a terminal's Ctrl-C or a closed terminal sends, no longer reaches them, and Node exits on these
+// signals without running the finally below. So they are stopped here too, the scratch root is
+// removed, and the run exits as a shell expects, 128 plus the signal's number. A SIGKILL cannot
+// be caught, and after one both servers are still running.
+for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     stopServer(inviteServer);
     stopServer(server);
-    process.exit(130);
+    rmSync(root, { recursive: true, force: true });
+    process.exit(128 + constants.signals[signal]);
   });
 }
 
@@ -1015,6 +1041,43 @@ try {
     "after a refusal, focus is back in the password field",
     (await eve.evaluate(() => document.activeElement?.id)) === "delete-password",
   );
+  // Selected as well, ready to type over, and tied to the sentence that says why, so a screen
+  // reader coming back to the field hears the refusal and not just the label.
+  const retypeReady = () =>
+    eve.evaluate(() => {
+      const field = document.activeElement;
+      return (
+        field?.id === "delete-password" &&
+        field.value.length > 0 &&
+        field.selectionStart === 0 &&
+        field.selectionEnd === field.value.length
+      );
+    });
+  check("after a wrong password, the field is selected, ready to retype", await retypeReady());
+  check(
+    "the wrong password marks the field invalid and is tied to it",
+    await eve.evaluate(() => {
+      const field = document.getElementById("delete-password");
+      const reason = document.getElementById(field?.getAttribute("aria-describedby") ?? "");
+      return field?.getAttribute("aria-invalid") === "true" && reason?.getAttribute("role") === "alert";
+    }),
+  );
+  // Every other refusal the same way, not just a wrong password. Faked in this browser, so neither
+  // touches the server's real limits, which the rest of the run signs in through.
+  for (const [what, sentence, answer] of [
+    [
+      "a rate limit",
+      en("auth.error.RATE_LIMITED"),
+      (route) => route.fulfill({ status: 429, contentType: "application/json", body: '{"error":"RATE_LIMITED"}' }),
+    ],
+    ["a request that never got an answer", en("auth.error.unavailable"), (route) => route.abort()],
+  ]) {
+    await eve.route("**/api/account", answer);
+    await eve.getByRole("button", { name: en("account.delete.confirm") }).click();
+    await eve.getByText(sentence).waitFor();
+    check(`after ${what}, focus is back in the password field, selected`, await retypeReady());
+    await eve.unroute("**/api/account");
+  }
   await eve.getByLabel(en("account.delete.password")).fill(PASSWORD);
   await eve.getByRole("button", { name: en("account.delete.confirm") }).click();
   check(
@@ -1123,11 +1186,15 @@ try {
     "a returning visitor never sees the sign in form, not even for a frame",
     (await pat.evaluate(() => window.__sawSignInForm)) === false,
   );
-  // Nothing takes focus on its own when the start page loads: a stolen focus on "Delete account"
-  // is one Enter away from the deletion form.
+  // Nothing in the account strip takes focus on its own when the start page loads: focus on
+  // "Delete account" is one Enter from the deletion form, and on "Sign out" one Enter from signing
+  // out. Checked once the strip has mounted and its effects have run (checked before that, it
+  // passed on a race), and only the strip: focus a design puts elsewhere on purpose is fine.
+  await pat.locator(".account-state").waitFor();
+  await pat.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   check(
-    "the start page loads with nothing focused on its own",
-    (await pat.evaluate(() => document.activeElement?.textContent)) !== en("account.delete.open"),
+    "the start page loads with nothing in the account strip focused",
+    await pat.evaluate(() => !document.activeElement?.closest(".account-strip")),
   );
 
   // Deleted from somewhere else mid call: the tab has to notice on its own and go to the sign in
@@ -1149,8 +1216,10 @@ try {
     "the tab that was in a call goes to the sign in screen on its own",
     await reached(pat.getByRole("button", { name: en("auth.submit.signIn") })),
   );
+  check("the invite only server answers until it is stopped", await answers(INVITE_BASE));
   stopServer(inviteServer);
   inviteServer = null;
+  check("the invite only server is gone once stopped", await goneWithin(INVITE_BASE, 5000));
 
   // ---------------------------------------------------------------------
   section("Credentials stay out of URLs");
@@ -1182,7 +1251,14 @@ try {
 } finally {
   await browser?.close();
   stopServer(inviteServer);
-  stopServer(server);
+  if (BASE !== "") {
+    section("Shutdown");
+    check("the server answers until it is stopped", await answers(BASE));
+    stopServer(server);
+    check("the server is gone once stopped, so a run leaves nothing running", await goneWithin(BASE, 5000));
+  } else {
+    stopServer(server);
+  }
   rmSync(root, { recursive: true, force: true });
 }
 

@@ -41,7 +41,9 @@ export function DeleteAccount({ onDelete }: Props) {
   const openButton = useRef<HTMLButtonElement>(null);
   const focusOpenButton = useRef(false);
   // After a refusal, back to the field, selected, ready to retype. The submit button is disabled
-  // while the request runs, and a disabled button drops the focus it had to <body>.
+  // while the request runs, and a disabled button drops the focus it had to <body>. The field is
+  // described by the refusal (and marked invalid when the password was wrong), so a screen reader
+  // coming back to it hears why, not just its label.
   const passwordField = useRef<HTMLInputElement>(null);
   const retype = () => {
     passwordField.current?.focus();
@@ -94,9 +96,15 @@ export function DeleteAccount({ onDelete }: Props) {
           autoComplete="current-password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
+          aria-invalid={failure === "INVALID_CREDENTIALS" || undefined}
+          aria-describedby={failure ? "delete-password-error" : undefined}
         />
       </div>
-      {failure && <p className="hint bad" role="alert">{copy.t(failureKey(failure))}</p>}
+      {failure && (
+        <p id="delete-password-error" className="hint bad" role="alert">
+          {copy.t(failureKey(failure))}
+        </p>
+      )}
       <div className="delete-actions">
         <button
           type="button"

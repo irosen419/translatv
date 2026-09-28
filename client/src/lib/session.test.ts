@@ -48,6 +48,7 @@ function fakeServer(clock: { now: number }) {
   const live = new Set<string>();
   const calls: Array<{ path: string; body: Record<string, unknown>; authorization?: string }> = [];
   let offline = false;
+  let gone = false;
 
   function session(): AuthSession {
     serial += 1;
@@ -85,7 +86,7 @@ function fakeServer(clock: { now: number }) {
         live.delete(String(body["refreshToken"]));
         return new Response(null, { status: 204 });
       case "/api/account":
-        if (authorization !== `Bearer access-${serial}`) return json(401, { error: "UNAUTHENTICATED" });
+        if (gone || authorization !== `Bearer access-${serial}`) return json(401, { error: "UNAUTHENTICATED" });
         if (body["password"] !== "right password") return json(401, { error: "INVALID_CREDENTIALS" });
         live.clear();
         return new Response(null, { status: 204 });
@@ -102,6 +103,11 @@ function fakeServer(clock: { now: number }) {
     live,
     setOffline: (value: boolean) => {
       offline = value;
+    },
+    /** The account deleted from another device: its tokens stop working, access and refresh. */
+    deleteElsewhere: () => {
+      gone = true;
+      live.clear();
     },
   };
 }
@@ -382,6 +388,19 @@ describe("deleting the account", () => {
     // One request: a retry would spend a second lockout strike on the same typo.
     expect(server.calls.slice(before).filter((c) => c.path === "/api/account")).toHaveLength(1);
     expect(manager.state().status).toBe("signedIn");
+  });
+
+  it("signs out, rather than staying signed in, when the account is already gone", async () => {
+    // Deleted from another device: the bearer is refused (UNAUTHENTICATED, not a wrong password),
+    // and so is the refresh token. The tab used to keep its session for up to fifteen minutes.
+    const { manager, server } = setup();
+    await manager.signIn("ana@example.test", "right password");
+    server.deleteElsewhere();
+    const before = server.calls.length;
+    expect(await manager.deleteAccount("right password")).toEqual({ ok: false, error: "UNAUTHENTICATED" });
+    expect(manager.state()).toEqual({ status: "signedOut", user: null });
+    // Settled by one refresh, never by a second deletion attempt.
+    expect(server.calls.slice(before).map((call) => call.path)).toEqual(["/api/account", "/api/auth/refresh"]);
   });
 
   it("reports NETWORK when the server cannot be reached, and stays signed in", async () => {
