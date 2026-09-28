@@ -121,7 +121,7 @@ export function Landing({
           {invite && "code" in invite && (
             <div className="invite-result">
               <p className="hint">{copy.t("account.invite.lead")}</p>
-              <code className="invite-code">{invite.code}</code>
+              <code className="owner-invite-code">{invite.code}</code>
             </div>
           )}
           {invite && "failed" in invite && <p className="hint bad">{copy.t("account.invite.failed")}</p>}

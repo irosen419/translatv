@@ -144,7 +144,9 @@ label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px
 }
 .account-state { color: var(--muted); overflow-wrap: anywhere; min-width: 0; }
 .invite-result { width: 100%; }
-.invite-code {
+/* Not .invite-code: that is the room code on the waiting screen (below), and sharing the class
+   gave the owner's code its 26 to 38px type and the room code this border and padding. */
+.owner-invite-code {
   display: inline-block;
   margin-top: 6px;
   padding: 6px 10px;
