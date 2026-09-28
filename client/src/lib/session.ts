@@ -26,6 +26,16 @@ export const REFRESH_KEY = "translatv.refresh";
 /** Refresh this long before the access token expires, so a request never races the expiry. */
 export const REFRESH_MARGIN_MS = 60_000;
 
+/**
+ * The soonest a scheduled refresh may run. Expiries come from the SERVER's clock and "now" from
+ * this browser's, so on a device running fourteen minutes or more fast every expiry is already
+ * past: floored at 0, each refresh scheduled the next one immediately, and the page rotated
+ * tokens in a loop until the server's per address limit refused it. A minute apart instead, the
+ * token (fifteen minutes on the server's clock) stays valid, and a clock running slow is caught
+ * by the 401 and forced refresh that already handle an expired token.
+ */
+export const MIN_REFRESH_DELAY_MS = 60_000;
+
 /** The slice of Storage this needs. An interface so a test can hand it something that throws. */
 export interface TokenStore {
   getItem(key: string): string | null;
@@ -332,7 +342,7 @@ export class SessionManager {
   private schedule(expiresAt: number): void {
     this.cancelTimer();
     if (!this.deps.setTimer) return;
-    const delay = Math.max(0, expiresAt - REFRESH_MARGIN_MS - this.deps.now());
+    const delay = Math.max(MIN_REFRESH_DELAY_MS, expiresAt - REFRESH_MARGIN_MS - this.deps.now());
     this.timer = this.deps.setTimer(() => {
       this.timer = null;
       void this.refresh().catch(() => {

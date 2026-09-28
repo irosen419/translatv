@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { AuthSession } from "@translatv/shared";
-import { REFRESH_KEY, REFRESH_MARGIN_MS, SessionManager, SessionUnavailable, type TokenStore } from "./session.js";
+import {
+  MIN_REFRESH_DELAY_MS,
+  REFRESH_KEY,
+  REFRESH_MARGIN_MS,
+  SessionManager,
+  SessionUnavailable,
+  type SessionDeps,
+  type TokenStore,
+} from "./session.js";
 
 const T0 = 1_800_000_000_000;
 const ACCESS_MS = 15 * 60 * 1000;
@@ -222,6 +230,82 @@ describe("accessToken", () => {
     server.setOffline(true);
     await expect(manager.accessToken()).rejects.toBeInstanceOf(SessionUnavailable);
     expect(manager.state().status).toBe("signedIn");
+  });
+});
+
+describe("two tabs of one browser", () => {
+  /** What navigator.locks gives every tab of an origin: one queue per lock name. */
+  function sharedLock(): NonNullable<SessionDeps["lock"]> {
+    const tails = new Map<string, Promise<unknown>>();
+    return <T,>(name: string, fn: () => Promise<T>): Promise<T> => {
+      const run = (tails.get(name) ?? Promise.resolve()).then(fn, fn);
+      tails.set(name, run.catch(() => undefined));
+      return run;
+    };
+  }
+
+  it("never present the same refresh token twice when both refresh at once", async () => {
+    // Both tabs find one stored token on load. Presented twice, the second presentation is
+    // exactly what theft looks like to the server, which then revokes the family and signs both
+    // tabs out. The shared lock makes the second tab read the token the first one just stored.
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const storage = memoryStore();
+    const lock = sharedLock();
+    const tab = () => new SessionManager({ fetch: server.fetch, storage, now: () => clock.now, lock });
+    expect(await tab().signIn("ana@example.test", "right password")).toEqual({ ok: true });
+
+    const [first, second] = [tab(), tab()];
+    await Promise.all([first.restore(), second.restore()]);
+
+    const presented = server.calls.filter((c) => c.path === "/api/auth/refresh").map((c) => c.body["refreshToken"]);
+    expect(presented).toHaveLength(2);
+    expect(new Set(presented).size).toBe(2);
+    expect(first.state().status).toBe("signedIn");
+    expect(second.state().status).toBe("signedIn");
+  });
+});
+
+describe("the scheduled refresh", () => {
+  function scheduled(clockSkewMs: number) {
+    const clock = { now: T0 };
+    const server = fakeServer(clock);
+    const timers: Array<{ fn: () => void; ms: number }> = [];
+    const manager = new SessionManager({
+      fetch: server.fetch,
+      storage: memoryStore(),
+      // The server issues expiries on ITS clock; this browser reads its own.
+      now: () => clock.now + clockSkewMs,
+      setTimer: (fn, ms) => timers.push({ fn, ms }),
+      clearTimer: () => {},
+    });
+    return { server, timers, manager };
+  }
+
+  it("runs a minute before the access token expires", async () => {
+    const { server, timers, manager } = scheduled(0);
+    await manager.signIn("ana@example.test", "right password");
+    expect(timers.at(-1)?.ms).toBe(ACCESS_MS - REFRESH_MARGIN_MS);
+
+    timers.at(-1)?.fn();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(server.calls.filter((c) => c.path === "/api/auth/refresh")).toHaveLength(1);
+  });
+
+  it("never schedules itself at 0 ms when this browser's clock runs ahead of the server's", async () => {
+    // Twenty minutes fast: every expiry the server sends is already in this browser's past, so
+    // expiry minus now is negative on every refresh. Floored only at 0, each refresh scheduled
+    // the next one immediately, and a page load became a loop of rotations that stopped only
+    // when the server's per address limit ran out (29 in 12 seconds, measured).
+    const { server, timers, manager } = scheduled(20 * 60 * 1000);
+    await manager.signIn("ana@example.test", "right password");
+    for (let i = 0; i < 3; i += 1) {
+      timers.at(-1)?.fn();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(timers.length).toBeGreaterThan(1);
+    expect(timers.every((timer) => timer.ms >= MIN_REFRESH_DELAY_MS)).toBe(true);
+    expect(server.calls.filter((c) => c.path === "/api/auth/refresh")).toHaveLength(3);
   });
 });
 
