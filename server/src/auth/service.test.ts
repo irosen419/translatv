@@ -18,7 +18,15 @@ import { findLockout, pruneLockouts, saveLockout } from "../store/loginLockouts.
 import { deleteUser, insertUser, newUserId } from "../store/users.js";
 import { ACCESS_TTL_MS } from "./accessTokens.js";
 import { hashPassword } from "./passwords.js";
-import { AuthService, FAILURE_WINDOW_MS, LOCK_MS, MAX_FAILURES, REFRESH_TTL_MS, type AuthOptions } from "./service.js";
+import {
+  AuthService,
+  ERASE_ATTEMPTS,
+  FAILURE_WINDOW_MS,
+  LOCK_MS,
+  MAX_FAILURES,
+  REFRESH_TTL_MS,
+  type AuthOptions,
+} from "./service.js";
 
 const NOW = 1_800_000_000_000;
 // Generated, never literal. See passwords.test.ts.
@@ -766,6 +774,134 @@ describe("deleteAccount", () => {
       reader.close();
       onDisk.close();
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A file store, a second connection to it (a backup, an operator's shell), and accounts whose
+   * email and name carry a marker, for the erase tests below. `readable` lists the markers either
+   * file still holds.
+   */
+  async function eraseRig(accounts: number) {
+    const dir = mkdtempSync(join(tmpdir(), "tv-erase-"));
+    const path = join(dir, "translatv.db");
+    const onDisk = openStore({ path });
+    const reader = new DatabaseSync(path);
+    const later: Array<{ run: () => void; ms: number }> = [];
+    let erases = 0;
+    const counted: Store = {
+      ...onDisk,
+      erase: () => {
+        erases += 1;
+        return onDisk.erase();
+      },
+    };
+    const auth = new AuthService(counted, {
+      secret: SECRET,
+      signupMode: "open",
+      ownerEmail: null,
+      schedule: (run, ms) => later.push({ run, ms }),
+    });
+    const made: Array<{ id: string; marker: string }> = [];
+    for (let i = 0; i < accounts; i += 1) {
+      const marker = randomBytes(8).toString("hex");
+      const signup = await auth.signup(
+        { email: `erase-${marker}@example.test`, password: PASSWORD, displayName: `Name ${marker}` },
+        NOW,
+      );
+      if (!signup.ok) throw new Error(`signup failed: ${signup.error}`);
+      made.push({ id: signup.value.user.id, marker });
+    }
+    return {
+      auth,
+      reader,
+      later,
+      made,
+      erases: () => erases,
+      remove: (id: string) => auth.deleteAccount(id, { password: PASSWORD, userId: id }, NOW + 1),
+      readable: () =>
+        made
+          .map((account) => account.marker)
+          .filter((marker) => [path, `${path}-wal`].some((file) => existsSync(file) && readFileSync(file).includes(marker))),
+      close: () => {
+        reader.close();
+        onDisk.close();
+        rmSync(dir, { recursive: true, force: true });
+      },
+    };
+  }
+
+  it("keeps one retry for every deletion made while the database is busy, not one each", async () => {
+    // Each deletion used to start retries of its own, each rewriting the whole file every minute:
+    // five deletions beside one reader made five chains and 295 attempts (measured in review).
+    // One rewrite erases every deleted row, so one retry covers them all.
+    const rig = await eraseRig(3);
+    try {
+      rig.reader.exec("BEGIN");
+      rig.reader.prepare("SELECT count(*) AS n FROM users").get();
+      for (const account of rig.made) expect((await rig.remove(account.id)).ok).toBe(true);
+      expect(rig.later).toHaveLength(1);
+
+      rig.reader.exec("COMMIT");
+      rig.later.shift()?.run();
+      expect(rig.later).toHaveLength(0);
+      expect(rig.readable()).toEqual([]);
+    } finally {
+      rig.close();
+    }
+  });
+
+  it("does not rewrite the file again for a retry left over once a later deletion has erased everything", async () => {
+    // Each rewrite holds the server for a time that grows with the file (about 0.7 s at 100 MB).
+    const rig = await eraseRig(2);
+    try {
+      rig.reader.exec("BEGIN");
+      rig.reader.prepare("SELECT count(*) AS n FROM users").get();
+      expect((await rig.remove(rig.made[0]!.id)).ok).toBe(true);
+      expect(rig.later).toHaveLength(1);
+      rig.reader.exec("COMMIT");
+      expect((await rig.remove(rig.made[1]!.id)).ok).toBe(true);
+      expect(rig.readable()).toEqual([]);
+
+      const before = rig.erases();
+      rig.later.shift()?.run();
+      expect(rig.erases()).toBe(before);
+    } finally {
+      rig.close();
+    }
+  });
+
+  it("retries at least ten seconds apart, for at least half an hour after the latest deletion, then stops", async () => {
+    // Both bounds were untested: with the cap removed the retries never ended, and with no delay
+    // the real timer would have run them back to back (both green in review). The half hour
+    // counts from the LATEST deletion, so a deletion late in a busy spell still gets its retries.
+    const rig = await eraseRig(3);
+    try {
+      rig.reader.exec("BEGIN");
+      rig.reader.prepare("SELECT count(*) AS n FROM users").get();
+      expect((await rig.remove(rig.made[0]!.id)).ok).toBe(true);
+      for (let i = 0; i < 10; i += 1) rig.later.shift()?.run();
+      expect((await rig.remove(rig.made[1]!.id)).ok).toBe(true);
+
+      let runs = 0;
+      let waited = 0;
+      while (rig.later.length > 0 && runs < 1000) {
+        const next = rig.later.shift()!;
+        expect(next.ms).toBeGreaterThanOrEqual(10_000);
+        waited += next.ms;
+        next.run();
+        runs += 1;
+      }
+      expect(rig.later).toHaveLength(0);
+      expect(runs).toBe(ERASE_ATTEMPTS - 1);
+      expect(waited).toBeGreaterThanOrEqual(30 * 60 * 1000);
+
+      // Given up, the rows wait for the next deletion, whose rewrite takes theirs too.
+      rig.reader.exec("COMMIT");
+      expect((await rig.remove(rig.made[2]!.id)).ok).toBe(true);
+      expect(rig.readable()).toEqual([]);
+    } finally {
+      rig.close();
     }
   });
 

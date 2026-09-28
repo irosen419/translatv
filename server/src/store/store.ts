@@ -46,10 +46,16 @@ export interface Store {
    * page's unused space (review found deleted account ids there), which only a rewrite clears,
    * and the WAL keeps older copies of every page it wrote until it is emptied.
    *
-   * Never waits. This connection is synchronous, so waiting out busy_timeout while another
-   * connection holds the database (a backup, an operator's shell) would stall every call on the
-   * server for five seconds (measured). It returns false at once instead, having finished
-   * nothing, and the caller tries again later. Its time grows with the file: 8 ms for 1.2 MB.
+   * True when both are done. False while another connection keeps the WAL in use (a reader, a
+   * backup, an operator's shell) or holds the write lock, and the caller tries again later. The
+   * WAL is emptied FIRST and the rewrite runs only once that works, because a rewrite beside a
+   * reader lands in a WAL nobody can empty: a full copy of the file per attempt (measured in
+   * review). Only a reader that starts between the two can still cost one such copy.
+   *
+   * Never waits for a lock. This connection is synchronous, so waiting out busy_timeout would
+   * stall every call on the server for five seconds (measured). The rewrite itself does hold it,
+   * for a time that grows with the file: 8 ms at 1.2 MB, about 0.7 s at 100 MB and 2.5 s at
+   * 400 MB (measured in review), with about twice the file in spare disk while it runs.
    */
   erase(): boolean;
   close(): void;
@@ -185,7 +191,13 @@ export function openStore(options: StoreOptions): Store {
       erase: () => {
         const wait = Number(db.prepare("PRAGMA busy_timeout").get()?.["timeout"] ?? 0);
         db.exec("PRAGMA busy_timeout = 0");
+        // Emptied only when busy is 0. Not log == checkpointed: a reader that took the newest
+        // snapshot lets every frame be copied back while it keeps the WAL in use, so those are
+        // equal and the WAL is not emptied (18% of attempts beside a busy reader, measured in
+        // review).
+        const emptyWal = () => Number(db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get()?.["busy"] ?? 0) === 0;
         try {
+          if (!emptyWal()) return false;
           try {
             db.exec("VACUUM");
           } catch (error) {
@@ -193,9 +205,7 @@ export function openStore(options: StoreOptions): Store {
             if (isBusy(error)) return false;
             throw error;
           }
-          // busy, not log == checkpointed: a reader on the newest snapshot leaves those equal
-          // while the WAL still holds everything (measured in review).
-          return Number(db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get()?.["busy"] ?? 0) === 0;
+          return emptyWal();
         } finally {
           db.exec(`PRAGMA busy_timeout = ${wait}`);
         }

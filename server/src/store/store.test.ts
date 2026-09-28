@@ -4,7 +4,7 @@
 // reopening an existing database), which use a throwaway directory. Nothing touches data/.
 
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -67,7 +67,9 @@ describe("openStore", () => {
   it("erases without waiting: false at once while another connection reads, true after", () => {
     // The server's one connection is synchronous, so an erase that waited out busy_timeout would
     // stall every call on the server for five seconds (measured in review). A reader holding a
-    // snapshot keeps the WAL from being emptied, and the erase has to say so at once.
+    // snapshot keeps the WAL from being emptied, and the erase has to say so at once. Under half a
+    // second, not merely under the five: a wait lowered to two seconds instead of none passed a
+    // looser bound and froze the server for two (measured in review), while no wait takes a few ms.
     const path = join(tempDir(), "t.db");
     const store = open({ path });
     store.db.exec("CREATE TABLE scratch (v TEXT); INSERT INTO scratch VALUES ('a')");
@@ -77,11 +79,40 @@ describe("openStore", () => {
       reader.prepare("SELECT count(*) AS n FROM scratch").get();
       const started = performance.now();
       expect(store.erase()).toBe(false);
-      expect(performance.now() - started).toBeLessThan(2500);
+      expect(performance.now() - started).toBeLessThan(500);
       reader.exec("COMMIT");
       expect(store.erase()).toBe(true);
       // The wait is lowered only for the erase, and put back.
       expect(Number(store.db.prepare("PRAGMA busy_timeout").get()?.["timeout"])).toBeGreaterThanOrEqual(5000);
+    } finally {
+      reader.close();
+    }
+  });
+
+  it("rewrites nothing while a reader keeps the WAL in use, and leaves the WAL empty whenever it answers true", () => {
+    // A rewrite beside a reader lands in a WAL nobody can empty: each attempt appended a full copy
+    // of the database to it (4 MB per attempt on a 4 MB file, measured in review), once a minute
+    // for an hour per deletion. The reader here took the NEWEST snapshot, the case where every
+    // frame can be copied back while the WAL stays in use, so "the WAL was not emptied" is told by
+    // busy alone: log equal to checkpointed said done 18% of the time beside a busy reader
+    // (measured in review). And true means both halves ran in order: a rewrite after the last
+    // checkpoint leaves its copy of every page in the WAL.
+    const path = join(tempDir(), "t.db");
+    const store = open({ path });
+    store.db.exec("CREATE TABLE scratch (v TEXT)");
+    const insert = store.db.prepare("INSERT INTO scratch VALUES (?)");
+    for (let i = 0; i < 200; i += 1) insert.run("x".repeat(2000));
+    const wal = () => statSync(`${path}-wal`).size;
+    const reader = new DatabaseSync(path);
+    try {
+      reader.exec("BEGIN");
+      reader.prepare("SELECT count(*) AS n FROM scratch").get();
+      const before = wal();
+      for (let attempt = 0; attempt < 3; attempt += 1) expect(store.erase()).toBe(false);
+      expect(wal()).toBeLessThanOrEqual(before);
+      reader.exec("COMMIT");
+      expect(store.erase()).toBe(true);
+      expect(wal()).toBe(0);
     } finally {
       reader.close();
     }

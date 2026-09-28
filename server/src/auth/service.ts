@@ -70,7 +70,10 @@ export const LOCK_MS = 15 * 60 * 1000;
 
 /** Failures older than this stop counting, so ten typos spread over a month do not lock anyone. */
 export const FAILURE_WINDOW_MS = 15 * 60 * 1000;
-/** How often, and how many times, a deleted account's erase is retried while the database is busy. */
+/**
+ * How often, and how many times, the erase after a deletion is tried while the database is busy:
+ * a minute apart, for an hour after the latest deletion.
+ */
 export const ERASE_RETRY_MS = 60 * 1000;
 export const ERASE_ATTEMPTS = 60;
 
@@ -152,6 +155,11 @@ export class AuthService {
   /** Told the id of each deleted account, after the delete commits (the socket layer listens). */
   private readonly deletedListeners = new Set<(userId: string) => void>();
   private readonly schedule: (run: () => void, ms: number) => void;
+  /**
+   * The erase still owed: deletions whose rows the files may still hold, attempts since the
+   * latest of them, and whether a retry is already scheduled.
+   */
+  private readonly erasing = { accounts: 0, attempt: 0, retrying: false };
 
   constructor(
     private readonly store: Store,
@@ -392,33 +400,51 @@ export class AuthService {
     }
     // Last, after everything the deletion itself has to do: rewriting the files is housekeeping,
     // and a failure in it must never skip closing the account's sockets above.
-    this.eraseDeleted(userId, 1);
+    this.erasing.accounts += 1;
+    this.erasing.attempt = 0;
+    this.eraseDeleted();
     return { ok: true, value: null };
   }
 
   /**
-   * Rewrite the database files without a deleted account's rows (Store.erase). Never waits and
-   * never throws: while another connection holds the database it tries again a minute later, up
-   * to an hour, and any other failure is logged, because the account is already deleted.
+   * Rewrite the database files without the deleted rows (Store.erase). Never waits and never
+   * throws, because the account is already deleted.
+   *
+   * While another connection keeps the database busy it tries again a minute later, for an hour
+   * after the LATEST deletion. One retry at a time covers every deletion so far, since one
+   * rewrite erases every deleted row: each deletion used to keep retries of its own (five
+   * deletions beside one reader made five chains, measured in review). Given up, or failed for
+   * another reason, the rows wait for the next deletion, whose rewrite takes theirs too. The
+   * retries live in this process, so a restart forgets them the same way.
    */
-  private eraseDeleted(userId: string, attempt: number): void {
+  private eraseDeleted(): void {
+    const erasing = this.erasing;
+    if (erasing.accounts === 0) return;
+    erasing.attempt += 1;
+    const { accounts, attempt } = erasing;
     let done: boolean;
     try {
       done = this.store.erase();
     } catch (error) {
-      log.error("account.erase_failed", { user: userId, attempt, error: error instanceof Error ? error.message : "unknown" });
+      log.error("account.erase_failed", { accounts, attempt, error: error instanceof Error ? error.message : "unknown" });
       return;
     }
     if (done) {
-      if (attempt > 1) log.info("account.erased", { user: userId, attempt });
+      erasing.accounts = 0;
+      if (attempt > 1) log.info("account.erased", { accounts, attempt });
       return;
     }
     if (attempt >= ERASE_ATTEMPTS) {
-      log.warn("account.erase_gave_up", { user: userId, attempts: attempt });
+      log.warn("account.erase_gave_up", { accounts, attempts: attempt });
       return;
     }
-    log.warn("account.erase_busy", { user: userId, attempt });
-    this.schedule(() => this.eraseDeleted(userId, attempt + 1), ERASE_RETRY_MS);
+    log.warn("account.erase_busy", { accounts, attempt });
+    if (erasing.retrying) return;
+    erasing.retrying = true;
+    this.schedule(() => {
+      erasing.retrying = false;
+      this.eraseDeleted();
+    }, ERASE_RETRY_MS);
   }
 
   /** Hear about every deleted account. Returns the unsubscribe. */
