@@ -1,6 +1,7 @@
 # Translatv: brainstorm handoff
 
-A snapshot taken 2026-09-28, evening UTC. It holds everything needed to brainstorm Translatv's
+A snapshot taken 2026-09-28, evening UTC, and updated 2026-09-29 as #3 finished review. It holds
+everything needed to brainstorm Translatv's
 money model and next steps. It is written so that a fresh Claude, for example in Claude Voice,
 can pick the project up cold. Nothing in it is secret: this repository is public.
 
@@ -8,7 +9,8 @@ can pick the project up cold. Nothing in it is secret: this repository is public
 
 You are helping the owner of Translatv make decisions, by voice. How to use this file:
 
-- **Treat the facts here as the project's state on 2026-09-28.** Prices were read that day.
+- **Treat the facts here as the project's state on 2026-09-28,** with #3 and the next two pull
+  requests updated on 2026-09-29. Prices were read on 2026-09-28.
   - A figure marked as an estimate rests on the assumptions stated beside it.
   - Do not invent prices, benchmarks or quality claims. If a number is not in this file, say
     that it is not known.
@@ -90,13 +92,14 @@ A suggested order for a first session:
     below come from real calls in the project Translatv was copied from.
   - Echo and speech recognition have not been tested on real phones.
 
-## 3. Where the work stands (2026-09-28)
+## 3. Where the work stands (2026-09-29)
 
 | Item | State |
 | --- | --- |
 | [#1](https://github.com/irosen419/translatv/pull/1): accounts, SQLite storage, per user data, and the protocol export the iOS app builds on | **Merged into main on 2026-09-28**, after ten rounds of adversarial review |
 | [#2](https://github.com/irosen419/translatv/pull/2): per user spend charged to the room's host, with a $1 default daily cap | **Paused by the owner** for the money model. It gets reshaped after the brainstorm |
-| [#3](https://github.com/irosen419/translatv/pull/3): log what a timed out translation cost, and never bill a user for it | **Built, and in review.** An adversarial review loop is running, up to five rounds. It is held for the owner because it touches spend |
+| [#3](https://github.com/irosen419/translatv/pull/3): log what a timed out translation cost, and never bill a user for it | **Reviewed, and waiting for the owner.** Five rounds of adversarial review: rounds 1 and 2 blocked it, and rounds 3 to 5 approved with nothing blocking. It is held for the owner because it touches spend |
+| The iOS contract, and corrections | **Briefed, not started.** [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md) is the working brief for each: what exists, what to build, the decisions they need, and a prompt to start a fresh session |
 | The iOS app | **Not started.** Planned as a native SwiftUI app for iOS 26. The first version runs only in the foreground, with no CallKit and no push |
 | Deploying with accounts | **Not done.** It needs `AUTH_SECRET`, `OWNER_EMAIL`, `SIGNUP_MODE` and a volume for the database |
 
@@ -153,6 +156,8 @@ In the owner's words where there are some.
 - **The iOS contract comes next** (2026-09-28). It is a new branch and pull request after #1. It
   exports schemas and fixtures for the account API, so the iOS app can be built against them.
 - **No brainstorm reminder** (2026-09-28). The owner is brainstorming from this file instead.
+- **The next two pull requests are handed off** (2026-09-29). The iOS contract and corrections
+  each have a working brief in [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md), for a fresh session.
 
 **From the plan of record (2026-09-27)**
 
@@ -385,7 +390,15 @@ made**, and a short job screens them after each call.
 
 **Today.** A correction lasts for the rest of its call. Carrying it to the next call means
 downloading the transcript, then loading it with "Load corrections from a past chat". Accounts
-can already store a list of corrections (#1 added that), but the web app never saves to it.
+can already store a glossary (#1 added that), which is where saved corrections would go, but the
+web app never saves to it. There is no separate corrections store.
+
+**Found while writing the corrections brief (2026-09-29).** A correction is not stored as a
+term. It becomes a room glossary entry whose source is the whole corrected line, up to 2000
+characters, and often the other person's words. Saving that to an account would store transcript
+text, which the rules forbid, and it would not fit the stored glossary's 200 character term
+anyway. So saving corrections needs one decision first (question 22). The recommendation is
+that corrections become term level: a phrase and its fix, prefilled from the line.
 
 | How a correction could do harm | What stops it |
 | --- | --- |
@@ -456,7 +469,20 @@ can already store a list of corrections (#1 added that), but the web app never s
 20. **The web keeps its refresh token in localStorage.** An httpOnly cookie is the stronger
     option.
 21. **The account API has no version.** It changed without one, and the iOS contract follow up
-    should add one.
+    should add one. Recommended: a version number on `/healthz` beside the socket's, bumped by the
+    same rule, rather than a `/api/v1` path (decision A1 in
+    [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md)).
+
+**From the next pull requests' brief, and #3's review (2026-09-29)**
+
+22. **What is a saved correction?** Today it is the whole corrected line (section 8). Term level
+    corrections (recommended), only lines short enough to fit, or a change to the rule against
+    storing transcript text? The corrections brief lists five more calls that follow from it,
+    each with a recommendation (decisions C2 to C6).
+23. **A late translation's slot.** #3 keeps a timed out call's concurrency slot until it
+    settles, which bounds the unknown spend a hung provider can run up. The price is throughput:
+    in review's simulation, with 1 call in 7 hanging, 90 of 600 calls were turned away. Keep it,
+    or give late calls a bound of their own?
 
 ## 10. The cost calculator (not built yet)
 
@@ -487,16 +513,22 @@ this file, and it is about an hour of work. It has not been built; the owner can
 ## 11. Follow up work
 
 - [x] Merge #1 (done 2026-09-28).
-- [ ] **#3, the timeout fix.** Its review loop is running, and it stays held for the owner
-      because it touches spend.
+- [ ] **#3, the timeout fix.** Reviewed over five rounds; rounds 3 to 5 approved with nothing
+      blocking. It waits for the owner, because it touches spend.
   - A timed out request finishes in the background and logs its real cost.
   - A reply that never arrives is logged as "cost unknown", and counted against the caps at its
     worst case.
   - Either way, the row is marked not billed.
 - [ ] **The iOS contract.** `schema.json` gains dialect codes and length limits. The account API
-      gains exported schemas, fixtures and a version.
+      gains exported schemas, fixtures and a version. The brief is part A of
+      [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md).
 - [ ] **Corrections.** Save them to the account and screen them after each call. Remove
-      transcript downloads and "Load corrections from a past chat".
+      transcript downloads and "Load corrections from a past chat". The brief is part B of
+      [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md); question 22 comes first.
+- [ ] **Fix `npm run verify`'s "Reason: undefined"** when its first call fails. It is one line
+      (`smoke.reason`), found in #3's review.
+- [ ] **Put the `/review-loop` skill on main.** It lives only on the branch
+      `claude/relaxed-ritchie-b0xf65`, so a session started from main cannot run it.
 - [ ] **Pick a translation model before Haiku 4.5 can retire** (not before October 15, 2026). The
       blind test in section 6 decides it, and needs the owner's go ahead.
 - [ ] **Measure finished sentences per call-minute on real calls.** It narrows every cost range
@@ -619,6 +651,8 @@ Second hand:
   This file carries all of it, as of 2026-09-28.
 - **In this repository:**
   - [`docs/PLAN.md`](PLAN.md): the plan of record for the server and the iOS app.
+  - [`docs/HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md): the working brief for the iOS contract and
+    corrections pull requests.
   - `README.md`: what runs today, and how to run it.
   - `DEPLOY.md`: deploying with accounts.
   - `CLAUDE.md`: the rules every change follows.
