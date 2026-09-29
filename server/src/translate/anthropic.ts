@@ -90,13 +90,22 @@ subscribe("undici:client:connectError", (message) => {
 });
 
 /**
- * Whether undici failed this fetch before writing any of its request: its cause is an error a
- * connection failed with. An error undici never reported as one, such as fetch refusing a URL
- * before undici saw it, counts as written: nobody can say it was not sent.
+ * Whether undici failed this fetch before writing any of its request: an error a connection failed
+ * with is somewhere in its causes. Usually it is fetch's own cause, but fetch can wrap it once
+ * more: a proxy that refuses the tunnel fails the connection with an AbortError, which fetch
+ * reports as a cancelled request whose cause it is (measured). Read one level deep, that was
+ * counted as sent, at round 1's lockout rate (found in review). Walking further is safe because
+ * a connect error only ever fails requests none of which was written, and the depth is bounded so
+ * a cause that loops ends the walk. An error undici never reported as a connection's, such as
+ * fetch refusing a URL before undici saw it, counts as written: nobody can say it was not sent.
  */
 function neverWritten(error: unknown): boolean {
-  const cause = isObject(error) ? (error as { cause?: unknown }).cause : undefined;
-  return isObject(cause) && connectErrors.has(cause);
+  let link: unknown = error;
+  for (let depth = 0; depth < 4 && isObject(link); depth += 1) {
+    if (connectErrors.has(link)) return true;
+    link = (link as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 /**

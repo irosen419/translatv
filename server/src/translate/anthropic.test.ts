@@ -220,6 +220,45 @@ describe("the Anthropic adapter", () => {
     expect(lost()).toBe(0);
   });
 
+  it("reports nothing for a request never sent when fetch wraps the connection's error once more", async () => {
+    // A proxy that refuses the tunnel fails the connection with an AbortError, and fetch reports it
+    // as a cancelled request whose cause it is: the error undici published sits two causes down
+    // (measured with NODE_USE_ENV_PROXY and a proxy answering 407). Read one level deep, each
+    // attempt was counted as sent, at round 1's lockout rate (found in review).
+    const refused = Object.assign(new Error("Proxy response (407) !== 200 when HTTP Tunneling"), {
+      name: "AbortError",
+      code: "UND_ERR_ABORTED",
+    });
+    const cancelled: Answer = () => {
+      channel("undici:client:connectError").publish({ connectParams: {}, connector: null, error: refused });
+      const cancellation = Object.assign(new DOMException("Request was cancelled."), { cause: refused });
+      return Promise.reject(new TypeError("fetch failed", { cause: cancellation }));
+    };
+    const { fetch, requests } = fakeFetch([cancelled, cancelled]);
+    const { result, lost } = complete(fetch);
+    await expect(result).rejects.toMatchObject({ reason: "connection" });
+    expect(requests).toHaveLength(2);
+    expect(lost()).toBe(0);
+  });
+
+  it("reads at most four causes deep, which is what ends a cause that loops", async () => {
+    // Without the bound, a failure whose cause is itself would spin the server forever. It is
+    // pinned from the other side, so that losing it fails here rather than hanging the suite: a
+    // connect error four causes down, one past the walk, is not trusted, and the request counts
+    // as sent.
+    const tooDeep: Answer = () => {
+      const published = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+      channel("undici:client:connectError").publish({ connectParams: {}, connector: null, error: published });
+      const third = new Error("third", { cause: published });
+      const second = new Error("second", { cause: third });
+      return Promise.reject(new TypeError("fetch failed", { cause: new Error("first", { cause: second }) }));
+    };
+    const { fetch } = fakeFetch([tooDeep, tooDeep]);
+    const { result, lost } = complete(fetch);
+    await expect(result).rejects.toMatchObject({ reason: "connection" });
+    expect(lost()).toBe(2);
+  });
+
   it("reports a request as lost when undici says only that the request failed, not the connection", async () => {
     // What a request sent over HTTP/2 and then lost looks like: undici publishes that its headers
     // were written only over HTTP/1, so the absence of that note is no evidence. Read as never
