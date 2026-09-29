@@ -241,7 +241,23 @@ describe("the Anthropic adapter", () => {
     expect(lost()).toBe(0);
   });
 
-  it("reads at most four causes deep, which is what ends a cause that loops", async () => {
+  it("reports a cancelled request as lost when no connection error was published beneath it", async () => {
+    // The wrapper alone is no evidence. fetch wraps any AbortError the same way, and undici also
+    // gives that name to failures of requests it has written. Only an error published as a
+    // connection's proves nothing was sent. A shortcut on the wrapper passed every test before
+    // this one (found in review).
+    const aborted = Object.assign(new Error("Request aborted"), { name: "AbortError", code: "UND_ERR_ABORTED" });
+    const cancelled: Answer = () => {
+      const cancellation = Object.assign(new DOMException("Request was cancelled."), { cause: aborted });
+      return Promise.reject(new TypeError("fetch failed", { cause: cancellation }));
+    };
+    const { fetch } = fakeFetch([cancelled, cancelled]);
+    const { result, lost } = complete(fetch);
+    await expect(result).rejects.toMatchObject({ reason: "connection" });
+    expect(lost()).toBe(2);
+  });
+
+  it("reads at most four causes deep, so a connect error beyond that is not trusted", async () => {
     // Without the bound, a failure whose cause is itself would spin the server forever. It is
     // pinned from the other side, so that losing it fails here rather than hanging the suite: a
     // connect error four causes down, one past the walk, is not trusted, and the request counts
