@@ -27,10 +27,9 @@ will drift; the names will not.
 - **Gates.** Run `npm run check` (dashes, copy, wire, spend view, typecheck, the TypeScript and
   Python suites), then `npm run build`, `npm run check:secrets`, `npm run e2e`, and the CI
   `docker` job. CI runs `check`, `e2e` and `docker`.
-- **Review.** The `/review-loop` skill runs an adversarial review, and it was worth it on #1 and
-  #3. It is not on `main` yet: it lives on the branch `claude/relaxed-ritchie-b0xf65`
-  (`.claude/skills/review-loop/SKILL.md`, commit e6ea4c4). Copy it in, or ask the owner to merge
-  it first.
+- **Review.** The `/review-loop` skill (`.claude/skills/review-loop/SKILL.md`) runs an
+  adversarial review, and it was worth it on #1 and #3. It has been on `main` since 2026-09-30,
+  so a session started from `main` can run it.
 - **Merging.** The owner merges both. Neither spends money as scoped here. If the corrections
   screen ever calls a model, that pull request spends, and CLAUDE.md's spend gate holds it.
 - **Order.** The two are independent and can run in parallel. The one thing both touch is the

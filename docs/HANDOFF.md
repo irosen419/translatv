@@ -1,16 +1,16 @@
 # Translatv: brainstorm handoff
 
-A snapshot taken 2026-09-28, evening UTC, and updated 2026-09-29 as #3 finished review. It holds
-everything needed to brainstorm Translatv's
-money model and next steps. It is written so that a fresh Claude, for example in Claude Voice,
-can pick the project up cold. Nothing in it is secret: this repository is public.
+A snapshot taken 2026-09-28, evening UTC, updated 2026-09-29 as #3 finished review, and updated
+2026-09-30 when #3 merged. It holds everything needed to brainstorm Translatv's money model and
+next steps. It is written so that a fresh Claude, for example in Claude Voice, can pick the
+project up cold. Nothing in it is secret: this repository is public.
 
 ## Read this first (for the assistant)
 
 You are helping the owner of Translatv make decisions, by voice. How to use this file:
 
 - **Treat the facts here as the project's state on 2026-09-28,** with #3 and the next two pull
-  requests updated on 2026-09-29. Prices were read on 2026-09-28.
+  requests updated on 2026-09-29, and #3's merge on 2026-09-30. Prices were read on 2026-09-28.
   - A figure marked as an estimate rests on the assumptions stated beside it.
   - Do not invent prices, benchmarks or quality claims. If a number is not in this file, say
     that it is not known.
@@ -92,13 +92,13 @@ A suggested order for a first session:
     below come from real calls in the project Translatv was copied from.
   - Echo and speech recognition have not been tested on real phones.
 
-## 3. Where the work stands (2026-09-29)
+## 3. Where the work stands (2026-09-30)
 
 | Item | State |
 | --- | --- |
 | [#1](https://github.com/irosen419/translatv/pull/1): accounts, SQLite storage, per user data, and the protocol export the iOS app builds on | **Merged into main on 2026-09-28**, after ten rounds of adversarial review |
 | [#2](https://github.com/irosen419/translatv/pull/2): per user spend charged to the room's host, with a $1 default daily cap | **Paused by the owner** for the money model. It gets reshaped after the brainstorm |
-| [#3](https://github.com/irosen419/translatv/pull/3): log what a timed out translation cost, and never bill a user for it | **Reviewed, and waiting for the owner.** Five rounds of adversarial review: rounds 1 and 2 blocked it, and rounds 3 to 5 approved with nothing blocking. It is held for the owner because it touches spend |
+| [#3](https://github.com/irosen419/translatv/pull/3): log what a timed out translation cost, and never bill a user for it | **Merged into main on 2026-09-30**, at the owner's go ahead, after five rounds of adversarial review: rounds 1 and 2 blocked it, and rounds 3 to 5 approved with nothing blocking |
 | The iOS contract, and corrections | **Briefed, not started.** [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md) is the working brief for each: what exists, what to build, the decisions they need, and a prompt to start a fresh session |
 | The iOS app | **Not started.** Planned as a native SwiftUI app for iOS 26. The first version runs only in the foreground, with no CallKit and no push |
 | Deploying with accounts | **Not done.** It needs `AUTH_SECRET`, `OWNER_EMAIL`, `SIGNUP_MODE` and a volume for the database |
@@ -122,7 +122,8 @@ In the owner's words where there are some.
   > I think it should be logged but as far as billing goes, I think we need to eat the cost
   > instead of charging the customer.
 
-  Anthropic bills a request the client gives up on, so these are real costs. #3 builds this.
+  Anthropic bills a request the client gives up on, so these are real costs. #3 built this,
+  and it is merged.
 - **In-app and device notifications, and a billing page, are needed** (2026-09-28). The owner's words:
 
   > we probably need in-app and device notifications and a full billing page with their
@@ -158,6 +159,9 @@ In the owner's words where there are some.
 - **No brainstorm reminder** (2026-09-28). The owner is brainstorming from this file instead.
 - **The next two pull requests are handed off** (2026-09-29). The iOS contract and corrections
   each have a working brief in [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md), for a fresh session.
+- **#3 is merged** (2026-09-30, at the owner's go ahead).
+- **The `/review-loop` skill goes on main** (2026-09-30). The owner's words: "Definitely put
+  the skill on main."
 
 **From the plan of record (2026-09-27)**
 
@@ -513,8 +517,7 @@ this file, and it is about an hour of work. It has not been built; the owner can
 ## 11. Follow up work
 
 - [x] Merge #1 (done 2026-09-28).
-- [ ] **#3, the timeout fix.** Reviewed over five rounds; rounds 3 to 5 approved with nothing
-      blocking. It waits for the owner, because it touches spend.
+- [x] **#3, the timeout fix** (merged 2026-09-30, at the owner's go ahead).
   - A timed out request finishes in the background and logs its real cost.
   - A reply that never arrives is logged as "cost unknown", and counted against the caps at its
     worst case.
@@ -527,8 +530,8 @@ this file, and it is about an hour of work. It has not been built; the owner can
       [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md); question 22 comes first.
 - [ ] **Fix `npm run verify`'s "Reason: undefined"** when its first call fails. It is one line
       (`smoke.reason`), found in #3's review.
-- [ ] **Put the `/review-loop` skill on main.** It lives only on the branch
-      `claude/relaxed-ritchie-b0xf65`, so a session started from main cannot run it.
+- [x] **Put the `/review-loop` skill on main** (done 2026-09-30). A session started from main
+      can run it.
 - [ ] **Pick a translation model before Haiku 4.5 can retire** (not before October 15, 2026). The
       blind test in section 6 decides it, and needs the owner's go ahead.
 - [ ] **Measure finished sentences per call-minute on real calls.** It narrows every cost range
