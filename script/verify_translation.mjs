@@ -46,6 +46,12 @@ const { LedgerNotFound, flushView, ledgerWritable, load, totals, viewIsStale } =
 
 let failures = 0;
 let checks = 0;
+/**
+ * Every TranslationService this run makes. A call still running when the script exits (one past
+ * its timeout, say) would cost something the ledger never hears of, so each exit logs them first
+ * (flushViewNow). Declared up here because the signal handlers can run before the services exist.
+ */
+const services = [];
 
 function check(label, ok, detail = "") {
   checks += 1;
@@ -71,6 +77,10 @@ function section(title) {
  * Safe to call more than once: flushView is a no op when nothing is stale.
  */
 function flushViewNow() {
+  for (const service of services) {
+    const abandoned = service.abandonInFlight();
+    if (abandoned > 0) console.error(`Logged ${abandoned} call(s) still running as unknown, at their worst case.`);
+  }
   if (flushView(root)) {
     console.log("\nRegenerated out/translatv/spend_log.md to match the ledger.");
     console.log("COMMIT BOTH: the ledger rows and the view are one change.");
@@ -182,6 +192,7 @@ const service = new TranslationService(
   gate,
   root,
 );
+services.push(service);
 
 // Per RUN, not a constant.
 //
@@ -411,6 +422,7 @@ try {
     tightGate,
     root,
   );
+  services.push(capped);
   const refused = await capped.translate({
     lineId: "CAP",
     text: "this must not be translated",

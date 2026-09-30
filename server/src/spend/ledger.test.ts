@@ -62,6 +62,35 @@ function fixture(): SpendRecord[] {
 }
 
 describe("load", () => {
+  it("writes a worst case, and billable false, only on the rows that need them", () => {
+    // Ordinary rows stay exactly as they were, for both readers and the dashboard.
+    const plain = entry({ program: "p", kind: "translation", model: "claude-haiku-4-5", inputTokens: 10, outputTokens: 5 });
+    expect("worst_case_usd" in plain).toBe(false);
+    expect("billable" in plain).toBe(false);
+    const unknown = entry({
+      program: "p",
+      kind: "translation",
+      model: "claude-haiku-4-5",
+      worstCaseUsd: 0.0123456789,
+      billable: false,
+    });
+    expect(unknown).toMatchObject({ cost_usd: null, cost_source: "unparsed", worst_case_usd: 0.012346, billable: false });
+  });
+
+  it("refuses a worst case beside a known cost, or one below zero", () => {
+    const base = { program: "p", kind: "translation" as const, model: "claude-haiku-4-5" };
+    expect(() => entry({ ...base, inputTokens: 10, outputTokens: 5, worstCaseUsd: 1 })).toThrow(RangeError);
+    expect(() => entry({ ...base, worstCaseUsd: -0.01 })).toThrow(RangeError);
+  });
+
+  it("refuses a worst case that is not a finite amount", () => {
+    // Infinity would lock every cap for good, and NaN would compare as neither over nor under.
+    const base = { program: "p", kind: "translation" as const, model: "claude-haiku-4-5" };
+    for (const worstCaseUsd of [Number.POSITIVE_INFINITY, Number.NaN]) {
+      expect(() => entry({ ...base, worstCaseUsd })).toThrow(RangeError);
+    }
+  });
+
   it("reads every data record", () => {
     expect(fixture()).toHaveLength(EXPECTED_ENTRIES);
   });
