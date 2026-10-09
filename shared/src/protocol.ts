@@ -89,11 +89,15 @@ export const roomCode = z.string().regex(ROOM_CODE_PATTERN, "malformed room code
  * the edges in both directions: an emoji counts once there and twice here, and whitespace the
  * cleaning trims counts there and not here.
  */
-const measured = (max: number, min = 0) =>
-  `${min > 0 ? `At least ${min} and at` : "At"} most ${max} UTF-16 code units once cleaned (control ` +
-  "characters dropped or replaced, ends trimmed). minLength and maxLength count code points of the " +
-  "raw string, so they are a guide, not the rule: a client that keeps the cleaned text within " +
+const measured = (max: number, min: number, cleaning: string) =>
+  `${min > 0 ? `At least ${min} and at` : "At"} most ${max} UTF-16 code units once cleaned ` +
+  `(${cleaning}). ${min > 0 ? "minLength and maxLength count" : "maxLength counts"} code points of ` +
+  `the raw string, so ${min > 0 ? "they are" : "it is"} a guide, not the rule: a client that keeps ` +
+  "the cleaned text within " +
   `${min > 0 ? `${min} to ` : ""}${max} UTF-16 units is always accepted.`;
+
+const USERNAME_CLEANING = "control and format characters removed, whitespace collapsed, ends trimmed";
+const BODY_CLEANING = "control characters replaced by spaces, CRLF made LF, ends trimmed";
 
 /**
  * Usernames: trimmed, length capped, and stripped of control and format characters.
@@ -112,7 +116,7 @@ export const username = z
       .min(1, { message: `username must be 1 to ${LIMITS.username} characters` })
       .max(LIMITS.username, { message: `username must be 1 to ${LIMITS.username} characters` }),
   )
-  .describe(measured(LIMITS.username, 1));
+  .describe(measured(LIMITS.username, 1, USERNAME_CLEANING));
 
 /**
  * Body text: control characters become spaces, CRLF becomes LF, the ends are trimmed, and THEN the
@@ -124,7 +128,7 @@ export const bodyText = (max: number, nonEmpty?: { message: string }) => {
     .string()
     .transform((v) => v.replace(/[\p{Cc}]/gu, " ").replace(/\r\n/g, "\n").trim())
     .pipe(nonEmpty ? limited.min(1, nonEmpty) : limited)
-    .describe(measured(max, nonEmpty ? 1 : 0));
+    .describe(measured(max, nonEmpty ? 1 : 0, BODY_CLEANING));
 };
 
 export const glossaryEntry = z.object({

@@ -147,6 +147,16 @@ describe("text limits", () => {
     const node = field(ws, "clientMessage", "stt.final", "text");
     expect(node.description).toMatch(/UTF-16/);
     expect(node.description).toMatch(/code point/);
+    expect(node.description).not.toMatch(/minLength/);
+  });
+
+  it("describes a username's cleaning and minimum as the server applies them", () => {
+    const node = field(ws, "clientMessage", "room.create", "username");
+    expect(node.minLength).toBe(1);
+    expect(node.description).toMatch(/at least 1/i);
+    // Format characters (a zero width space, say) are removed, so a name made only of them is empty.
+    expect(node.description).toMatch(/format characters removed/);
+    expect(node.description).toMatch(/whitespace collapsed/);
   });
 
   it("publishes what the server really sends for a glossary entry's source: a whole line", () => {

@@ -434,7 +434,7 @@
       "additionalProperties": true,
       "properties": {
         "source": {
-          "description": "At least 1 and at most 200 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 200 UTF-16 units is always accepted.",
+          "description": "At least 1 and at most 200 UTF-16 code units once cleaned (control characters replaced by spaces, CRLF made LF, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 200 UTF-16 units is always accepted.",
           "maxLength": 200,
           "minLength": 1,
           "type": "string"
@@ -443,7 +443,7 @@
           "$ref": "#/definitions/dialectCode"
         },
         "target": {
-          "description": "At least 1 and at most 400 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 400 UTF-16 units is always accepted.",
+          "description": "At least 1 and at most 400 UTF-16 code units once cleaned (control characters replaced by spaces, CRLF made LF, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 400 UTF-16 units is always accepted.",
           "maxLength": 400,
           "minLength": 1,
           "type": "string"
@@ -461,7 +461,7 @@
       "type": "object"
     },
     "username": {
-      "description": "At least 1 and at most 24 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 24 UTF-16 units is always accepted.",
+      "description": "At least 1 and at most 24 UTF-16 code units once cleaned (control and format characters removed, whitespace collapsed, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 24 UTF-16 units is always accepted.",
       "maxLength": 24,
       "minLength": 1,
       "type": "string"

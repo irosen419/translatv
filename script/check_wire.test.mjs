@@ -134,6 +134,18 @@ describe("check_wire.mjs", () => {
     expect(result.stderr).toMatch(/auth\.login\.request\.json/);
   });
 
+  it("fails, naming the file, when an HTTP fixture names no request or response", () => {
+    // Listed in the index too, so the index check cannot be what catches it.
+    writeFileSync(join(wire, "fixtures", "http", "orphan.json"), "{}\n");
+    const path = join(wire, "fixtures", "index.json");
+    const index = JSON.parse(readFileSync(path, "utf8"));
+    index.http = [...index.http, "orphan"];
+    writeFileSync(path, JSON.stringify(index, null, 2) + "\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/orphan\.json: names no request or response in HTTP_ROUTES/);
+  });
+
   it("fails when index.json leaves out an HTTP fixture", () => {
     const path = join(wire, "fixtures", "index.json");
     const index = JSON.parse(readFileSync(path, "utf8"));
