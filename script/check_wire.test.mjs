@@ -115,6 +115,19 @@ describe("check_wire.mjs", () => {
     expect(result.stderr).toMatch(/peer\.updated\.json/);
   });
 
+  it("fails on the zod schema alone when text is in bounds by code points but not by UTF-16 units", () => {
+    // 1001 emoji: 1001 code points, which the exported maxLength accepts, and 2002 UTF-16 units,
+    // which the server refuses. Only zod can catch this one, so it proves the zod branch is still
+    // checked now that Ajv also reads every fixture.
+    const path = join(wire, "fixtures", "client", "chat.send.json");
+    const fixture = JSON.parse(readFileSync(path, "utf8"));
+    writeFileSync(path, JSON.stringify({ ...fixture, text: "😀".repeat(1001) }, null, 2) + "\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/chat\.send\.json: fails the clientMessage schema at text/);
+    expect(result.stderr).not.toMatch(/refused by the exported schema/);
+  });
+
   it("fails when a fixture carries text over its limit", () => {
     const path = join(wire, "fixtures", "client", "chat.send.json");
     const fixture = JSON.parse(readFileSync(path, "utf8"));
