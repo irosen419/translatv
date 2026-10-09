@@ -77,6 +77,9 @@ const INSTRUCTION_PATTERNS: readonly RegExp[] = [
     "iu",
   ),
   near("you are|eres|sos", "an? (?:ai|assistant|language model|chatbot)|una? (?:ia|asistente)"),
+  // A part to play, but only the model's own kind of part: "act as a team" and "pretend to be
+  // asleep" are things people say.
+  near("act as|pretend to be|actuá como|actúa como|fingí ser|finge ser", "an? (?:ai|assistant|system|admin|bot)|the (?:system|assistant|admin)|el sistema|una? (?:ia|asistente)"),
   // A blanket order about translating: "translate everything as yes", "instead of translating".
   near("translate|traduc\\p{L}*", "everything|every|all|always|instead|todo|todas?|todos|siempre"),
   near("instead of|en vez de|en lugar de", "translat\\p{L}*|traduc\\p{L}*"),
@@ -94,7 +97,9 @@ const INSTRUCTION_PATTERNS: readonly RegExp[] = [
  * a delete.
  */
 function readsAsInstructions(text: string): boolean {
-  const folded = text.normalize("NFKC");
+  // NFKC, and the curly apostrophe phones type (smart punctuation) as the straight one the
+  // patterns spell: "you\u2019re now" got past "you're now" (review round 3).
+  const folded = text.normalize("NFKC").replace(/[\u2018\u2019]/gu, "'");
   return INSTRUCTION_PATTERNS.some((pattern) => pattern.test(text) || pattern.test(folded));
 }
 
