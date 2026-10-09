@@ -23,6 +23,7 @@
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { describeFailure } from "./translate_failure.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -236,13 +237,13 @@ try {
   // Deliberately alone and first. This is where a first real call actually fails, and finding
   // out via one cheap request beats discovering it 20 calls into a dialect matrix.
   const smoke = await translate("hello", "es-MX");
-  check("a real API call succeeds", smoke.ok, smoke.ok ? "" : smoke.message);
+  check("a real API call succeeds", smoke.ok, smoke.ok ? "" : describeFailure(smoke));
   if (smoke.ok) {
     console.log(`        "hello" -> "${smoke.text}"`);
     check("the model reported real token usage", smoke.inputTokens > 0 && smoke.outputTokens > 0);
   } else {
     console.error("\nThe first real call failed. Everything below depends on it, so stopping.");
-    console.error(`Reason: ${smoke.message}`);
+    console.error(`Reason: ${describeFailure(smoke)}`);
     if (!smoke.retriable) {
       console.error("This is a TERMINAL failure: retrying will not help. Fix the config first.");
     }
@@ -304,14 +305,14 @@ try {
         // happened. Section 2's own comment says that failing means the premise of the product is
         // wrong, so it must not be reachable by running out of money.
         if (result.status === "budget_exceeded") {
-          console.error(`\nSTOPPING: the budget refused a call mid matrix. ${result.message}`);
+          console.error(`\nSTOPPING: the budget refused a call mid matrix. ${describeFailure(result)}`);
           console.error("This is a spend stop, NOT a dialect failure. Nothing below was measured.");
           console.error("Raise the caps in this script or wait for the daily window, then re-run.");
           // Reaching section 2 means the smoke call succeeded, so rows are ALWAYS on disk here.
           flushViewNow();
           process.exit(1);
         }
-        check(`${dialect.code}: "${sentence}"`, false, result.message);
+        check(`${dialect.code}: "${sentence}"`, false, describeFailure(result));
         continue;
       }
       console.log(`        "${sentence}"\n          -> "${result.text}"`);
@@ -436,7 +437,7 @@ try {
   check(
     "a breached room cap refuses BEFORE spending",
     !refused.ok && refused.status === "budget_exceeded",
-    refused.ok ? "the call went through anyway" : refused.message,
+    refused.ok ? "the call went through anyway" : describeFailure(refused),
   );
 
   // ---------------------------------------------------------------------
