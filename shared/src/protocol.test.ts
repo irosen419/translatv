@@ -111,6 +111,15 @@ describe("dialectCode", () => {
     }
   });
 
+  it("keeps zod's own message for a missing or non string value", () => {
+    // The errorMap renames only the enum refusal. A missing or non string dialect still says what
+    // it always said, since MALFORMED's detail is for whoever is debugging the client.
+    const missing = dialectCode.safeParse(undefined);
+    expect(missing.success ? "" : missing.error.issues[0]?.message).toBe("Required");
+    const number = dialectCode.safeParse(5);
+    expect(number.success ? "" : number.error.issues[0]?.message).toMatch(/received number/);
+  });
+
   it("is an enum, so the exported schema can list the codes", () => {
     expect(dialectCode).toBeInstanceOf(z.ZodEnum);
     expect([...(dialectCode as z.ZodEnum<[string, ...string[]]>).options]).toEqual([...DIALECT_CODES]);

@@ -120,7 +120,7 @@
             },
             "username": {
               "$ref": "#/definitions/username",
-              "description": "At most 24 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 24 UTF-16 units is always accepted."
+              "description": "At least 1 and at most 24 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 24 UTF-16 units is always accepted."
             },
             "wantsTranslation": {
               "type": "boolean"
@@ -193,7 +193,7 @@
               "type": "string"
             },
             "text": {
-              "description": "At most 2000 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 2000 UTF-16 units is always accepted.",
+              "description": "At most 2000 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 2000 UTF-16 units is always accepted.",
               "maxLength": 2000,
               "type": "string"
             }
@@ -217,7 +217,7 @@
               "type": "string"
             },
             "text": {
-              "description": "At most 2000 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 2000 UTF-16 units is always accepted.",
+              "description": "At most 2000 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 2000 UTF-16 units is always accepted.",
               "maxLength": 2000,
               "type": "string"
             }
@@ -237,7 +237,7 @@
               "type": "string"
             },
             "text": {
-              "description": "At most 2000 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 2000 UTF-16 units is always accepted.",
+              "description": "At most 2000 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 2000 UTF-16 units is always accepted.",
               "maxLength": 2000,
               "type": "string"
             }
@@ -271,7 +271,7 @@
           "additionalProperties": true,
           "properties": {
             "correctedTranslation": {
-              "description": "At most 400 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 400 UTF-16 units is always accepted.",
+              "description": "At most 400 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 400 UTF-16 units is always accepted.",
               "maxLength": 400,
               "type": "string"
             },
@@ -360,7 +360,7 @@
       "additionalProperties": true,
       "properties": {
         "source": {
-          "description": "At most 200 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 200 UTF-16 units is always accepted.",
+          "description": "At most 200 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 200 UTF-16 units is always accepted.",
           "maxLength": 200,
           "type": "string"
         },
@@ -368,7 +368,7 @@
           "$ref": "#/definitions/dialectCode"
         },
         "target": {
-          "description": "At most 400 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 400 UTF-16 units is always accepted.",
+          "description": "At most 400 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 400 UTF-16 units is always accepted.",
           "maxLength": 400,
           "type": "string"
         },
@@ -1130,7 +1130,7 @@
       "type": "string"
     },
     "username": {
-      "description": "At most 24 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 24 UTF-16 units is always accepted.",
+      "description": "At least 1 and at most 24 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 24 UTF-16 units is always accepted.",
       "maxLength": 24,
       "minLength": 1,
       "type": "string"

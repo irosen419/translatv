@@ -145,11 +145,27 @@ describe("check_wire.mjs", () => {
   });
 
   it.each(["http.schema.json", "constants.json"])("fails when the committed %s is stale", (name) => {
+    // A change every reader still accepts (a reworded description or comment), so freshness is
+    // the only check that can object: an unknown keyword would fail Ajv strict mode instead.
     const path = join(wire, name);
-    writeFileSync(path, readFileSync(path, "utf8").replace("\n", '\n  "stale": true,\n'));
+    const before = readFileSync(path, "utf8");
+    const after = before.replace(/"(\$comment|description)": "GENERATED/, '"$1": "Hand edited. GENERATED');
+    expect(after).not.toBe(before);
+    writeFileSync(path, after);
     const result = run(wire);
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain(name);
+    expect(result.stderr).toContain(`${name}: stale`);
+    expect(result.stderr).not.toMatch(/strict mode|refused by the exported schema/);
+  });
+
+  it("fails when an HTTP fixture the zod schema accepts is refused by the exported HTTP schema", () => {
+    const path = join(wire, "http.schema.json");
+    const schema = JSON.parse(readFileSync(path, "utf8"));
+    schema.definitions.dialectCode.enum = schema.definitions.dialectCode.enum.filter((code) => code !== "es-AR");
+    writeFileSync(path, JSON.stringify(schema, null, 2) + "\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/me\.preferences\.put\.request\.json: refused by the exported schema/);
   });
 
   it("fails when a fixture the zod schema accepts is refused by the exported schema", () => {

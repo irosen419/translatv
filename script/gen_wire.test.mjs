@@ -45,10 +45,6 @@ function field(document, union, t, ...path) {
   let node = memberOf(document, union, t);
   for (const key of path) {
     while (node && typeof node.$ref === "string") node = at(document, node.$ref.slice(1));
-    if (node?.anyOf && key === "*nonNull") {
-      node = node.anyOf.find((option) => option.type !== "null");
-      continue;
-    }
     node = key === "*items" ? node.items : node.properties[key];
   }
   while (node && typeof node.$ref === "string") node = at(document, node.$ref.slice(1));
@@ -101,6 +97,7 @@ describe("dialects", () => {
     ["peer.updated's dialect", "peer.updated", ["dialect"]],
     ["translation.result's targetDialect", "translation.result", ["targetDialect"]],
     ["a server glossary entry's sourceDialect", "glossary.updated", ["entries", "*items", "sourceDialect"]],
+    ["a server glossary entry's targetDialect", "glossary.updated", ["entries", "*items", "targetDialect"]],
   ])("%s, which the server sends, is the enum", (_name, t, path) => {
     expect(field(ws, "serverMessage", t, ...path)?.enum).toEqual(codes());
   });
@@ -172,6 +169,7 @@ describe("text limits", () => {
     // A stored entry refuses a term or translation that is empty once cleaned; the room's does not.
     expect(entry.properties.source.minLength).toBe(1);
     expect(entry.properties.target.minLength).toBe(1);
+    expect(entry.properties.source.description).toMatch(/at least 1/i);
   });
 
   it("carries the account API's own limits", () => {

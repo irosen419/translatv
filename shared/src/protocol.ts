@@ -72,7 +72,10 @@ export const LIMITS = {
  * derived from the catalog at runtime, and the refusal keeps the message it always had.
  */
 export const dialectCode = z.enum(DIALECT_CODES as [string, ...string[]], {
-  errorMap: () => ({ message: "unknown dialect" }),
+  // Only the enum refusal is renamed; a missing or non string value keeps zod's own message.
+  errorMap: (issue, ctx) => ({
+    message: issue.code === "invalid_enum_value" ? "unknown dialect" : ctx.defaultError,
+  }),
 });
 
 export const roomCode = z.string().regex(ROOM_CODE_PATTERN, "malformed room code");
@@ -86,11 +89,11 @@ export const roomCode = z.string().regex(ROOM_CODE_PATTERN, "malformed room code
  * the edges in both directions: an emoji counts once there and twice here, and whitespace the
  * cleaning trims counts there and not here.
  */
-const measured = (max: number) =>
-  `At most ${max} UTF-16 code units once cleaned (control characters dropped or replaced, ends ` +
-  "trimmed). " +
-  "maxLength counts code points of the raw string, so it is a guide, not the rule: a client that " +
-  `keeps the cleaned text within ${max} UTF-16 units is always accepted.`;
+const measured = (max: number, min = 0) =>
+  `${min > 0 ? `At least ${min} and at` : "At"} most ${max} UTF-16 code units once cleaned (control ` +
+  "characters dropped or replaced, ends trimmed). minLength and maxLength count code points of the " +
+  "raw string, so they are a guide, not the rule: a client that keeps the cleaned text within " +
+  `${min > 0 ? `${min} to ` : ""}${max} UTF-16 units is always accepted.`;
 
 /**
  * Usernames: trimmed, length capped, and stripped of control and format characters.
@@ -109,7 +112,7 @@ export const username = z
       .min(1, { message: `username must be 1 to ${LIMITS.username} characters` })
       .max(LIMITS.username, { message: `username must be 1 to ${LIMITS.username} characters` }),
   )
-  .describe(measured(LIMITS.username));
+  .describe(measured(LIMITS.username, 1));
 
 /**
  * Body text: control characters become spaces, CRLF becomes LF, the ends are trimmed, and THEN the
@@ -121,7 +124,7 @@ export const bodyText = (max: number, nonEmpty?: { message: string }) => {
     .string()
     .transform((v) => v.replace(/[\p{Cc}]/gu, " ").replace(/\r\n/g, "\n").trim())
     .pipe(nonEmpty ? limited.min(1, nonEmpty) : limited)
-    .describe(measured(max));
+    .describe(measured(max, nonEmpty ? 1 : 0));
 };
 
 export const glossaryEntry = z.object({

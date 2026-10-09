@@ -140,6 +140,6 @@ file. They ADD to the skill's own guardrails and override its defaults where the
   `out/translatv/spend_log.jsonl`. The ledger is append only, and a deletion is either a
   botched conflict resolution or lost spend. Both need a human.
 - Never merge on a red or still pending required check. `npm run check` (dash grep, copy parity,
-  typecheck, both suites) is the bar.
+  wire contract, spend view, typecheck, both suites) is the bar.
 - Merge with an ordinary merge commit, matching the owner's other repositories. Do not switch to
   squash or rebase without asking.
