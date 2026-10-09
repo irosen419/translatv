@@ -1,16 +1,18 @@
 # Translatv: brainstorm handoff
 
-A snapshot taken 2026-09-28, evening UTC, updated 2026-09-29 as #3 finished review, and updated
-2026-09-30 when #3 merged. It holds everything needed to brainstorm Translatv's money model and
-next steps. It is written so that a fresh Claude, for example in Claude Voice, can pick the
-project up cold. Nothing in it is secret: this repository is public.
+A snapshot taken 2026-09-28, evening UTC, and updated 2026-09-29 (#3 finished review), 2026-09-30
+(#3 merged) and 2026-10-09 (the next pull requests decided). It holds everything needed to
+brainstorm Translatv's money model and next steps. It is written so that a fresh Claude, for
+example in Claude Voice, can pick the project up cold. Nothing in it is secret: this repository
+is public.
 
 ## Read this first (for the assistant)
 
 You are helping the owner of Translatv make decisions, by voice. How to use this file:
 
 - **Treat the facts here as the project's state on 2026-09-28,** with #3 and the next two pull
-  requests updated on 2026-09-29, and #3's merge on 2026-09-30. Prices were read on 2026-09-28.
+  requests updated on 2026-09-29, #3's merge on 2026-09-30, and the next pull requests'
+  decisions on 2026-10-09. Prices were read on 2026-09-28.
   - A figure marked as an estimate rests on the assumptions stated beside it.
   - Do not invent prices, benchmarks or quality claims. If a number is not in this file, say
     that it is not known.
@@ -92,14 +94,14 @@ A suggested order for a first session:
     below come from real calls in the project Translatv was copied from.
   - Echo and speech recognition have not been tested on real phones.
 
-## 3. Where the work stands (2026-09-30)
+## 3. Where the work stands (2026-10-09)
 
 | Item | State |
 | --- | --- |
 | [#1](https://github.com/irosen419/translatv/pull/1): accounts, SQLite storage, per user data, and the protocol export the iOS app builds on | **Merged into main on 2026-09-28**, after ten rounds of adversarial review |
 | [#2](https://github.com/irosen419/translatv/pull/2): per user spend charged to the room's host, with a $1 default daily cap | **Paused by the owner** for the money model. It gets reshaped after the brainstorm |
 | [#3](https://github.com/irosen419/translatv/pull/3): log what a timed out translation cost, and never bill a user for it | **Merged into main on 2026-09-30**, at the owner's go ahead, after five rounds of adversarial review: rounds 1 and 2 blocked it, and rounds 3 to 5 approved with nothing blocking |
-| The iOS contract, and corrections | **Briefed, not started.** [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md) is the working brief for each: what exists, what to build, the decisions they need, and a prompt to start a fresh session |
+| The iOS contract, and corrections | **Briefed and decided (2026-10-09), not started.** [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md) is the working brief for each: what exists and what to build. [`HANDOFF-AGENT.md`](HANDOFF-AGENT.md) has the owner's decisions and a prompt to start each |
 | The iOS app | **Not started.** Planned as a native SwiftUI app for iOS 26. The first version runs only in the foreground, with no CallKit and no push |
 | Deploying with accounts | **Not done.** It needs `AUTH_SECRET`, `OWNER_EMAIL`, `SIGNUP_MODE` and a volume for the database |
 
@@ -150,8 +152,8 @@ In the owner's words where there are some.
   - The owner's words: "corrections should be saved overall", with "a way to filter out
     malicious corrections for sure".
   - The owner asked whether that screening should be "a nightly job? Or a post-call job".
-  - Recommended, not yet confirmed: screen after each call, and save to an account only the
-    corrections its own owner made (section 8).
+  - Decided 2026-10-09: screen after each call, by rules only, and save to an account only the
+    corrections its own owner made, as terms rather than whole lines (section 8).
 - **Deleted accounts are fully erased from the database files** (2026-09-28, done in #1).
 - **#1 is merged** (2026-09-28, at the owner's go ahead).
 - **The iOS contract comes next** (2026-09-28). It is a new branch and pull request after #1. It
@@ -162,6 +164,9 @@ In the owner's words where there are some.
 - **#3 is merged** (2026-09-30, at the owner's go ahead).
 - **The `/review-loop` skill goes on main** (2026-09-30). The owner's words: "Definitely put
   the skill on main."
+- **The next pull requests are decided** (2026-10-09). The owner's words: "All recommended."
+  A1, A2 and C1 to C6 take the recommended option; [`HANDOFF-AGENT.md`](HANDOFF-AGENT.md)
+  spells each out.
 
 **From the plan of record (2026-09-27)**
 
@@ -401,8 +406,8 @@ web app never saves to it. There is no separate corrections store.
 term. It becomes a room glossary entry whose source is the whole corrected line, up to 2000
 characters, and often the other person's words. Saving that to an account would store transcript
 text, which the rules forbid, and it would not fit the stored glossary's 200 character term
-anyway. So saving corrections needs one decision first (question 22). The recommendation is
-that corrections become term level: a phrase and its fix, prefilled from the line.
+anyway. So saving corrections needed one decision first (question 22). The owner decided on
+2026-10-09 that corrections become term level: a phrase and its fix, prefilled from the line.
 
 | How a correction could do harm | What stops it |
 | --- | --- |
@@ -455,7 +460,8 @@ that corrections become term level: a phrase and its fix, prefilled from the lin
 13. **Launch platforms.** iOS first, or the web too? Chrome's free translator runs on desktop
     only.
 14. **Corrections screening.** After each call (recommended) or nightly? Rules only (free), or a
-    model check (about one small request per call)?
+    model check (about one small request per call)? **Decided 2026-10-09:** after each call,
+    rules only.
 15. **People without accounts.** May they join by link? That needs an answer to question 1 first.
 16. **Open signup.** When? Signup is invite only today, because every account spends against one
     shared daily cap.
@@ -475,14 +481,15 @@ that corrections become term level: a phrase and its fix, prefilled from the lin
 21. **The account API has no version.** It changed without one, and the iOS contract follow up
     should add one. Recommended: a version number on `/healthz` beside the socket's, bumped by the
     same rule, rather than a `/api/v1` path (decision A1 in
-    [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md)).
+    [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md)). **Decided 2026-10-09:** the version number.
 
 **From the next pull requests' brief, and #3's review (2026-09-29)**
 
 22. **What is a saved correction?** Today it is the whole corrected line (section 8). Term level
     corrections (recommended), only lines short enough to fit, or a change to the rule against
     storing transcript text? The corrections brief lists five more calls that follow from it,
-    each with a recommendation (decisions C2 to C6).
+    each with a recommendation (decisions C2 to C6). **Decided 2026-10-09:** term level, and the
+    recommendation for each of C2 to C6.
 23. **A late translation's slot.** #3 keeps a timed out call's concurrency slot until it
     settles, which bounds the unknown spend a hung provider can run up. The price is throughput:
     in review's simulation, with 1 call in 7 hanging, 90 of 600 calls were turned away. Keep it,
@@ -527,7 +534,7 @@ this file, and it is about an hour of work. It has not been built; the owner can
       [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md).
 - [ ] **Corrections.** Save them to the account and screen them after each call. Remove
       transcript downloads and "Load corrections from a past chat". The brief is part B of
-      [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md); question 22 comes first.
+      [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md); its decisions were made 2026-10-09.
 - [ ] **Fix `npm run verify`'s "Reason: undefined"** when its first call fails. It is one line
       (`smoke.reason`), found in #3's review.
 - [x] **Put the `/review-loop` skill on main** (done 2026-09-30). A session started from main
@@ -654,6 +661,8 @@ Second hand:
   This file carries all of it, as of 2026-09-28.
 - **In this repository:**
   - [`docs/PLAN.md`](PLAN.md): the plan of record for the server and the iOS app.
+  - [`docs/HANDOFF-AGENT.md`](HANDOFF-AGENT.md): for the next agent. Every review so far, with
+    links to each round's comment, and the next steps with the owner's decisions.
   - [`docs/HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md): the working brief for the iOS contract and
     corrections pull requests.
   - `README.md`: what runs today, and how to run it.
