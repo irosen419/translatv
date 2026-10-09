@@ -15,7 +15,7 @@ import {
 } from "@translatv/shared";
 import { append, entry as ledgerEntry, type SpendKind } from "../spend/ledger.js";
 import { PROGRAMS, type SpendGate } from "../spend/caps.js";
-import { DEFAULT_MODEL } from "../spend/pricing.js";
+import { costUsd, DEFAULT_MODEL } from "../spend/pricing.js";
 import { log } from "../log.js";
 import { buildSystemPrompt, buildUserMessage, type ContextTurn } from "./prompt.js";
 
@@ -36,6 +36,19 @@ const CAP_REASONS: Record<
 
 /** How long to wait on the API before giving up on a line. */
 export const TIMEOUT_MS = 6_000;
+/**
+ * How long after it was sent a call is given before it is abandoned. Past TIMEOUT_MS the caller
+ * has already been answered and the call runs on only to learn what it cost (settleLate); a
+ * translation of about 30 tokens that has not come back in a minute is not coming.
+ */
+export const LATE_CEILING_MS = 60_000;
+/**
+ * The most output one call may produce. Lives here, not in the adapter, because the worst case a
+ * lost call is logged at is computed here and must use the same number the request is sent with.
+ */
+export const MAX_OUTPUT_TOKENS = 512;
+/** Tokens the message framing adds around the prompt, generously. Only feeds the worst case. */
+const FRAMING_TOKENS = 64;
 /** Concurrent in flight calls across the whole process. */
 export const MAX_CONCURRENT = 8;
 
@@ -95,7 +108,34 @@ export interface LlmClient {
     system: string;
     user: string;
     signal: AbortSignal;
+    /**
+     * No request may be started at or after this time (milliseconds since the epoch). By then the
+     * caller has been told TIMED_OUT, so a request started later is paid for and read by nobody.
+     * One started before it can still reach the provider after it, while its connection is made,
+     * and then answers late.
+     */
+    sendBefore: number;
+    /**
+     * Called once for each request that was sent and may have been billed, but whose answer never
+     * came: a connection lost mid request, or an abort while it was in flight. The caller logs
+     * each as unknown, at one request's worst case, the moment it is called, so the client calls it
+     * before it sends any further request: the row is on disk first. A request that never left, or
+     * that the provider answered with an error, was not billed and is not reported: only the
+     * client can tell those apart, which is why it reports rather than the caller guessing from
+     * the error.
+     */
+    onLost: () => void;
   }): Promise<{ text: string; inputTokens: number; outputTokens: number }>;
+}
+
+/** A call on its way to the provider, from the moment it is sent until it settles. */
+interface RunningCall {
+  request: TranslateRequest;
+  controller: AbortController;
+  /** One request's worst case, or null when the model has no documented price. */
+  worstCaseUsd: number | null;
+  /** Already logged and aborted at shutdown, so nothing it reports later is logged again. */
+  abandoned: boolean;
 }
 
 /**
@@ -126,6 +166,8 @@ export class LlmFailure extends Error {
 
 export class TranslationService {
   private inFlight = 0;
+  /** Every call still running, in time or late (settleLate), until it settles. */
+  private readonly running = new Set<RunningCall>();
   private readonly queues = new Map<string, Promise<unknown>>();
   /**
    * Set once a terminal failure proves the configuration is wrong.
@@ -296,46 +338,59 @@ export class TranslationService {
       return { ok: true, text: request.text, inputTokens: 0, outputTokens: 0 };
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const system = buildSystemPrompt(source, target, request.glossary);
+    const user = buildUserMessage(request.context, request.text);
+    const running: RunningCall = {
+      request,
+      controller: new AbortController(),
+      worstCaseUsd: this.worstCaseUsd(system, user),
+      abandoned: false,
+    };
+    const client = this.client;
     this.inFlight += 1;
+    this.running.add(running);
+    // Wrapped, so a client that throws rather than rejecting still releases its slot.
+    const call = (async () =>
+      client.complete({
+        system,
+        user,
+        signal: running.controller.signal,
+        sendBefore: Date.now() + TIMEOUT_MS,
+        // Logged the moment it is reported, like every row: never batched to the end of a call.
+        onLost: () => {
+          if (!running.abandoned) this.record(request, { worstCaseUsd: running.worstCaseUsd }, "no answer");
+        },
+      }))();
 
-    try {
-      const result = await this.client.complete({
-        system: buildSystemPrompt(source, target, request.glossary),
-        user: buildUserMessage(request.context, request.text),
-        signal: controller.signal,
-      });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      call.then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      ),
+      new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => resolve("timeout"), TIMEOUT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
 
-      // Log the spend BEFORE returning, so a crash between here and the caller cannot lose the
-      // record of money already spent. Batching this to the end of a session is how spend goes
-      // untracked, which is the failure this whole project is built not to repeat.
-      this.record(request, result.inputTokens, result.outputTokens);
+    if (outcome === "timeout") {
+      // Worth another try: the next sentence may land in a quieter moment. The call itself is
+      // NOT aborted here, because a request the client abandons is still billed (see settleLate).
+      log.warn("translation.timeout", { room: request.roomHash, lineId: request.lineId });
+      this.settleLate(running, call);
+      return {
+        ok: false,
+        status: "unavailable",
+        reason: "TIMED_OUT",
+        retriable: true,
+      };
+    }
+    this.inFlight -= 1;
+    this.running.delete(running);
 
-      const text = result.text.trim();
-      if (text.length === 0) {
-        return {
-          ok: false,
-          status: "unavailable",
-          reason: "EMPTY_RESULT",
-          retriable: true,
-        };
-      }
-      return { ok: true, text, inputTokens: result.inputTokens, outputTokens: result.outputTokens };
-    } catch (error) {
-      // A timeout is our own abort, and it is always worth another try: the next sentence may
-      // land in a quieter moment. Checked first because an aborted request surfaces as a
-      // provider error too, and misreading it as a provider fault would be wrong.
-      if (controller.signal.aborted) {
-        log.warn("translation.timeout", { room: request.roomHash, lineId: request.lineId });
-        return {
-          ok: false,
-          status: "unavailable",
-          reason: "TIMED_OUT",
-          retriable: true,
-        };
-      }
-
+    if ("error" in outcome) {
+      const error = outcome.error;
       if (error instanceof LlmFailure && error.kind === "terminal") {
         // Configuration is wrong and will stay wrong. Latch off, and say so loudly enough that
         // an operator reading logs sees the cause rather than a wall of identical failures.
@@ -356,6 +411,8 @@ export class TranslationService {
         };
       }
 
+      // Nothing to log here: the client has already reported each request that was sent and
+      // lost (onLost), and one that never left or that the provider refused was not billed.
       const reason = error instanceof LlmFailure ? error.reason : "unknown";
       log.warn("translation.failed", {
         room: request.roomHash,
@@ -368,13 +425,104 @@ export class TranslationService {
         reason: reason === "rate_limit" ? "PROVIDER_RATE_LIMITED" : "PROVIDER_ERROR",
         retriable: true,
       };
-    } finally {
-      clearTimeout(timer);
-      this.inFlight -= 1;
     }
+
+    const result = outcome.result;
+    const text = result.text.trim();
+    // Log the spend BEFORE returning, so a crash between here and the caller cannot lose the
+    // record of money already spent. Batching this to the end of a session is how spend goes
+    // untracked, which is the failure this whole project is built not to repeat. An empty answer
+    // was billed and reached nobody, so no user is charged for it. A call abandoned at shutdown
+    // whose answer won the race with its abort is already logged, at its worst case.
+    if (!running.abandoned) this.record(request, result, text.length === 0 ? "empty answer" : undefined);
+
+    if (text.length === 0) {
+      return {
+        ok: false,
+        status: "unavailable",
+        reason: "EMPTY_RESULT",
+        retriable: true,
+      };
+    }
+    return { ok: true, text, inputTokens: result.inputTokens, outputTokens: result.outputTokens };
   }
 
-  private record(request: TranslateRequest, inputTokens: number, outputTokens: number): void {
+  /**
+   * A call the caller stopped waiting for.
+   *
+   * It is NOT aborted at the timeout. A request the client abandons is still billed (Anthropic's
+   * billing terms), so the abort this used to be only hid the spend: no ledger row for money that
+   * went out. The call runs on, sending no new request (sendBefore), and what it cost is logged
+   * as it settles: its real cost if it answers, or, for a request that was sent and lost its
+   * answer, one request's worst case, counted by the caps. A call that has not answered by
+   * LATE_CEILING_MS is aborted after all, and the client reports its request lost. Its slot stays
+   * taken until then, which bounds a hung provider to MAX_CONCURRENT calls of unknown cost at a
+   * time. The late translation is dropped (the line already showed its original), and none of
+   * this is charged to a user: the house pays for what never reached anyone (owner decision,
+   * 2026-09-28).
+   */
+  private settleLate(running: RunningCall, call: Promise<{ text: string; inputTokens: number; outputTokens: number }>): void {
+    const ceiling = setTimeout(() => running.controller.abort(), LATE_CEILING_MS - TIMEOUT_MS);
+    ceiling.unref?.();
+    void call
+      .then(
+        (result) => {
+          if (!running.abandoned) this.record(running.request, result, "answered late");
+        },
+        // Nothing to log: the client reported each lost request itself, the one the ceiling's
+        // abort cut off included.
+        () => undefined,
+      )
+      .finally(() => {
+        clearTimeout(ceiling);
+        this.running.delete(running);
+        this.inFlight -= 1;
+      });
+  }
+
+  /**
+   * Log every call still running, late or in time, as one request lost at its worst case, and
+   * abort it. Returns how many.
+   *
+   * For shutdown: the process is about to exit, and whatever those calls end up costing would
+   * otherwise never reach the ledger. A call caught between two requests has none in flight and
+   * is counted anyway, because the harmful direction is under-counting.
+   */
+  abandonInFlight(): number {
+    const calls = [...this.running].filter((call) => !call.abandoned);
+    for (const call of calls) {
+      call.abandoned = true;
+      this.record(call.request, { worstCaseUsd: call.worstCaseUsd }, "no answer");
+      call.controller.abort();
+    }
+    return calls.length;
+  }
+
+  /**
+   * The most one request can be billed, or null when the model has no documented price (unknown,
+   * never a zero standing in for it).
+   *
+   * Input: the prompt's UTF-8 bytes, since a byte level tokenizer never makes more tokens than
+   * bytes, plus an allowance for the message framing. Output: MAX_OUTPUT_TOKENS, all of it. Each
+   * request is logged on its own row, so a retry is its own worst case. Far above a real call
+   * (about $0.0006 against a worst case near $0.004), which is the point: it stands in for a cost
+   * nobody could recover, and the harmful direction is under-counting.
+   */
+  private worstCaseUsd(system: string, user: string): number | null {
+    const inputTokens = Buffer.byteLength(system, "utf8") + Buffer.byteLength(user, "utf8") + FRAMING_TOKENS;
+    return costUsd(DEFAULT_MODEL, inputTokens, MAX_OUTPUT_TOKENS);
+  }
+
+  /**
+   * Append one request's spend. `spent` is its usage, or, when nobody can know what it was billed,
+   * its worst case. `unbilled` names why no user may be charged for it (it reached nobody); an
+   * answer delivered in time leaves it out and is billable like every ordinary row.
+   */
+  private record(
+    request: TranslateRequest,
+    spent: { inputTokens: number; outputTokens: number } | { worstCaseUsd: number | null },
+    unbilled?: "answered late" | "no answer" | "empty answer",
+  ): void {
     try {
       const program =
         request.kind === "eval"
@@ -391,10 +539,13 @@ export class TranslationService {
           kind: request.kind,
           model: DEFAULT_MODEL,
           room: request.roomHash,
-          inputTokens,
-          outputTokens,
+          ...("worstCaseUsd" in spent
+            ? { worstCaseUsd: spent.worstCaseUsd }
+            : { inputTokens: spent.inputTokens, outputTokens: spent.outputTokens }),
           capUsd: this.gate.capFor(program),
-          note: request.kind,
+          // "not charged to a user": the provider may well have billed it, and the house pays.
+          note: unbilled === undefined ? request.kind : `${request.kind}, ${unbilled}, not charged to a user`,
+          billable: unbilled === undefined,
         }),
         this.repoRoot,
       );

@@ -4,10 +4,14 @@ import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { authSecretRefusal, resolveAuthSecret } from "./auth/secret.js";
+import { AccountService } from "./account/service.js";
+import { AuthService } from "./auth/service.js";
 import { describeConfig, loadConfig } from "./config.js";
 import { createApp } from "./http.js";
 import { log } from "./log.js";
 import { SpendGate } from "./spend/caps.js";
+import { ephemeralDataRefusal, isEphemeralDataDir, openStore, type Store } from "./store/index.js";
 import { flushView, isEphemeralLedger, ledgerWritable } from "./spend/ledger.js";
 import { createAnthropicClient } from "./translate/anthropic.js";
 import { TranslationService } from "./translate/TranslationService.js";
@@ -55,7 +59,8 @@ if (!writable.ok) {
   log.error("boot", {
     message:
       "  The call, the transcript, and the original language subtitles all still work. " +
-      "Fix the file's ownership or permissions and restart. In Docker this is COPY --chown.",
+      "Fix the file's ownership or permissions and restart. In the image that is COPY --chown; " +
+      "for the compose bind mount it is `sudo chown -R 1000:1000 out` on the host (DEPLOY.md section 5).",
   });
 }
 
@@ -75,16 +80,25 @@ if (config.isProduction && isEphemeralLedger(repoRoot) && !process.env.ALLOW_EPH
   process.exit(1);
 }
 
-// Without a password nobody can prove they are the admin, so the gate on starting a call is
-// open to everyone. That is fine on a laptop and is the whole point of the feature in
-// production, so a deployment that forgot the variable must not come up quietly serving an
-// unguarded app. Same shape as the ledger guards above: refuse loudly, say what to set.
-if (config.isProduction && config.adminPassword === null) {
-  log.error("boot", {
-    message:
-      "refusing to start: ADMIN_PASSWORD is not set, so admin gating would be off and anyone " +
-      "could start a call. Set ADMIN_PASSWORD in the environment.",
-  });
+// The database gets the same guard as the ledger, for a harsher reason: an image layer ledger
+// resets a day's spend, an image layer database deletes every account on the next redeploy.
+const dataRefusal = ephemeralDataRefusal({
+  isProduction: config.isProduction,
+  ephemeral: isEphemeralDataDir(config.dataDir),
+  allow: process.env.ALLOW_EPHEMERAL_DATA,
+});
+if (dataRefusal !== null) {
+  log.error("boot", { message: dataRefusal });
+  process.exit(1);
+}
+
+// Every session is an access token signed under AUTH_SECRET, so production without one has no
+// honest way to sign anybody in: a guessable key lets anyone mint a session for any account, and a
+// random one per boot signs everyone out on every restart. Same shape as the guards above: refuse
+// loudly, say what to set. CI asserts on the "AUTH_SECRET is not set" wording.
+const secretRefusal = authSecretRefusal({ isProduction: config.isProduction, secret: config.authSecret });
+if (secretRefusal !== null) {
+  log.error("boot", { message: secretRefusal });
   process.exit(1);
 }
 
@@ -92,6 +106,39 @@ if (config.isProduction && config.adminPassword === null) {
 // refuse to start announced "listening on port 8080" on its way out. The CI log showed exactly
 // that sequence, which is a confusing thing to hand someone debugging a failed boot.
 for (const line of describeConfig(config)) log.info("boot", { message: line });
+
+// Opened after every guard, so a boot that is going to refuse never creates a database file on
+// its way out. A store that cannot open (an unwritable directory, a schema newer than this code)
+// stops the boot, since accounts live here and a server that cannot reach them has nothing
+// correct to serve.
+let store: Store;
+try {
+  store = openStore({ path: config.databasePath });
+} catch (error) {
+  log.error("boot", {
+    message: "refusing to start: the database could not be opened",
+    reason: error instanceof Error ? error.message : "unknown",
+  });
+  process.exit(1);
+}
+log.info("boot", { message: "database open", schemaVersion: store.schemaVersion() });
+
+// Development only, since production refused above without one. Said out loud because it has a
+// visible consequence (restarting signs everyone out), and said WITHOUT the value, which would
+// let anyone reading the log mint a session for any account.
+const { secret: authSecret, generated } = resolveAuthSecret(config.authSecret);
+if (generated) {
+  log.warn("boot", {
+    message:
+      "AUTH_SECRET is not set, so a random one was generated for this process. Every sign in " +
+      "ends when the server restarts. Set AUTH_SECRET to keep sessions across restarts.",
+  });
+}
+const auth = new AuthService(store, {
+  secret: authSecret,
+  signupMode: config.signupMode,
+  ownerEmail: config.ownerEmail,
+});
 
 const llm = writable.ok && config.anthropicApiKey ? createAnthropicClient(config.anthropicApiKey) : null;
 const translation = new TranslationService(llm, gate, repoRoot);
@@ -105,9 +152,13 @@ const VIEW_FLUSH_MS = 60_000;
 const viewTimer = setInterval(() => flushView(repoRoot), VIEW_FLUSH_MS);
 viewTimer.unref();
 
-const app = createApp(config, clientDist, translation);
+// Per user data (M5). The signaling server subscribes itself to account deletions through auth,
+// so a deleted account's live sockets close without any wiring here.
+const account = new AccountService(store);
+
+const app = createApp(config, clientDist, translation, auth, account);
 const server = createServer(app);
-const signaling = new SignalingServer(server, config, translation);
+const signaling = new SignalingServer(server, config, translation, auth, account);
 
 server.listen(config.port, () => {
   // Report the port actually bound, not the one requested. With PORT=0 the OS picks one, and
@@ -131,17 +182,33 @@ server.on("error", (error: NodeJS.ErrnoException) => {
   process.exit(1);
 });
 
+// Closing checkpoints the WAL back into the main file, so a stopped server leaves one file rather
+// than three. Guarded because both shutdown paths below can reach it.
+function closeStore(): void {
+  if (store.db.isOpen) store.close();
+}
+
 function shutdown(signal: string): void {
   log.info("shutdown", { signal, rooms: signaling.roomCount });
   // Last chance to leave the view agreeing with the ledger. This is what makes a local test run
   // end with a file that does not need regenerating by hand before committing.
   clearInterval(viewTimer);
+  // Calls still running, in time or past their timeout, would end up costing something the
+  // ledger never hears of once the process exits: logged now as unknown, at their worst case.
+  const abandoned = translation.abandonInFlight();
+  if (abandoned > 0) log.warn("translation.abandoned_in_flight", { calls: abandoned });
   flushView(repoRoot);
   signaling.close();
-  server.close(() => process.exit(0));
+  server.close(() => {
+    closeStore();
+    process.exit(0);
+  });
   // Do not wait forever on a socket that will not close. Rooms are in memory and die with the
   // process anyway, so there is nothing to flush.
-  setTimeout(() => process.exit(0), 3_000).unref();
+  setTimeout(() => {
+    closeStore();
+    process.exit(0);
+  }, 3_000).unref();
 }
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));

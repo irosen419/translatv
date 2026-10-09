@@ -9,7 +9,7 @@
 //   close code 4001         another tab took this seat. Do not fight it.
 
 import type { ClientMessage, ServerMessage } from "@translatv/shared";
-import { CLOSE, WS_PATH } from "@translatv/shared";
+import { CLOSE, WS_BEARER_PREFIX, WS_PATH, WS_SUBPROTOCOL } from "@translatv/shared";
 
 const BASE_RECONNECT_MS = 250;
 const MAX_RECONNECT_MS = 8_000;
@@ -31,7 +31,26 @@ export interface SocketHandlers {
   /** terminal true means do not reconnect: the room is gone or the seat was taken. */
   onClose(info: { code: number; terminal: boolean }): void;
   onReconnecting(attempt: number): void;
+  /** There is no session to open a socket with. Terminal: signing in again is the only fix. */
+  onSignedOut?(): void;
 }
+
+/**
+ * The subprotocol list that carries an access token (shared/src/protocol.ts explains why a
+ * browser uses this rather than a header). Never the URL.
+ */
+export function bearerProtocols(accessToken: string): string[] {
+  return [WS_SUBPROTOCOL, `${WS_BEARER_PREFIX}${accessToken}`];
+}
+
+/**
+ * Where a socket gets its credentials, asked afresh before EVERY connect, because a reconnect can
+ * come long after the last token expired. Resolves null when signed out; throws when the answer
+ * is not available right now (the server is unreachable), which is retried like a dropped socket.
+ * `force` is set after an upgrade that never opened: the server refuses a bad token with 401,
+ * which a browser reports only as a close, so a socket that never opened is treated as refused.
+ */
+export type AccessTokenSource = (options: { force: boolean }) => Promise<string | null>;
 
 export class SignalingSocket {
   private socket: WebSocket | null = null;
@@ -42,17 +61,49 @@ export class SignalingSocket {
   /** Set once we are in a room, so a reconnect can reclaim the seat rather than rejoin. */
   private resume: { code: string; token: string } | null = null;
 
+  /** Set when the last attempt closed without ever opening, which is how a 401 looks from here. */
+  private refusedLastTime = false;
+
   constructor(
     private readonly url: string,
     private readonly handlers: SocketHandlers,
+    private readonly accessToken?: AccessTokenSource,
   ) {}
 
   connect(): void {
     this.closedByUs = false;
-    const socket = new WebSocket(this.url);
+    void this.open();
+  }
+
+  private async open(): Promise<void> {
+    let protocols: string[] | undefined;
+    if (this.accessToken) {
+      let token: string | null;
+      try {
+        token = await this.accessToken({ force: this.refusedLastTime });
+      } catch {
+        // Could not get a token right now: the same as a dropped socket, so back off and retry.
+        if (this.closedByUs) return;
+        this.handlers.onClose({ code: 1006, terminal: false });
+        this.scheduleReconnect();
+        return;
+      }
+      if (this.closedByUs) return;
+      if (token === null) {
+        this.handlers.onSignedOut?.();
+        this.handlers.onClose({ code: 1008, terminal: true });
+        return;
+      }
+      protocols = bearerProtocols(token);
+    }
+
+    const socket = protocols ? new WebSocket(this.url, protocols) : new WebSocket(this.url);
     this.socket = socket;
+    let opened = false;
 
     socket.onopen = () => {
+      opened = true;
+      this.refusedLastTime = false;
       this.attempt = 0;
       this.pingTimer = setInterval(() => this.send({ t: "ping" }), PING_INTERVAL_MS);
 
@@ -95,6 +146,7 @@ export class SignalingSocket {
 
     socket.onclose = (event) => {
       this.clearTimers();
+      if (!opened) this.refusedLastTime = true;
 
       const terminal =
         this.closedByUs ||

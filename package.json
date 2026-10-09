@@ -9,21 +9,24 @@
     "client"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.16"
   },
   "scripts": {
     "dev": "npm run build:shared && (npm run dev --workspace=server & npm run dev --workspace=client)",
     "lan": "node script/lan.mjs",
     "build": "npm run build:shared && npm run build --workspace=server && npm run build --workspace=client",
     "start": "npm run start --workspace=server",
+    "invite": "npm run build:shared && tsx server/src/cli/invite.ts",
     "test": "npm run build:shared && npm run test --workspace=shared && npm run test --workspace=server && npm run test --workspace=client && npm run test:script",
     "test:script": "vitest run --config script/vitest.config.mjs",
     "test:py": "python3 -m unittest discover -s . -p 'test_*.py' -v",
     "typecheck": "npm run build:shared && tsc -p server/tsconfig.json --noEmit && tsc -p client/tsconfig.json --noEmit",
     "check:dashes": "node script/check_dashes.mjs",
     "check:copy": "node script/check_copy.mjs",
+    "check:wire": "npm run build:shared && node script/check_wire.mjs",
+    "gen:wire": "npm run build:shared && node script/gen_wire.mjs",
     "check:secrets": "node script/check_secrets.mjs",
-    "check": "npm run check:dashes && npm run check:copy && npm run check:spend-view && npm run typecheck && npm test && npm run test:py",
+    "check": "npm run check:dashes && npm run check:copy && npm run check:wire && npm run check:spend-view && npm run typecheck && npm test && npm run test:py",
     "e2e": "npm run build && node script/e2e.mjs",
     "latency": "npm run build && tsx script/latency.mjs",
     "build:shared": "npm run build --workspace=shared",
@@ -33,6 +36,7 @@
   "devDependencies": {
     "playwright": "^1.62.1",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "zod-to-json-schema": "3.24.6"
   }
 }

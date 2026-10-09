@@ -18,8 +18,8 @@ import type { Config } from "../config.js";
 import { roomHash, SpendGate } from "../spend/caps.js";
 import { MAX_CONNECTIONS_PER_IP } from "../security/rateLimit.js";
 import { TranslationService, type LlmClient } from "../translate/TranslationService.js";
-import { mintAdminToken } from "../security/adminAuth.js";
-import { clientAddress, SignalingServer } from "./server.js";
+import { accessKey, ACCESS_TTL_MS, mintAccessToken, verifyAccessToken } from "../auth/accessTokens.js";
+import { clientAddress, SignalingServer, type AccessVerifier } from "./server.js";
 
 let server: Server;
 let signaling: SignalingServer;
@@ -34,15 +34,46 @@ function config(): Config {
     repoRoot: root,
     allowedOrigins: [ORIGIN],
     anthropicApiKey: "test",
+    authSecret: null,
+    signupMode: "invite",
+    ownerEmail: null,
     dailyCapUsd: 10,
     roomCapUsd: 1.5,
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    // No admin password: these suites exercise the room lifecycle, not the gate, and with no
-    // password configured the gate is off. The gate has its own suite that sets one.
-    adminPassword: null,
     isProduction: false,
     trustProxy: false,
+    dataDir: root,
+    databasePath: ":memory:",
   };
+}
+
+// Real access tokens, signed and checked by the real code, with no database behind them: the
+// socket layer only needs "which account is this", and the account rules have their own suites.
+const KEY = accessKey(randomBytes(32).toString("hex"));
+const verifier: AccessVerifier = { verifyAccess: (token, now) => verifyAccessToken(KEY, token, now) };
+
+/** An access token for this user, valid now. */
+function tokenFor(userId: string, now = Date.now()): string {
+  return mintAccessToken(KEY, userId, now).token;
+}
+
+/**
+ * Who a Client.connect() is signed in as when the test does not say. One shared account is the
+ * default because most suites here are about rooms, not people, and a resume has to come back as
+ * the account that took the seat. The account suites below pick users explicitly.
+ */
+const DEFAULT_USER = "user-default";
+
+interface ConnectOptions {
+  /** Sign in as this user, sending the token as `Authorization: Bearer`. */
+  user?: string;
+  /** Send exactly this bearer instead of minting one. Null sends none at all. */
+  bearer?: string | null;
+  /** Carry the token as the browser does, in the subprotocol list, instead of a header. */
+  viaSubprotocol?: boolean;
+  /** Override the server port (for suites with their own server). */
+  port?: number;
+  headers?: Record<string, string>;
 }
 
 // Counts its calls, because "no API call happened" is the actual requirement of the skip path
@@ -78,14 +109,20 @@ class Client {
     });
   }
 
-  static async connect(origin = ORIGIN): Promise<Client> {
+  static async connect(origin: string | null = ORIGIN, options: ConnectOptions = {}): Promise<Client> {
     // WS_PATH, not a bare origin. This helper used to omit it, which is part of why a client
     // that also omitted it looked fine here: both sides agreed on the wrong thing, and the
     // server accepted any path anyway.
-    const socket = new WebSocket(`ws://127.0.0.1:${port}${WS_PATH}`, { headers: { origin } });
+    const bearer = options.bearer === undefined ? tokenFor(options.user ?? DEFAULT_USER) : options.bearer;
+    const headers: Record<string, string> = { ...(options.headers ?? {}) };
+    if (origin !== null) headers["origin"] = origin;
+    if (bearer !== null && !options.viaSubprotocol) headers["authorization"] = `Bearer ${bearer}`;
+    const protocols = bearer !== null && options.viaSubprotocol ? ["translatv.v1", `bearer.${bearer}`] : undefined;
+    const socket = new WebSocket(`ws://127.0.0.1:${options.port ?? port}${WS_PATH}`, protocols, { headers });
     await new Promise((resolve, reject) => {
       socket.once("open", resolve);
       socket.once("error", reject);
+      socket.once("unexpected-response", (_req, res) => reject(new Error(`refused with ${res.statusCode}`)));
     });
     return new Client(socket);
   }
@@ -144,7 +181,7 @@ beforeEach(async () => {
   const translation = new TranslationService(echoClient, gate, root);
 
   server = createServer();
-  signaling = new SignalingServer(server, cfg, translation);
+  signaling = new SignalingServer(server, cfg, translation, verifier);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   port = (server.address() as { port: number }).port;
 });
@@ -599,7 +636,12 @@ describe("lines that need no translation", () => {
     // going to translate, and the client latches translation off over it.
     const keyless = createServer();
     const gate = new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5 });
-    const offline = new SignalingServer(keyless, config(), new TranslationService(null, gate, root));
+    const offline = new SignalingServer(
+      keyless,
+      config(),
+      new TranslationService(null, gate, root),
+      verifier,
+    );
     await new Promise<void>((resolve) => keyless.listen(0, "127.0.0.1", resolve));
 
     // Client.connect reads the module level port, so point it at the keyless server for the
@@ -1122,7 +1164,7 @@ describe("an async handler that rejects", () => {
     const broken = createServer();
     const gate = new SpendGate(brokenRoot, { dailyCapUsd: 10, roomCapUsd: 1.5 });
     const service = new TranslationService(echoClient, gate, brokenRoot);
-    const brokenSignaling = new SignalingServer(broken, config(), service);
+    const brokenSignaling = new SignalingServer(broken, config(), service, verifier);
     await new Promise<void>((resolve) => broken.listen(0, "127.0.0.1", resolve));
 
     const realPort = port;
@@ -1239,293 +1281,261 @@ describe("clientAddress", () => {
 });
 
 
-// Everything above runs with the gate OFF, which is the app as it behaved before any of this
-// existed. This suite is the gate itself, so it stands up its own server with a password set.
-// Its own server, not a reconfigured shared one, because half these tests turn on what happens
-// to a room AFTER someone leaves it, and that is not a state worth sharing between cases.
-describe("the admin gate", () => {
-  // Generated, not written down. See the note in adminAuth.test.ts: a password shaped literal
-  // reads as a committed credential to a scanner and to a person skimming the file.
-  const PASSWORD = randomBytes(24).toString("hex");
-  let gatedServer: Server;
-  let gatedSignaling: SignalingServer;
-  let gatedPort: number;
-  let gatedRoot: string;
+// ---------------------------------------------------------------------------
+// Accounts on the socket (M3).
+//
+// Its own server per case, not the shared one, because these tests turn on configuration
+// (production or not) and on what happens to a room AFTER someone leaves it, and neither is state
+// worth sharing between cases.
 
-  function token(): string {
-    return mintAdminToken(PASSWORD, Date.now());
+describe("accounts on the socket", () => {
+  let ownServer: Server;
+  let ownSignaling: SignalingServer;
+  let ownPort: number;
+  let ownRoot: string;
+
+  async function start(overrides: Partial<Config> = {}): Promise<void> {
+    ownRoot = mkdtempSync(join(tmpdir(), "ws-accounts-"));
+    mkdirSync(join(ownRoot, "out", "translatv"), { recursive: true });
+    writeFileSync(join(ownRoot, "out", "translatv", "spend_log.jsonl"), "", "utf8");
+    const cfg = { ...config(), repoRoot: ownRoot, ...overrides };
+    const gate = new SpendGate(ownRoot, { dailyCapUsd: cfg.dailyCapUsd, roomCapUsd: cfg.roomCapUsd });
+    ownServer = createServer();
+    ownSignaling = new SignalingServer(ownServer, cfg, new TranslationService(echoClient, gate, ownRoot), verifier);
+    await new Promise<void>((resolve) => ownServer.listen(0, "127.0.0.1", resolve));
+    ownPort = (ownServer.address() as { port: number }).port;
   }
-
-  /** Client.connect reads the shared `port`; this suite has its own server. */
-  async function gatedConnect(): Promise<Client> {
-    const socket = new WebSocket(`ws://127.0.0.1:${gatedPort}${WS_PATH}`, {
-      headers: { origin: ORIGIN },
-    });
-    await new Promise((resolve, reject) => {
-      socket.once("open", resolve);
-      socket.once("error", reject);
-    });
-    return new Client(socket);
-  }
-
-  beforeEach(async () => {
-    gatedRoot = mkdtempSync(join(tmpdir(), "ws-gated-"));
-    mkdirSync(join(gatedRoot, "out", "translatv"), { recursive: true });
-    writeFileSync(join(gatedRoot, "out", "translatv", "spend_log.jsonl"), "", "utf8");
-
-    const cfg = { ...config(), repoRoot: gatedRoot, adminPassword: PASSWORD };
-    const gate = new SpendGate(gatedRoot, { dailyCapUsd: cfg.dailyCapUsd, roomCapUsd: cfg.roomCapUsd });
-    gatedServer = createServer();
-    gatedSignaling = new SignalingServer(
-      gatedServer,
-      cfg,
-      new TranslationService(echoClient, gate, gatedRoot),
-    );
-    await new Promise<void>((resolve) => gatedServer.listen(0, "127.0.0.1", resolve));
-    gatedPort = (gatedServer.address() as { port: number }).port;
-  });
 
   afterEach(async () => {
-    gatedSignaling.close();
-    await new Promise<void>((resolve) => gatedServer.close(() => resolve()));
-    rmSync(gatedRoot, { recursive: true, force: true });
+    if (!ownServer) return;
+    ownSignaling.close();
+    await new Promise<void>((resolve) => ownServer.close(() => resolve()));
+    rmSync(ownRoot, { recursive: true, force: true });
   });
 
-  describe("starting a call", () => {
-    it("refuses someone with no token at all", async () => {
-      const ana = await gatedConnect();
+  function connect(origin: string | null, options: ConnectOptions = {}): Promise<Client> {
+    return Client.connect(origin, { port: ownPort, ...options });
+  }
+
+  /** How an upgrade ended: "open", or the HTTP status it was refused with. */
+  async function outcome(origin: string | null, options: ConnectOptions): Promise<string> {
+    try {
+      const client = await connect(origin, options);
+      client.close();
+      return "open";
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  describe("the upgrade, in production", () => {
+    beforeEach(() => start({ isProduction: true, allowedOrigins: [ORIGIN] }));
+
+    it("refuses an upgrade with no Origin and no bearer, with 401", async () => {
+      expect(await outcome(null, { bearer: null })).toBe("refused with 401");
+    });
+
+    it("accepts an upgrade with no Origin and a valid bearer, which is what a native client sends", async () => {
+      expect(await outcome(null, { user: "user-ios" })).toBe("open");
+    });
+
+    it("refuses a browser upgrade from a bad Origin even with a valid bearer", async () => {
+      // The allowlist is a browser's CSRF defense, and a token does not buy a hostile page past it.
+      expect(await outcome("http://evil.example", { user: "user-ana" })).toBe("refused with 403");
+    });
+
+    it("accepts a browser upgrade from an allowed Origin that carries its token as a subprotocol", async () => {
+      const client = await connect(ORIGIN, { user: "user-ana", viaSubprotocol: true });
+      // The server selects the app protocol and never echoes the bearer entry back.
+      expect(client.socket.protocol).toBe("translatv.v1");
+      client.close();
+    });
+
+    it("refuses a browser upgrade from an allowed Origin with no token, with 401", async () => {
+      expect(await outcome(ORIGIN, { bearer: null })).toBe("refused with 401");
+    });
+
+    it("refuses an expired access token", async () => {
+      const stale = tokenFor("user-ana", Date.now() - ACCESS_TTL_MS - 1);
+      expect(await outcome(null, { bearer: stale })).toBe("refused with 401");
+      expect(await outcome(ORIGIN, { bearer: stale, viaSubprotocol: true })).toBe("refused with 401");
+    });
+
+    it("refuses a token signed with some other key", async () => {
+      const foreign = mintAccessToken(accessKey("some other secret entirely"), "user-ana", Date.now()).token;
+      expect(await outcome(null, { bearer: foreign })).toBe("refused with 401");
+    });
+  });
+
+  describe("the upgrade, in development", () => {
+    beforeEach(() => start({ isProduction: false }));
+
+    it("still refuses an unauthenticated upgrade: every call needs an account", async () => {
+      expect(await outcome(ORIGIN, { bearer: null })).toBe("refused with 401");
+      expect(await outcome(null, { bearer: null })).toBe("refused with 401");
+    });
+  });
+
+  describe("rooms", () => {
+    beforeEach(() => start());
+
+    async function hostsRoom(user = "user-ana") {
+      const ana = await connect(ORIGIN, { user });
       ana.send({ t: "room.create", username: "Ana", dialect: "en-US", wantsVideo: false });
-      expect((await ana.next("error")).code).toBe("ADMIN_REQUIRED");
-      ana.close();
-    });
-
-    it("refuses a token that was not signed with this password", async () => {
-      // The shape of a real token, signed by someone else. This is the forgery that matters:
-      // anything that merely looks wrong would be caught by parsing.
-      const ana = await gatedConnect();
-      ana.send({
-        t: "room.create",
-        username: "Ana",
-        dialect: "en-US",
-        wantsVideo: false,
-        adminToken: mintAdminToken("a different password", Date.now()),
-      });
-      expect((await ana.next("error")).code).toBe("ADMIN_REQUIRED");
-      ana.close();
-    });
-
-    it("lets the admin through and marks them admin on the wire", async () => {
-      const ana = await gatedConnect();
-      ana.send({
-        t: "room.create",
-        username: "Ana",
-        dialect: "en-US",
-        wantsVideo: false,
-        adminToken: token(),
-      });
-      const created = await ana.next("room.created");
-      expect(created.you.isAdmin).toBe(true);
-      ana.close();
-    });
-  });
-
-  describe("joining a call", () => {
-    async function adminCreates() {
-      const ana = await gatedConnect();
-      ana.send({
-        t: "room.create",
-        username: "Ana",
-        dialect: "en-US",
-        wantsVideo: false,
-        adminToken: token(),
-      });
       return { ana, code: (await ana.next("room.created")).code };
     }
 
-    it("lets a guest in while the admin is sitting there", async () => {
-      const { ana, code } = await adminCreates();
-      const ben = await gatedConnect();
+    it("lets any signed in user create a room, and makes them its host", async () => {
+      const { ana } = await hostsRoom();
+      const created = ana.received.find((m) => m.t === "room.created");
+      expect(created?.t === "room.created" && created.you.isHost).toBe(true);
+      ana.close();
+    });
+
+    it("lets a guest in while the host is sitting there, and says who is who", async () => {
+      const { ana, code } = await hostsRoom();
+      const ben = await connect(ORIGIN, { user: "user-ben" });
       ben.send({ t: "room.join", code, username: "Ben", dialect: "es-AR" });
       const joined = await ben.next("room.joined");
-      // The guest is a guest, and knows it. The admin flag is the server's answer about what
-      // was proved, never an echo of what the client asked for.
-      expect(joined.you.isAdmin).toBe(false);
-      expect(joined.peer?.isAdmin).toBe(true);
+      expect(joined.you.isHost).toBe(false);
+      expect(joined.peer?.isHost).toBe(true);
+      // The peer is described by its opaque member id, never by the account behind it.
+      expect(JSON.stringify(joined)).not.toContain("user-ana");
       ana.close();
       ben.close();
     });
 
-    it("refuses a guest once the admin has gone", async () => {
-      const { ana, code } = await adminCreates();
-      ana.send({ t: "room.leave" });
-      await ana.closed();
-
-      const ben = await gatedConnect();
-      ben.send({ t: "room.join", code, username: "Ben", dialect: "es-AR" });
-      expect((await ben.next("error")).code).toBe("ADMIN_NOT_PRESENT");
-      ben.close();
-    });
-
-    it("refuses a guest for a room that never existed, revealing nothing either way", async () => {
-      // Same refusal as a real room with no admin in it. A code guesser learns only that they
-      // are not the admin, which they already knew.
-      const ben = await gatedConnect();
+    it("refuses a guest with HOST_NOT_PRESENT for a code with no live room", async () => {
+      const ben = await connect(ORIGIN, { user: "user-ben" });
       ben.send({ t: "room.join", code: "ZZZZZZZZ", username: "Ben", dialect: "es-AR" });
-      expect((await ben.next("error")).code).toBe("ADMIN_NOT_PRESENT");
+      const error = await ben.next("error");
+      expect(error.code).toBe("HOST_NOT_PRESENT");
+      expect(error.fatal).toBe(true);
       ben.close();
     });
 
-    it("lets the admin rejoin their own room, which has no admin in it at that moment", async () => {
-      // The gap the guest rule would close over if it were written as "the room must contain an
-      // admin" without the "or you are one" half. The owner coming back to their own room must
-      // not be locked out of it.
-      const { ana, code } = await adminCreates();
+    it("tells someone arriving after the host ENDED the call that it ended, not to wait", async () => {
+      const { ana, code } = await hostsRoom();
       ana.send({ t: "room.leave" });
       await ana.closed();
 
-      const again = await gatedConnect();
-      again.send({ t: "room.join", code, username: "Ana", dialect: "en-US", adminToken: token() });
-      // The room was ended by the admin leaving, so this is ROOM_ENDED rather than a seat. The
-      // point is the refusal is about the ROOM being gone, not about who is asking.
-      expect((await again.next("error")).code).toBe("ROOM_ENDED");
-      again.close();
+      const ben = await connect(ORIGIN, { user: "user-ben" });
+      ben.send({ t: "room.join", code, username: "Ben", dialect: "es-AR" });
+      expect((await ben.next("error")).code).toBe("ROOM_ENDED");
+      ben.close();
     });
-  });
 
-  describe("the admin dropping rather than leaving", () => {
-    async function adminAndGuest() {
-      const ana = await gatedConnect();
-      ana.send({
-        t: "room.create",
-        username: "Ana",
-        dialect: "en-US",
-        wantsVideo: false,
-        adminToken: token(),
-      });
-      const code = (await ana.next("room.created")).code;
-      const ben = await gatedConnect();
+    it("counts a RECONNECTING host as present, so a guest can still arrive mid blip", async () => {
+      const { ana, code } = await hostsRoom();
+      const ben = await connect(ORIGIN, { user: "user-ben" });
       ben.send({ t: "room.join", code, username: "Ben", dialect: "es-AR" });
       await ben.next("room.joined");
       await ana.next("peer.joined");
-      return { ana, ben, code };
-    }
 
-    it("counts a RECONNECTING admin as present, so a guest can still arrive mid blip", async () => {
-      // A dropped socket is not a departure: the seat is held for the grace window. Someone
-      // arriving during a thirty second wifi hop must not be turned away from a call that is
-      // still very much happening.
-      //
-      // Ben is here to make the drop OBSERVABLE. Waiting a fixed number of milliseconds for the
-      // server to notice would let this pass on a slow runner without having tested anything:
-      // an admin the server still thinks is CONNECTED is trivially present, so the assertion
-      // would hold for the wrong reason. Ben is told the instant the state actually changes.
-      const { ana, ben, code } = await adminAndGuest();
       ana.socket.terminate();
-      const state = await ben.next("peer.state");
-      expect(state.connection).toBe("reconnecting");
-
-      // Free the seat so someone new can try for it. Ben is a guest, so this ends nothing.
+      expect((await ben.next("peer.state")).connection).toBe("reconnecting");
       ben.send({ t: "room.leave" });
       await ben.closed();
 
-      const cal = await gatedConnect();
+      const cal = await connect(ORIGIN, { user: "user-cal" });
       cal.send({ t: "room.join", code, username: "Cal", dialect: "es-AR" });
       expect((await cal.next("room.joined")).code).toBe(code);
       cal.close();
     });
 
-    it("ends the room once the admin's grace window actually expires", async () => {
-      // The other end of the same rule, and the one that had no test at all: mutating this path
-      // off passed the whole suite. Driven through sweepAt rather than by waiting, because the
-      // grace window is a minute.
-      const { ana, ben, code } = await adminAndGuest();
-      ana.socket.terminate();
-      // The server telling Ben is the signal that it has processed the drop. Sweeping before it
-      // has would expire nothing and the test would hang rather than fail.
-      expect((await ben.next("peer.state")).connection).toBe("reconnecting");
-
-      gatedSignaling.sweepAt(Date.now() + GRACE_MS + 1_000);
-
-      const ended = await ben.next("room.ended");
-      expect(ended.byUsername).toBe("Ana");
-      expect(await ben.closed()).toBe(CLOSE.roomEnded);
-
-      // And the room is genuinely gone rather than left as a husk nobody can enter. This is the
-      // shape of the bug review found: hasAdminPresent used to sweep and swallow the release,
-      // so the expiry was consumed, endRoom never ran, and the guest sat in a room that could
-      // not end and that nobody could join.
-      const late = await gatedConnect();
-      late.send({ t: "room.join", code, username: "Cal", dialect: "es-AR", adminToken: token() });
-      expect((await late.next("error")).code).toBe("ROOM_ENDED");
-      late.close();
-    });
-
-    it("does not end the room when a GUEST's grace window expires", async () => {
-      const { ana, ben, code } = await adminAndGuest();
-      ben.socket.terminate();
-      expect((await ana.next("peer.state")).connection).toBe("reconnecting");
-
-      gatedSignaling.sweepAt(Date.now() + GRACE_MS + 1_000);
-
-      const left = await ana.next("peer.left");
-      expect(left.reason).toBe("timeout");
-      expect(ana.received.some((m) => m.t === "room.ended")).toBe(false);
-
-      // The seat is free and the admin is still there, so a new guest can take it.
-      const cal = await gatedConnect();
-      cal.send({ t: "room.join", code, username: "Cal", dialect: "es-AR" });
-      expect((await cal.next("room.joined")).code).toBe(code);
-      cal.close();
-      ana.close();
-    });
-  });
-
-  describe("the admin leaving", () => {
-    it("ends the call for the guest rather than leaving them in an empty room", async () => {
-      const ana = await gatedConnect();
-      ana.send({
-        t: "room.create",
-        username: "Ana",
-        dialect: "en-US",
-        wantsVideo: false,
-        adminToken: token(),
-      });
-      const code = (await ana.next("room.created")).code;
-
-      const ben = await gatedConnect();
-      ben.send({ t: "room.join", code, username: "Ben", dialect: "es-AR" });
-      await ben.next("room.joined");
-
-      ana.send({ t: "room.leave" });
-
-      const ended = await ben.next("room.ended");
-      expect(ended.byUsername).toBe("Ana");
-      expect(await ben.closed()).toBe(CLOSE.roomEnded);
-    });
-
-    it("does not end the call when a GUEST leaves", async () => {
-      // The rule is about the admin specifically. A guest leaving frees a seat, exactly as it
-      // always did, and the admin stays in their room.
-      const ana = await gatedConnect();
-      ana.send({
-        t: "room.create",
-        username: "Ana",
-        dialect: "en-US",
-        wantsVideo: false,
-        adminToken: token(),
-      });
-      const code = (await ana.next("room.created")).code;
-
-      const ben = await gatedConnect();
+    it("ends the room once the host's grace window actually expires", async () => {
+      const { ana, code } = await hostsRoom();
+      const ben = await connect(ORIGIN, { user: "user-ben" });
       ben.send({ t: "room.join", code, username: "Ben", dialect: "es-AR" });
       await ben.next("room.joined");
       await ana.next("peer.joined");
 
-      ben.send({ t: "room.leave" });
-      const left = await ana.next("peer.left");
-      expect(left.reason).toBe("left");
+      ana.socket.terminate();
+      expect((await ben.next("peer.state")).connection).toBe("reconnecting");
+      ownSignaling.sweepAt(Date.now() + GRACE_MS + 1_000);
+
+      expect((await ben.next("room.ended")).byUsername).toBe("Ana");
+      expect(await ben.closed()).toBe(CLOSE.roomEnded);
+    });
+
+    it("does not end the room when a GUEST's grace window expires", async () => {
+      const { ana, code } = await hostsRoom();
+      const ben = await connect(ORIGIN, { user: "user-ben" });
+      ben.send({ t: "room.join", code, username: "Ben", dialect: "es-AR" });
+      await ben.next("room.joined");
+      await ana.next("peer.joined");
+
+      ben.socket.terminate();
+      expect((await ana.next("peer.state")).connection).toBe("reconnecting");
+      ownSignaling.sweepAt(Date.now() + GRACE_MS + 1_000);
+
+      expect((await ana.next("peer.left")).reason).toBe("timeout");
       expect(ana.received.some((m) => m.t === "room.ended")).toBe(false);
       ana.close();
+    });
+
+    it("ends the call for the guest when the host leaves", async () => {
+      const { ana, code } = await hostsRoom();
+      const ben = await connect(ORIGIN, { user: "user-ben" });
+      ben.send({ t: "room.join", code, username: "Ben", dialect: "es-AR" });
+      await ben.next("room.joined");
+
+      ana.send({ t: "room.leave" });
+      expect((await ben.next("room.ended")).byUsername).toBe("Ana");
+      expect(await ben.closed()).toBe(CLOSE.roomEnded);
+    });
+
+    it("refuses someone else's resume token, even presented with the right code", async () => {
+      const { ana, code } = await hostsRoom("user-ana");
+      const created = ana.received.find((m) => m.t === "room.created");
+      if (created?.t !== "room.created") throw new Error("no room.created");
+      ana.close();
+      await new Promise((r) => setTimeout(r, 50));
+
+      const mallory = await connect(ORIGIN, { user: "user-mallory" });
+      mallory.send({ t: "room.resume", code, resumeToken: created.resumeToken });
+      expect((await mallory.next("error")).code).toBe("INVALID_RESUME");
+      mallory.close();
+
+      // And the owner of the seat can still reclaim it: the attempt rotated nothing.
+      const back = await connect(ORIGIN, { user: "user-ana" });
+      back.send({ t: "room.resume", code, resumeToken: created.resumeToken });
+      expect((await back.next("room.joined")).code).toBe(code);
+      back.close();
+    });
+  });
+
+  describe("per account limits", () => {
+    // Trusting the forwarded header lets each socket arrive from its own address, which is what
+    // isolates the ACCOUNT bucket: the address buckets never fill.
+    beforeEach(() => start({ trustProxy: true }));
+
+    it("refuses creates past the account's budget even from fresh addresses", async () => {
+      const outcomes: string[] = [];
+      for (let i = 0; i < 6; i += 1) {
+        const client = await connect(ORIGIN, {
+          user: "user-busy",
+          headers: { "x-forwarded-for": `198.51.100.${i + 1}` },
+        });
+        client.send({ t: "room.create", username: "Ana", dialect: "en-US", wantsVideo: false });
+        // Polled rather than raced between two next() calls, which would leave the loser's
+        // timeout to reject after the test had finished.
+        let reply: ServerMessage | undefined;
+        for (let tries = 0; tries < 100 && !reply; tries += 1) {
+          reply = client.received.find((m) => m.t === "room.created" || m.t === "error");
+          if (!reply) await new Promise((r) => setTimeout(r, 20));
+        }
+        outcomes.push(reply?.t === "error" ? reply.code : reply ? "created" : "no answer");
+        client.close();
+      }
+      expect(outcomes.slice(0, 5)).toEqual(Array(5).fill("created"));
+      expect(outcomes[5]).toBe("RATE_LIMITED");
+
+      // A different account from yet another address is untouched by that budget.
+      const other = await connect(ORIGIN, { user: "user-calm", headers: { "x-forwarded-for": "198.51.100.99" } });
+      other.send({ t: "room.create", username: "Cal", dialect: "en-US", wantsVideo: false });
+      expect((await other.next("room.created")).t).toBe("room.created");
+      other.close();
     });
   });
 });

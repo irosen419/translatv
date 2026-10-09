@@ -12,14 +12,23 @@
 // it verifies everything except the browser's speech engine itself, which needs a real
 // microphone and a human voice. That gap is what script/spike.html exists for.
 //
+// Accounts (M4): every call needs a signed in account. The server runs with SIGNUP_MODE=open so
+// this harness can make its own. Ana and Ben sign up through the real sign up screen (and Ben
+// signs out and back in through the sign in screen), because those screens are part of what is
+// being verified. Everyone after them gets an account through the API and starts signed in, with
+// the refresh token placed in their browser's storage exactly where the client keeps it, because
+// clicking through the same form six more times would test nothing new.
+//
 // Run with: node script/e2e.mjs
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { createServer } from "node:net";
+import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { chromiumLaunchOptions, chromiumSource } from "./chromium.mjs";
+import { accountsEnv, emailFor, PASSWORD, signedInContext as signedInContextFor } from "./accounts.mjs";
 import { copyFor } from "./copy.mjs";
 
 /**
@@ -100,14 +109,221 @@ async function waitFor(fn, description, timeoutMs = 15_000) {
   throw new Error(`timed out waiting for ${description}: ${JSON.stringify(last)?.slice(0, 200)}`);
 }
 
+/** A context that starts signed in as a fresh account, made through the API. */
+function signedInContext(name, options = {}) {
+  return signedInContextFor(browser, BASE, name, options);
+}
+
+/** Sign up through the real screen, as a person would. */
+async function signUpViaScreen(page, name) {
+  await page.goto(BASE);
+  await page.getByRole("button", { name: en("auth.switch.toSignUp") }).click();
+  await page.getByLabel(en("auth.displayName"), { exact: true }).fill(name);
+  await page.getByLabel(en("auth.email")).fill(emailFor(name));
+  await page.getByLabel(en("auth.password")).fill(PASSWORD);
+  await page.getByRole("button", { name: en("auth.submit.signUp") }).click();
+  await page.getByRole("button", { name: "Start a new chat" }).waitFor();
+}
+
+/** Open the sign up form, as a person arriving at the app would. */
+async function openSignUp(page, base) {
+  await page.goto(base);
+  await page.getByRole("button", { name: en("auth.switch.toSignUp") }).click();
+}
+
+/** Fill in the sign up form on an invite only server and submit it. The outcome is the caller's. */
+async function submitSignUp(page, name, invite) {
+  await page.getByLabel(en("auth.displayName"), { exact: true }).fill(name);
+  await page.getByLabel(en("auth.email")).fill(emailFor(name));
+  await page.getByLabel(en("auth.password")).fill(PASSWORD);
+  await page.getByLabel(en("auth.invite")).fill(invite);
+  await page.getByRole("button", { name: en("auth.submit.signUp") }).click();
+}
+
+/**
+ * A session for `name` (its access token and user), from a sign in of its own. A new token family,
+ * so no page's session moves: refreshing the token a page holds from here would rotate it out from
+ * under that page.
+ */
+async function apiSignIn(base, name) {
+  const response = await fetch(`${base}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: emailFor(name), password: PASSWORD }),
+  });
+  if (!response.ok) throw new Error(`sign in for ${name} answered ${response.status}`);
+  return response.json();
+}
+
+/** Delete `session`'s account through the API, as another device would. Resolves the status. */
+async function apiDeleteAccount(base, session) {
+  const response = await fetch(`${base}/api/account`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json", authorization: `Bearer ${session.accessToken}` },
+    body: JSON.stringify({ password: PASSWORD, userId: session.user.id }),
+  });
+  return response.status;
+}
+
+/**
+ * Make an account called `name` on an invite only server, with an invite `owner` mints through the
+ * API. Resolves the sign up's answer: its tokens and user.
+ */
+async function apiInviteSignUp(base, owner, name) {
+  const invite = await fetch(`${base}/api/invites`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${owner.accessToken}` },
+  }).then((response) => response.json());
+  const response = await fetch(`${base}/api/auth/signup`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: emailFor(name), password: PASSWORD, displayName: name, invite: invite.code }),
+  });
+  if (response.status !== 201) throw new Error(`signup for ${name} answered ${response.status}`);
+  return response.json();
+}
+
+/** A context that starts signed in with `refreshToken`, kept where the client keeps it. */
+function contextSignedInWith(base, refreshToken, options = {}) {
+  return browser.newContext({
+    ...options,
+    storageState: {
+      cookies: [],
+      origins: [{ origin: base, localStorage: [{ name: "translatv.refresh", value: refreshToken }] }],
+    },
+  });
+}
+
+/** A local port nothing listens on: the OS picks a free one, and it is released again. */
+async function closedPort() {
+  const probe = createServer();
+  await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const { port } = probe.address();
+  await new Promise((resolve) => probe.close(resolve));
+  return port;
+}
+
+/**
+ * Installed before a page loads: an outage the test switches on, for the page's sockets alone.
+ * Every socket the page opens is kept, so the test can drop them. While `__offline` is set, a new
+ * one goes to `deadUrl`, where nothing listens, so it never opens: from inside the app that is an
+ * outage, and also how a refused token looks. `__failedWhileOffline` counts those.
+ */
+function socketOutageSwitch(deadUrl) {
+  const Real = window.WebSocket;
+  window.__sockets = [];
+  window.__protocols = [];
+  window.__offline = false;
+  window.__failedWhileOffline = 0;
+  window.WebSocket = class extends Real {
+    constructor(url, protocols) {
+      const offline = window.__offline;
+      super(offline ? deadUrl : url, protocols);
+      if (offline) this.addEventListener("close", () => (window.__failedWhileOffline += 1));
+      window.__sockets.push(this);
+      window.__protocols.push([protocols ?? []].flat());
+    }
+  };
+}
+
+/**
+ * The account a socket's subprotocols speak for, or null: the bearer is `<payload>.<signature>`,
+ * and the payload is base64url JSON naming the user (server/src/auth/accessTokens.ts).
+ */
+function accountOfSocket(protocols) {
+  const bearer = protocols.find((protocol) => protocol.startsWith("bearer."));
+  if (!bearer) return null;
+  try {
+    const payload = bearer.slice("bearer.".length).split(".")[0];
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")).sub ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A notice a screen reader is told about. Each of these arrives with the screen that shows it,
+ * text and all, and a region inserted already holding its text is announced reliably only as an
+ * alert: a polite status announces changes to a region that was already there (reasoned from ARIA
+ * and how screen readers treat live regions; no screen reader was run). So only an alert counts
+ * here. Accepting a status as well let a notice inserted as one pass (measured in review), and that
+ * one is likely silent. A polite region kept mounted, with its text changed in place, would be
+ * announced, and would need this taught to recognize that region.
+ */
+const announced = (page, text) => page.locator('[role="alert"]').filter({ hasText: text });
+
+/**
+ * Start `npx tsx server/src/index.ts` as a process group of its own, and stop it as one. npx does
+ * not forward SIGTERM to the tsx it starts, nor tsx to its node, so killing only the npx left the
+ * server running after every run (one leaked per run, measured), still holding its port and data.
+ */
+function startServer(env) {
+  return spawn("npx", ["tsx", "server/src/index.ts"], { env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+}
+function stopServer(child) {
+  if (!child?.pid) return;
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    // Already gone.
+  }
+}
+
+/** Whether the server at base answers its health check right now. */
+async function answers(base) {
+  try {
+    return (await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(1000) })).ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether the server at base stops answering within ms. Dropping `detached` above, or signalling
+ * only the npx, left both servers running after every run with every check green (measured in
+ * review), so a stop is checked rather than assumed.
+ */
+async function goneWithin(base, ms) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (!(await answers(base))) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}
+
+/**
+ * Installed before a page loads: records whether the sign in form was EVER inserted. It reads the
+ * mutation records rather than the live document, because React can mount the form and swap it
+ * out within one task, before any observer callback sees the DOM. Keyed on the email field, which
+ * only the sign in form has (the delete account form shares its heading class).
+ */
+function watchForSignInForm() {
+  window.__sawSignInForm = false;
+  new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (node.matches("#auth-email") || node.querySelector("#auth-email")) window.__sawSignInForm = true;
+      }
+    }
+  }).observe(document, { childList: true, subtree: true });
+}
+
+/** Resolves true once the locator shows up, false if it never does. */
+const reached = (locator) =>
+  locator
+    .waitFor()
+    .then(() => true)
+    .catch(() => false);
+
 // A ledger root the server can write to without touching the repo's real one.
 const root = mkdtempSync(join(tmpdir(), "e2e-"));
 mkdirSync(join(root, "out", "translatv"), { recursive: true });
 writeFileSync(join(root, "out", "translatv", "spend_log.jsonl"), "", "utf8");
 
 console.log("Starting server...");
-const server = spawn("npx", ["tsx", "server/src/index.ts"], {
-  env: {
+const server = startServer({
     ...process.env,
     // 0 means "any free port". The real one comes back on the listening log line.
     PORT: "0",
@@ -117,15 +333,35 @@ const server = spawn("npx", ["tsx", "server/src/index.ts"], {
     // Deliberately NO ANTHROPIC_API_KEY. This run verifies the degraded mode end to end:
     // the call, the transcript, and the original text must all work with translation off.
     ANTHROPIC_API_KEY: "",
-  },
-  stdio: ["ignore", "pipe", "pipe"],
+    // Open signup and a throwaway database: see script/accounts.mjs.
+    ...accountsEnv(root),
 });
 const serverLog = [];
 server.stdout.on("data", (d) => serverLog.push(String(d)));
 server.stderr.on("data", (d) => serverLog.push(String(d)));
 
 let browser;
+/** The second server, for the invite only section. Killed in finally if a step before it throws. */
+let inviteServer = null;
+
+// The servers are detached (their own process groups), so a signal sent to this run's group, as
+// a terminal's Ctrl-C or a closed terminal sends, no longer reaches them, and Node exits on these
+// signals without running the finally below. So they are stopped here too, the scratch root is
+// removed, and the run exits as a shell expects, 128 plus the signal's number. A SIGKILL cannot
+// be caught: after one, both servers are still running, and the scratch root and the browser's
+// profile directory stay on disk.
+for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    stopServer(inviteServer);
+    stopServer(server);
+    rmSync(root, { recursive: true, force: true });
+    process.exit(128 + constants.signals[signal]);
+  });
+}
+
 const pages = {};
+/** Set to a page's name for the one step that expects the server to answer 401. */
+let expectRefusal = null;
 const errors = [];
 try {
   PORT = await waitFor(
@@ -150,12 +386,20 @@ try {
   const ana = await contextA.newPage();
   const ben = await contextB.newPage();
 
+  // Every socket URL any page opens, to prove the access token never rides in one.
+  const socketUrls = [];
+  for (const page of [ana, ben]) page.on("websocket", (ws) => socketUrls.push(ws.url()));
+
   pages.ana = ana;
   pages.ben = ben;
   for (const [name, page] of [["ana", ana], ["ben", ben]]) {
     page.on("pageerror", (e) => errors.push(`${name}: ${e.message}`));
     page.on("console", (m) => {
-      if (m.type() === "error") errors.push(`${name} console: ${m.text()}`);
+      if (m.type() !== "error") return;
+      // The browser logs every non 2xx response as a console error. The one 401 this run asks
+      // for on purpose (a wrong password, below) is not a page fault, and is the only one let by.
+      if (expectRefusal === name && /status of 401/.test(m.text())) return;
+      errors.push(`${name} console: ${m.text()}`);
     });
     // A renderer death surfaces as "Target crashed" on whichever call happened to be in flight,
     // which names the wrong thing and cost a long investigation once already. Say plainly that
@@ -170,8 +414,56 @@ try {
   }
 
   // ---------------------------------------------------------------------
-  section("Creating a room");
+  section("Accounts");
   await ana.goto(BASE);
+  check(
+    "someone with no account is asked to sign in before anything else",
+    await ana.getByRole("button", { name: en("auth.submit.signIn") }).isVisible(),
+  );
+  check(
+    "an open server does not ask for an invite code",
+    (await ana.getByLabel(en("auth.invite")).count()) === 0,
+  );
+  await signUpViaScreen(ana, "Ana");
+  check(
+    "signing up lands on the start page, signed in",
+    (await ana.locator(".account-strip").innerText()).includes(en("account.signedInAs").replace("{name}", "Ana")),
+  );
+
+  await signUpViaScreen(ben, "Ben");
+  await ben.getByRole("button", { name: en("account.signOut") }).click();
+  check(
+    "signing out goes back to the sign in screen",
+    await ben
+      .getByRole("button", { name: en("auth.submit.signIn") })
+      .waitFor()
+      .then(() => true)
+      .catch(() => false),
+  );
+  check(
+    "and forgets the refresh token",
+    (await ben.evaluate(() => localStorage.getItem("translatv.refresh"))) === null,
+  );
+  await ben.getByLabel(en("auth.email")).fill(emailFor("Ben"));
+  await ben.getByLabel(en("auth.password")).fill("not the password");
+  expectRefusal = "ben";
+  await ben.getByRole("button", { name: en("auth.submit.signIn") }).click();
+  check(
+    "a wrong password is refused with a sentence, not a crash",
+    await ben
+      .getByText(en("auth.error.INVALID_CREDENTIALS"))
+      .waitFor()
+      .then(() => true)
+      .catch(() => false),
+  );
+  await ben.getByLabel(en("auth.password")).fill(PASSWORD);
+  await ben.getByRole("button", { name: en("auth.submit.signIn") }).click();
+  await ben.getByRole("button", { name: "Start a new chat" }).waitFor();
+  expectRefusal = null;
+  check("signing back in with the right password works", true);
+
+  // ---------------------------------------------------------------------
+  section("Creating a room");
   await ana.getByRole("button", { name: "Start a new chat" }).click();
   await ana.getByLabel("Your name, just for this chat").fill("Ana");
   await ana.getByLabel("Your language and region").selectOption("en-US");
@@ -189,7 +481,6 @@ try {
 
   // ---------------------------------------------------------------------
   section("Joining with the code");
-  await ben.goto(BASE);
 
   // Pasting a shared link into the code field has to work, because that is what people actually
   // have on the clipboard after clicking "Copy chat link". This used to leave "HTTP://LOCAL" in
@@ -484,8 +775,8 @@ try {
   // A fresh room, not Ana and Ben's: both of them joined WITH video from the start, so their room
   // can never exercise the case the disabled button used to make permanent, someone who unchecked
   // the camera box at the prejoin screen. New room, new pair.
-  const contextFin = await browser.newContext({ permissions: ["microphone", "camera"] });
-  const contextGia = await browser.newContext({ permissions: ["microphone", "camera"] });
+  const contextFin = await signedInContext("Fin", { permissions: ["microphone", "camera"] });
+  const contextGia = await signedInContext("Gia", { permissions: ["microphone", "camera"] });
   const fin = await contextFin.newPage();
   const gia = await contextGia.newPage();
   pages.fin = fin;
@@ -560,7 +851,7 @@ try {
   // the symptom is invisible to the UI. A track nobody stops is a camera light that stays on for
   // the life of the tab, long after the room is gone.
   const HELD_MS = 4_000;
-  const contextHal = await browser.newContext({ permissions: ["microphone", "camera"] });
+  const contextHal = await signedInContext("Hal", { permissions: ["microphone", "camera"] });
   await contextHal.addInitScript((heldMs) => {
     window.__cameraTracks = [];
     const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -619,20 +910,33 @@ try {
     "Ben's page to come back",
   );
   check("a reload lands on a usable page rather than a blank one", backUp.length > 0);
-  // Back in English: a reload drops the seat and the chosen dialect with it, so Ben lands on the
-  // same first screen anybody else would.
+  // A reload drops the seat, so Ben lands on the same first screen anybody else would. It may
+  // paint in the browser's English for the moment before his stored preference arrives.
   check(
     "the room code is remembered for rejoining",
-    backUp.includes(en("landing.codeLabel")) || backUp.includes(en("panel.title")),
+    [en("landing.codeLabel"), en("panel.title"), es("landing.codeLabel"), es("panel.title")].some((t) =>
+      backUp.includes(t),
+    ),
   );
+  // Ben picked es-AR before his first join, and that choice is stored on his account (M5), so
+  // the page settles in his dialect rather than staying in the browser's English.
+  const inHisDialect = await waitFor(
+    async () => ((await ben.locator("body").innerText()).includes(es("landing.join")) ? true : null),
+    "Ben's stored dialect to apply after the reload",
+  );
+  check("a reload restores the dialect stored on the account", inHisDialect === true);
 
   // Put Ben back in the room. A reload drops the media permission grant, so he rejoins through
-  // the form exactly as a real person would after refreshing.
+  // the form exactly as a real person would after refreshing. The picker already reads es-AR,
+  // from the stored preference, so it is left alone.
   if (!(await ben.locator(".room").isVisible())) {
-    await ben.getByLabel("Room code").fill(code);
-    await ben.getByRole("button", { name: "Join chat" }).click();
-    await ben.getByLabel("Your name, just for this chat").fill("Ben");
-    await ben.getByLabel("Your language and region").selectOption("es-AR");
+    await ben.getByLabel(es("landing.codeLabel")).fill(code);
+    await ben.getByRole("button", { name: es("landing.join") }).click();
+    await ben.getByLabel(es("prejoin.name.label")).fill("Ben");
+    check(
+      "the pre join dialect defaults from the stored preference",
+      (await ben.getByLabel(es("prejoin.dialect.label")).inputValue()) === "es-AR",
+    );
     await ben.getByRole("button", { name: es("prejoin.submit.join") }).click();
     await waitFor(async () => ben.locator(".room").isVisible(), "Ben to rejoin after reloading");
   }
@@ -641,7 +945,7 @@ try {
 
   // ---------------------------------------------------------------------
   section("Room capacity");
-  const cam = await (await browser.newContext({ permissions: ["microphone"] })).newPage();
+  const cam = await (await signedInContext("Cam", { permissions: ["microphone"] })).newPage();
   await cam.goto(BASE);
   await cam.getByLabel("Room code").fill(code);
   await cam.getByRole("button", { name: "Join chat" }).click();
@@ -713,7 +1017,7 @@ try {
   // layout. On iOS Safari 100vh is the viewport measured as though the URL bar were hidden, so
   // the page scrolled, the settings drawer could be reached by scrolling toward it, and its last
   // row sat below the fold where it could not be tapped at all.
-  const phoneContext = await browser.newContext({
+  const phoneContext = await signedInContext("Dana", {
     viewport: { width: 390, height: 844 },
     permissions: ["microphone", "camera"],
   });
@@ -772,7 +1076,7 @@ try {
   );
   check("everyone is told the chat ended, and by whom", true);
 
-  const rejoin = await browser.newContext({ permissions: ["microphone"] }).then((c) => c.newPage());
+  const rejoin = await signedInContext("Dee", { permissions: ["microphone"] }).then((c) => c.newPage());
   await rejoin.goto(BASE);
   await rejoin.getByLabel("Room code").fill(code);
   await rejoin.getByRole("button", { name: "Join chat" }).click();
@@ -789,9 +1093,435 @@ try {
   check("the code is dead after ending", Boolean(dead));
 
   // ---------------------------------------------------------------------
+  section("The call is on the host's account");
+  // Read through the API, as the iOS app will. The per user data service reaches the signaling
+  // server only through index.ts, and dropping it there silently turned off call history and the
+  // stored glossary with every other check green.
+  const anaToken = (await apiSignIn(BASE, "Ana")).accessToken;
+  const history = await fetch(`${BASE}/api/me/calls`, { headers: { authorization: `Bearer ${anaToken}` } })
+    .then((r) => r.json())
+    .catch(() => null);
+  check(
+    "the host's call history names the person who joined",
+    Array.isArray(history?.calls) && history.calls.some((call) => call.peer?.displayName === "Ben"),
+    JSON.stringify(history)?.slice(0, 200),
+  );
+
+  // ---------------------------------------------------------------------
+  section("Deleting an account");
+  // A page of its own, outside the console error watch above: the wrong password below answers
+  // 401 on purpose, and so does the sign in attempt after the account is gone.
+  const eve = await (await browser.newContext()).newPage();
+  await signUpViaScreen(eve, "Eve");
+  // Opening swaps the focused button for a form, and cancelling swaps it back. Focus left behind in
+  // a node that is gone falls to <body>, which drops a keyboard user at the top of the page.
+  await eve.getByRole("button", { name: en("account.delete.open") }).click();
+  check(
+    "opening it puts focus in the password field",
+    (await eve.evaluate(() => document.activeElement?.id)) === "delete-password",
+  );
+  await eve.getByRole("button", { name: en("account.delete.cancel") }).click();
+  check(
+    "cancelling puts focus back on the button that opened it",
+    (await eve.evaluate(() => document.activeElement?.textContent)) === en("account.delete.open"),
+  );
+  await eve.getByRole("button", { name: en("account.delete.open") }).click();
+  await eve.getByLabel(en("account.delete.password")).fill("not the password");
+  await eve.getByRole("button", { name: en("account.delete.confirm") }).click();
+  check(
+    "deleting needs the password: a wrong one is refused with a sentence",
+    await eve
+      .getByText(en("account.delete.wrongPassword"))
+      .waitFor()
+      .then(() => true)
+      .catch(() => false),
+  );
+  // The submit button is disabled while the request runs, which drops its focus to <body>.
+  check(
+    "after a refusal, focus is back in the password field",
+    (await eve.evaluate(() => document.activeElement?.id)) === "delete-password",
+  );
+  // Selected as well, ready to type over, and tied to the sentence that says why, so a screen
+  // reader coming back to the field hears the refusal and not just the label.
+  const retypeReady = () =>
+    eve.evaluate(() => {
+      const field = document.activeElement;
+      return (
+        field?.id === "delete-password" &&
+        field.value.length > 0 &&
+        field.selectionStart === 0 &&
+        field.selectionEnd === field.value.length
+      );
+    });
+  check("after a wrong password, the field is selected, ready to retype", await retypeReady());
+  check(
+    "the wrong password marks the field invalid and is tied to it",
+    await eve.evaluate(() => {
+      const field = document.getElementById("delete-password");
+      const reason = document.getElementById(field?.getAttribute("aria-describedby") ?? "");
+      return field?.getAttribute("aria-invalid") === "true" && reason?.getAttribute("role") === "alert";
+    }),
+  );
+  // Every other refusal the same way, not just a wrong password: focused and selected, tied to its
+  // sentence, and NOT marked invalid, since the password may well be right. Faked in this browser,
+  // so none touches the server's real limits, which the rest of the run signs in through. The
+  // expired sign in is answered for real by the refresh that follows it, so the tab stays signed in.
+  // "Not invalid" is anything but aria-invalid="true": an absent attribute and "false" mean the
+  // same to assistive technology, and either is a correct way to write it.
+  const tiedNotInvalid = () =>
+    eve.evaluate(() => {
+      const field = document.getElementById("delete-password");
+      const reason = document.getElementById(field?.getAttribute("aria-describedby") ?? "");
+      return field !== null && field.getAttribute("aria-invalid") !== "true" && reason?.getAttribute("role") === "alert";
+    });
+  for (const [what, sentence, answer] of [
+    [
+      "a rate limit",
+      en("auth.error.RATE_LIMITED"),
+      (route) => route.fulfill({ status: 429, contentType: "application/json", body: '{"error":"RATE_LIMITED"}' }),
+    ],
+    ["a request that never got an answer", en("auth.error.unavailable"), (route) => route.abort()],
+    [
+      "an expired sign in",
+      en("account.delete.expired"),
+      (route) => route.fulfill({ status: 401, contentType: "application/json", body: '{"error":"UNAUTHENTICATED"}' }),
+    ],
+  ]) {
+    await eve.route("**/api/account", answer);
+    await eve.getByRole("button", { name: en("account.delete.confirm") }).click();
+    await eve.getByText(sentence).waitFor();
+    check(`after ${what}, focus is back in the password field, selected`, await retypeReady());
+    check(`after ${what}, the refusal is tied to the field, which is not marked invalid`, await tiedNotInvalid());
+    await eve.unroute("**/api/account");
+  }
+  await eve.getByLabel(en("account.delete.password")).fill(PASSWORD);
+  await eve.getByRole("button", { name: en("account.delete.confirm") }).click();
+  check(
+    "the right password deletes the account and signs out",
+    await eve
+      .getByRole("button", { name: en("auth.submit.signIn") })
+      .waitFor()
+      .then(() => true)
+      .catch(() => false),
+  );
+  await eve.getByLabel(en("auth.email")).fill(emailFor("Eve"));
+  await eve.getByLabel(en("auth.password")).fill(PASSWORD);
+  await eve.getByRole("button", { name: en("auth.submit.signIn") }).click();
+  check(
+    "and the deleted account can no longer sign in",
+    await eve
+      .getByText(en("auth.error.INVALID_CREDENTIALS"))
+      .waitFor()
+      .then(() => true)
+      .catch(() => false),
+  );
+
+  // ---------------------------------------------------------------------
+  section("Invite only signup, the default a real deployment runs");
+  // Everything above runs with open signup so the harness can make accounts freely, which left
+  // the production default untested end to end: the client could stop sending the code, or the
+  // owner lose the control that mints one, and every check above still passed. A server and a
+  // database of its own, so no account from above exists here.
+  const inviteRoot = join(root, "invite-only");
+  inviteServer = startServer({
+    ...process.env,
+    PORT: "0",
+    NODE_ENV: "development",
+    ANTHROPIC_API_KEY: "",
+    ...accountsEnv(inviteRoot),
+    SIGNUP_MODE: "invite",
+    OWNER_EMAIL: emailFor("Olga"),
+  });
+  const inviteLog = [];
+  inviteServer.stdout.on("data", (d) => inviteLog.push(String(d)));
+  inviteServer.stderr.on("data", (d) => inviteLog.push(String(d)));
+  const invitePort = await waitFor(
+    async () => inviteLog.join("").match(/"event":"listening","port":(\d+)/)?.[1] ?? null,
+    "the invite only server to report its port",
+  );
+  const INVITE_BASE = `http://localhost:${invitePort}`;
+
+  // The first code the way DEPLOY.md tells the owner to mint it: the BUILT CLI, which is what the
+  // image ships, run on the host against the database the live server has open.
+  const cli = spawnSync(process.execPath, ["server/dist/cli/invite.js"], {
+    encoding: "utf8",
+    env: { ...process.env, DATA_DIR: join(inviteRoot, "data"), OWNER_EMAIL: "" },
+  });
+  const INVITE_CODE = /^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){2}$/;
+  const firstCode = (cli.stdout ?? "").split("\n")[0]?.trim() ?? "";
+  check("the invite CLI prints a code", INVITE_CODE.test(firstCode), (cli.stderr ?? "").slice(0, 200));
+
+  const olga = await (await browser.newContext()).newPage();
+  await openSignUp(olga, INVITE_BASE);
+  check("an invite only server asks for an invite code", await olga.getByLabel(en("auth.invite")).isVisible());
+  await submitSignUp(olga, "Olga", firstCode);
+  check(
+    "the owner signs up with the code from the CLI",
+    await reached(olga.getByRole("button", { name: "Start a new chat" })),
+  );
+
+  await olga.getByRole("button", { name: en("account.invite.create") }).click();
+  const minted = await waitFor(
+    async () => (await olga.locator(".owner-invite-code").textContent().catch(() => null))?.trim() || null,
+    "the owner's new invite code",
+  );
+  check("the owner mints an invite in the app", INVITE_CODE.test(minted), minted);
+
+  const pat = await (await browser.newContext({ permissions: ["microphone"] })).newPage();
+  await openSignUp(pat, INVITE_BASE);
+  await submitSignUp(pat, "Pat", minted);
+  check(
+    "someone invited signs up with the code the owner sent",
+    await reached(pat.getByRole("button", { name: "Start a new chat" })),
+  );
+
+  const quin = await (await browser.newContext()).newPage();
+  await openSignUp(quin, INVITE_BASE);
+  await submitSignUp(quin, "Quin", minted);
+  check("a code already used is refused with a sentence", await reached(quin.getByText(en("auth.error.INVITE_INVALID"))));
+
+  // A returning visitor's first render is the start page, restoring, never the sign in form. The
+  // session state used to be set in a mount effect, so the form was mounted first on every load.
+  // The observer reads what was INSERTED, not what is in the document when it runs: React can
+  // mount the form and swap it out within one task, before an observer's callback ever sees the
+  // live DOM, and a querySelector there passed with the form mounted on every load.
+  // The positive control first: the same observer, on a signed out load, has to see the form, or
+  // "never saw it" below proves nothing.
+  const control = await (await browser.newContext()).newPage();
+  await control.addInitScript(watchForSignInForm);
+  await control.goto(INVITE_BASE);
+  await control.getByLabel(en("auth.email")).waitFor();
+  check(
+    "the first render watcher sees the sign in form on a signed out load",
+    (await control.evaluate(() => window.__sawSignInForm)) === true,
+  );
+  await pat.addInitScript(watchForSignInForm);
+  await pat.reload();
+  await pat.getByRole("button", { name: "Start a new chat" }).waitFor();
+  check(
+    "a returning visitor never sees the sign in form, not even for a frame",
+    (await pat.evaluate(() => window.__sawSignInForm)) === false,
+  );
+  // Nothing in the account strip takes focus on its own when the start page loads: focus on
+  // "Delete account" is one Enter from the deletion form, and on "Sign out" one Enter from signing
+  // out. Checked once the strip has mounted and its effects have run (checked before that, it
+  // passed on a race), and only the strip: focus a design puts elsewhere on purpose is fine.
+  await pat.locator(".account-state").waitFor();
+  await pat.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  check(
+    "the start page loads with nothing in the account strip focused",
+    await pat.evaluate(() => !document.activeElement?.closest(".account-strip")),
+  );
+
+  // Deleted from somewhere else mid call: the tab has to notice on its own and go to the sign in
+  // screen, not sit in a room its account no longer exists for. It hears through the socket the
+  // server closes, then a refresh the server refuses (App.tsx, onSignedOut).
+  await pat.getByRole("button", { name: "Start a new chat" }).click();
+  await pat.getByLabel("Your name, just for this chat").fill("Pat");
+  await pat.getByLabel("Your language and region").selectOption("en-US");
+  await pat.getByRole("button", { name: /Create and allow microphone/ }).click();
+  await pat.locator(".room").waitFor();
+  const deletedElsewhere = await apiDeleteAccount(INVITE_BASE, await apiSignIn(INVITE_BASE, "Pat"));
+  check("the account is deleted from somewhere else", deletedElsewhere === 204, String(deletedElsewhere));
+  check(
+    "the tab that was in a call goes to the sign in screen on its own",
+    await reached(pat.getByRole("button", { name: en("auth.submit.signIn") })),
+  );
+  // Saying it was signed out, not that another account took the tab: the call's end tells the two
+  // apart, and counting every end as a move put the wrong sentence here (measured in review).
+  check("and says why, as a sign out", await reached(announced(pat, en("error.UNAUTHENTICATED"))));
+
+  // ---------------------------------------------------------------------
+  section("A call in a tab moved to another account ends, and says why");
+  // A call's socket asks for a token before every connect, and tabs share one sign in, so a tab
+  // another tab moved to a new account used to reconnect as that account. Measured in review:
+  // after an outage past the 60 s grace window, the call took its seat back as the new account
+  // under the old one's name, and both accounts' history and contacts gained a call one of them
+  // never had. The damage needs the grace window; the guard does not. A reconnect that follows a
+  // failed one forces a refresh, which is where the tab changes accounts, and from there no socket
+  // may reach the server, and the call has to end and say why. Olga hosts. Ivy is in the call in
+  // one tab, and in another tab of the same browser she signs out and Jon signs in.
+  const olgaHosting = await apiSignIn(INVITE_BASE, "Olga");
+  const ivy = await apiInviteSignUp(INVITE_BASE, olgaHosting, "Ivy");
+  const jon = await apiInviteSignUp(INVITE_BASE, olgaHosting, "Jon");
+  const hostContext = await contextSignedInWith(INVITE_BASE, olgaHosting.refreshToken, { permissions: ["microphone"] });
+  const host = await hostContext.newPage();
+  host.on("pageerror", (e) => errors.push(`host: ${e.message}`));
+  await host.goto(INVITE_BASE);
+  await host.getByRole("button", { name: "Start a new chat" }).click();
+  await host.getByLabel("Your name, just for this chat").fill("Olga");
+  await host.getByLabel("Your language and region").selectOption("en-US");
+  await host.getByRole("button", { name: /Create and allow microphone/ }).click();
+  const callCode = await waitFor(
+    async () => {
+      const text = await host.locator(".code-badge").textContent().catch(() => null);
+      return text && text.trim().length === 8 ? text.trim() : null;
+    },
+    "a room code on the invite only server",
+  );
+  const ivyBrowser = await contextSignedInWith(INVITE_BASE, ivy.refreshToken, { permissions: ["microphone"] });
+  await ivyBrowser.addInitScript(socketOutageSwitch, `ws://127.0.0.1:${await closedPort()}/`);
+  const inCall = await ivyBrowser.newPage();
+  const otherTab = await ivyBrowser.newPage();
+  for (const [name, page] of [["the tab in the call", inCall], ["the other tab", otherTab]]) {
+    page.on("pageerror", (e) => errors.push(`${name}: ${e.message}`));
+  }
+  await inCall.goto(INVITE_BASE);
+  await inCall.getByLabel("Room code").fill(callCode);
+  await inCall.getByRole("button", { name: "Join chat" }).click();
+  await inCall.getByLabel("Your name, just for this chat").fill("Ivy");
+  await inCall.getByLabel("Your language and region").selectOption("en-US");
+  await inCall.getByRole("button", { name: en("prejoin.submit.join") }).click();
+  await inCall.locator(".room").waitFor();
+  await waitFor(async () => (await host.locator(".names").textContent()).includes("Ivy"), "the host to see Ivy");
+  await otherTab.goto(INVITE_BASE);
+  // Once the page has restored: Sign out shows while it restores, and a click that lands before
+  // the restore answers is a race of its own (session.test.ts).
+  await otherTab.locator(".account-state", { hasText: "Ivy" }).waitFor();
+  await otherTab.getByRole("button", { name: en("account.signOut") }).click();
+  await otherTab.getByLabel(en("auth.email")).fill(emailFor("Jon"));
+  await otherTab.getByLabel(en("auth.password")).fill(PASSWORD);
+  await otherTab.getByRole("button", { name: en("auth.submit.signIn") }).click();
+  await otherTab.locator(".account-state", { hasText: "Jon" }).waitFor();
+  check(
+    "a tab is in a call while another tab of its browser signs in as someone else",
+    (await inCall.locator(".room").count()) === 1,
+  );
+  // The control for the socket check below: the call's own sockets are read as Ivy's.
+  check(
+    "the call's socket speaks for the account it was joined as",
+    (await inCall.evaluate(() => window.__protocols)).map(accountOfSocket).includes(ivy.user.id),
+  );
+  // A few seconds of outage: the socket drops, a reconnect fails, and the network comes back.
+  await inCall.evaluate(() => {
+    window.__offline = true;
+    for (const socket of window.__sockets) socket.close(3000, "outage");
+  });
+  await waitFor(async () => (await inCall.evaluate(() => window.__failedWhileOffline)) > 0, "a reconnect to fail");
+  const socketsBefore = await inCall.evaluate(() => {
+    window.__offline = false;
+    return window.__sockets.length;
+  });
+  check(
+    "when the network comes back, the call ends and says the tab is on another account now",
+    await reached(announced(inCall, en("error.ACCOUNT_CHANGED"))),
+  );
+  check("and the tab has left the call", (await inCall.locator(".room").count()) === 0);
+  // The property itself, not only its notice: the old token source opened one as Jon here, and
+  // was refused only because Ivy's seat was still held (measured in review). Read from each
+  // socket's own bearer, so a design that reconnected as Ivy would pass.
+  check(
+    "and no socket reached the server as the account the tab moved to",
+    !(await inCall.evaluate((before) => window.__protocols.slice(before), socketsBefore))
+      .map(accountOfSocket)
+      .includes(jon.user.id),
+  );
+  // And the tab can call again, as the account it holds now: a call object kept for the page's
+  // life, rather than made for each call, ended every later call at once as a move, with every
+  // check above green (measured in review).
+  const socketsBeforeNewCall = await inCall.evaluate(() => window.__protocols.length);
+  await inCall.getByRole("button", { name: "Start a new chat" }).click();
+  await inCall.getByLabel("Your name, just for this chat").fill("Jon");
+  await inCall.getByLabel("Your language and region").selectOption("en-US");
+  await inCall.getByRole("button", { name: /Create and allow microphone/ }).click();
+  check(
+    "and it can start a new call",
+    await waitFor(
+      async () => ((await inCall.locator(".code-badge").textContent().catch(() => null)) ?? "").trim().length === 8,
+      "a room code in the moved tab",
+    ).catch(() => false),
+  );
+  check(
+    "and that call's socket speaks for the account the tab holds now",
+    (await inCall.evaluate((before) => window.__protocols.slice(before), socketsBeforeNewCall))
+      .map(accountOfSocket)
+      .includes(jon.user.id),
+  );
+  await ivyBrowser.close();
+  await hostContext.close();
+
+  // ---------------------------------------------------------------------
+  section("Two tabs of one browser share one sign in");
+  // Tabs share the stored refresh token, so signing in as someone else in one tab moves every
+  // other tab to that account at its next refresh. Nothing the tab left behind shows for its old
+  // account may act on the new one. Measured in review: the tab's bearer was refused (its account
+  // deleted elsewhere), its refresh read the other account's token, the deletion form said to try
+  // again, and one Enter with the password the two shared (as every account here does) deleted
+  // the other account; and the owner's minted invite code stayed on screen for an account that is
+  // not the owner. On this server, so its accounts do not spend the main server's signup limit.
+  // Olga is the owner, and ends this section deleted: nothing after it uses her.
+  const olgaSession = await apiSignIn(INVITE_BASE, "Olga");
+  await apiInviteSignUp(INVITE_BASE, olgaSession, "Gus");
+  const sharedBrowser = await contextSignedInWith(INVITE_BASE, olgaSession.refreshToken);
+  const tabA = await sharedBrowser.newPage();
+  const tabB = await sharedBrowser.newPage();
+  for (const [name, page] of [["tab A", tabA], ["tab B", tabB]]) {
+    page.on("pageerror", (e) => errors.push(`${name}: ${e.message}`));
+  }
+  await tabA.goto(INVITE_BASE);
+  await tabA.locator(".account-state", { hasText: "Olga" }).waitFor();
+  await tabA.getByRole("button", { name: en("account.invite.create") }).click();
+  await tabA.locator(".owner-invite-code").waitFor();
+  await tabB.goto(INVITE_BASE);
+  await tabB.locator(".account-state", { hasText: "Olga" }).waitFor();
+  await tabB.getByRole("button", { name: en("account.signOut") }).click();
+  await tabB.getByLabel(en("auth.email")).fill(emailFor("Gus"));
+  await tabB.getByLabel(en("auth.password")).fill(PASSWORD);
+  await tabB.getByRole("button", { name: en("auth.submit.signIn") }).click();
+  await tabB.locator(".account-state", { hasText: "Gus" }).waitFor();
+  const olgaGone = await apiDeleteAccount(INVITE_BASE, await apiSignIn(INVITE_BASE, "Olga"));
+  check(
+    "an account is deleted on another device while a tab still shows it",
+    olgaGone === 204 && (await tabA.locator(".account-state").innerText()).includes("Olga"),
+    String(olgaGone),
+  );
+  await tabA.bringToFront();
+  await tabA.getByRole("button", { name: en("account.delete.open") }).click();
+  await tabA.getByLabel(en("account.delete.password")).fill(PASSWORD);
+  await tabA.getByRole("button", { name: en("account.delete.confirm") }).click();
+  check(
+    "the tab left behind moves to the account the other tab signed in to",
+    await reached(tabA.locator(".account-state", { hasText: "Gus" })),
+  );
+  // Either way the form was opened for the old account: gone with it, or saying so. Both are
+  // right; what is not is a form that offers to go on as if nothing changed.
+  check(
+    "and the deletion form opened for the old account is gone, or says the tab changed accounts",
+    (await tabA.locator("#delete-password").count()) === 0 ||
+      (await tabA.getByText(en("account.delete.changed")).isVisible()),
+  );
+  check(
+    "and the owner's invite code does not stay on screen for an account that is not the owner",
+    (await tabA.locator(".owner-invite-code").count()) === 0,
+  );
+  // What "try again" had them do. Given a moment to land, in case it sent anything.
+  await tabA.keyboard.press("Enter");
+  await tabA.getByRole("button", { name: en("auth.submit.signIn") }).waitFor({ timeout: 3000 }).catch(() => null);
+  const gusAfter = await fetch(`${INVITE_BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: emailFor("Gus"), password: PASSWORD }),
+  });
+  check("the account the tab was moved to is not deleted", gusAfter.status === 200, String(gusAfter.status));
+  await sharedBrowser.close();
+  check("the invite only server answers until it is stopped", await answers(INVITE_BASE));
+  stopServer(inviteServer);
+  inviteServer = null;
+  check("the invite only server is gone once stopped", await goneWithin(INVITE_BASE, 5000));
+
+  // ---------------------------------------------------------------------
+  section("Credentials stay out of URLs");
+  check(
+    "the socket was opened, and no socket URL carries a token",
+    socketUrls.length > 0 && socketUrls.every((url) => !/bearer|token|access/i.test(url)),
+    socketUrls.join(" "),
+  );
+
+  // ---------------------------------------------------------------------
   section("Page health");
   check("no uncaught page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 } catch (error) {
+  checks += 1;
   failures += 1;
   console.error(`\nFATAL: ${error.message}`);
   // Dump what each page was actually showing. A timeout with no context turns a five minute
@@ -809,7 +1539,15 @@ try {
   console.error(`\n--- server tail ---\n${serverLog.slice(-15).join("")}`);
 } finally {
   await browser?.close();
-  server.kill("SIGTERM");
+  stopServer(inviteServer);
+  if (BASE !== "") {
+    section("Shutdown");
+    check("the server answers until it is stopped", await answers(BASE));
+    stopServer(server);
+    check("the server is gone once stopped, so a run leaves nothing running", await goneWithin(BASE, 5000));
+  } else {
+    stopServer(server);
+  }
   rmSync(root, { recursive: true, force: true });
 }
 

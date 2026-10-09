@@ -152,7 +152,7 @@ in this repo" below. Never send a reviewer a brief with a placeholder still in i
 | `{{PR_NUMBER}}`, `{{BRANCH}}`, `{{HEAD_SHA}}`, `{{BASE}}`, `{{BASE_SHA}}` | From the PR itself. Always pin SHAs, never a branch name alone, so the reviewer reviews the head you named. |
 | `{{MAX_ROUNDS}}` | The second argument, else 5. |
 | `{{CONVENTIONS_FILE}}` | `CLAUDE.md` as it stands at the PR head (a PR can amend it: review against the head's copy and flag the amendment). Add `docs/PLAN.md` when the PR implements a milestone from it. |
-| `{{CHECK_COMMAND}}` | `npm ci && npm run check`, which is the dash grep, copy parity, spend view, typecheck, and both test suites. Read the `check` script at the PR head, because a PR can add to it. |
+| `{{CHECK_COMMAND}}` | `npm ci && npm run check`, which is the dash grep, copy parity, the wire fixtures, the spend view, typecheck, and both test suites. Read the `check` script at the PR head, because a PR can add to it. |
 | `{{ANY GATE NOT INCLUDED IN THE ABOVE}}` | `npm run build`; then `npm run check:secrets` (it greps the BUILT client, so it needs the build); `npm run e2e` (two real browsers; it binds port 0, so parallel runs do not collide); and the CI `docker` job (image build, `/healthz`, the ledger append check, and every production boot refusal step, each run as `.github/workflows/ci.yml` runs it). Read `ci.yml` at the PR head for the current list. |
 | `{{ANY PROJECT SPECIFIC GATES}}` | The translatv merge gates below. |
 | `{{DOMAIN SPECIFIC ASKS}}` | The list below. |
@@ -166,9 +166,10 @@ in this repo" below. Never send a reviewer a brief with a placeholder still in i
   that diacritics (á é í ó ú ñ ¿ ¡) are not clipped by line height or overflow. Render it; do not
   infer it from CSS.
 - Accessibility: labels on inputs, focus order, errors that are announced, contrast.
-- Security: auth, tokens, sockets, Origin checks, rate limits, and anything that widens the
-  server's boundary. Media is peer to peer and the server never sees audio or video, so a change
-  that routes media or a remote stream's transcription through the server is a finding.
+- Security: auth, tokens (never in a URL), sockets, Origin checks, rate limits, and anything
+  that widens the server's boundary. Media is peer to peer and the server never sees audio or
+  video, so a change that routes media or a remote stream's transcription through the server is
+  a finding.
 - Concurrency and error paths: two person rooms, reconnect and resume, a peer dropping mid call,
   and a server restart legitimately destroying every room.
 - The wire protocol: `shared/src/protocol.ts` is the single source of truth, and its zod schemas
@@ -179,7 +180,10 @@ in this repo" below. Never send a reviewer a brief with a placeholder still in i
 - Zero em or en dashes anywhere (`npm run check:dashes` must report zero).
 - No spend without its ledger row written first. Untracked spend is the failure this repo exists
   to prevent.
-- The logger never receives transcript text, chat text, usernames, or glossary content.
+- The logger never receives transcript text, chat text, usernames, glossary content, emails,
+  passwords, access or refresh tokens, or invite codes.
+- Transcripts, chat and room glossaries are never persisted.
+- Migrations in `server/src/store/migrations.ts` are append only.
 - No secret behind a `VITE_` prefix.
 - Each browser transcribes only its own microphone.
 - Spend honesty: a missing ledger raises unless the caller opts into `missingOk`; an

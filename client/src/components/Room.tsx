@@ -90,13 +90,12 @@ export function Room(props: Props) {
     hasVideo,
     micLevel,
     translationUnavailable,
-    adminRequired,
   } = useStore();
 
-  // Same shape as the Start button on the landing page, and for the same reason: an ungated
-  // server has no admins, so gating a feature on BEING one would hide it from everybody. Off
-  // means the app behaves exactly as it did before any of this existed.
-  const canExport = !adminRequired || me?.isAdmin === true;
+  // Everyone in a room is a signed in account now, so the download is offered to both people.
+  // It was host only while guests were anonymous, and it was never access control even then: a
+  // guest's browser already holds every line, because it needs them to render the subtitles.
+  const canExport = true;
 
   const localVideo = useRef<HTMLVideoElement>(null);
   const remoteVideo = useRef<HTMLVideoElement>(null);
@@ -448,7 +447,7 @@ export function Room(props: Props) {
       {confirmEnd && (
         <EndDialog
           copy={copy}
-          isHost={me?.isAdmin === true}
+          isHost={me?.isHost === true}
           onCancel={() => setConfirmEnd(false)}
           onConfirm={() => {
             setConfirmEnd(false);
@@ -497,7 +496,7 @@ function EndDialog({
   onConfirm,
 }: {
   copy: Copy;
-  /** You are the admin, so leaving ends this call rather than freeing a seat. */
+  /** You are the host, so leaving ends this call rather than freeing a seat. */
   isHost: boolean;
   onCancel(): void;
   onConfirm(): void;
@@ -514,9 +513,9 @@ function EndDialog({
       {/* The alternative only EXISTS for a guest. Leaving keeps the room open for the other
           person, which is exactly what it says, unless you are the one hosting: then leaving
           ends the call and offering it as a gentler option would be a straight lie about what
-          the button does. The admin gets told that instead. */}
+          the button does. The host gets told that instead. */}
       {isHost ? (
-        <p>{copy.t("room.end.admin.note")}</p>
+        <p>{copy.t("room.end.host.note")}</p>
       ) : (
         <p>
           {/* Split either side of the button name rather than interpolated, because the emphasis

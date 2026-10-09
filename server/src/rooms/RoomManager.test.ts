@@ -12,44 +12,87 @@ const T0 = 1_000_000;
 
 function withOne(now = T0) {
   const rooms = new RoomManager();
-  const created = rooms.create("Ana", "es-AR", now, false);
+  const created = rooms.create("Ana", "es-AR", now, "user-ana");
   return { rooms, ...created };
 }
 
-describe("hasAdminPresent", () => {
+describe("hasHostPresent", () => {
   it("answers about who is seated", () => {
     const rooms = new RoomManager();
-    const { room } = rooms.create("Ana", "es-AR", T0, true);
-    expect(rooms.hasAdminPresent(room.code)).toBe(true);
-    expect(rooms.hasAdminPresent("ZZZZZZZZ")).toBe(false);
+    const { room } = rooms.create("Ana", "es-AR", T0, "user-ana");
+    expect(rooms.hasHostPresent(room.code)).toBe(true);
+    expect(rooms.hasHostPresent("ZZZZZZZZ")).toBe(false);
   });
 
-  it("still counts an admin who has merely dropped", () => {
+  it("makes the creator the host and a joiner a guest", () => {
+    const rooms = new RoomManager();
+    const { room, member } = rooms.create("Ana", "es-AR", T0, "user-ana");
+    const joined = rooms.join(room.code, "Ben", "en-US", T0, "user-ben");
+    expect(member.isHost).toBe(true);
+    expect(joined.ok && joined.member.isHost).toBe(false);
+  });
+
+  it("is false once only a guest is left", () => {
+    const rooms = new RoomManager();
+    const { room, member } = rooms.create("Ana", "es-AR", T0, "user-ana");
+    rooms.join(room.code, "Ben", "en-US", T0, "user-ben");
+    rooms.leave(room.code, member.id, T0);
+    expect(rooms.hasHostPresent(room.code)).toBe(false);
+  });
+
+  it("still counts a host who has merely dropped", () => {
     // A held seat is presence. The grace window exists so a wifi hop does not cost the room.
     const rooms = new RoomManager();
-    const { room, member } = rooms.create("Ana", "es-AR", T0, true);
+    const { room, member } = rooms.create("Ana", "es-AR", T0, "user-ana");
     rooms.disconnect(room.code, member.id, T0);
-    expect(rooms.hasAdminPresent(room.code)).toBe(true);
+    expect(rooms.hasHostPresent(room.code)).toBe(true);
   });
 
   // The regression that matters, and the one a WS level test cannot reach: the caller cannot
   // control the clock inside a join. This used to sweep internally and DISCARD the result, so
-  // asking the question consumed the admin's expiry. The caller's own sweep then found nothing
+  // asking the question consumed the host's expiry. The caller's own sweep then found nothing
   // released, nothing ended the room, and the guest was stranded in a room that could not end
   // and that nobody could join.
   it("does not consume the expiry it is asked about", () => {
     const rooms = new RoomManager();
-    const { room, member } = rooms.create("Ana", "es-AR", T0, true);
-    rooms.join(room.code, "Ben", "en-US", T0, false);
+    const { room, member } = rooms.create("Ana", "es-AR", T0, "user-ana");
+    rooms.join(room.code, "Ben", "en-US", T0, "user-ben");
     rooms.disconnect(room.code, member.id, T0);
 
     const expired = T0 + GRACE_MS + 1;
     // Ask first, exactly as a joining guest does.
-    rooms.hasAdminPresent(room.code);
+    rooms.hasHostPresent(room.code);
 
     // The release must still be there to be reported. Asking a question may not swallow an event.
     const released = rooms.sweep(expired).released;
     expect(released.map((r) => r.member.id)).toContain(member.id);
+  });
+});
+
+describe("hasEnded", () => {
+  it("is true for an ended code and false for a live or unknown one", () => {
+    const rooms = new RoomManager();
+    const { room } = rooms.create("Ana", "es-AR", T0, "user-ana");
+    expect(rooms.hasEnded(room.code)).toBe(false);
+    expect(rooms.hasEnded("ZZZZZZZZ")).toBe(false);
+    rooms.end(room.code, T0);
+    expect(rooms.hasEnded(room.code)).toBe(true);
+  });
+});
+
+describe("resume is tied to the account", () => {
+  it("refuses a valid token presented by a different user, and leaves the seat alone", () => {
+    const rooms = new RoomManager();
+    const { room, member, resumeToken } = rooms.create("Ana", "es-AR", T0, "user-ana");
+    rooms.disconnect(room.code, member.id, T0);
+
+    expect(rooms.resume(room.code, resumeToken, T0 + 1, "user-mallory")).toEqual({
+      ok: false,
+      error: "INVALID_RESUME",
+    });
+    // The rightful owner's token was not rotated by the attempt, so it still works.
+    const back = rooms.resume(room.code, resumeToken, T0 + 2, "user-ana");
+    expect(back.ok).toBe(true);
   });
 });
 

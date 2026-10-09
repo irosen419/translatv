@@ -46,11 +46,11 @@ export default defineConfig({
       // because when they drifted apart the socket died with nothing logged on either side.
       "/ws": { target: "ws://localhost:8080", ws: true },
       "/healthz": { target: "http://localhost:8080" },
-      // Without this the dev server answers /auth/login itself with a 404 and the admin login
-      // is impossible under npm run dev, showing "could not reach the server" forever. It was
-      // missed because the feature was driven against the BUILT server, where one origin serves
-      // both and no proxy is involved.
-      "/auth": { target: "http://localhost:8080" },
+      // The account API. Without this the dev server answers /api/auth/login itself with a 404
+      // and nobody can sign in under npm run dev. The same mistake happened once with the admin
+      // login this replaced: it was driven against the BUILT server, where one origin serves
+      // both and no proxy is involved, so nothing noticed.
+      "/api": { target: "http://localhost:8080" },
     },
   },
   build: {

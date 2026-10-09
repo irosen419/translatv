@@ -1,6 +1,9 @@
 {
   "name": "@translatv/client",
   "private": true,
+  "engines": {
+    "node": ">=22.16"
+  },
   "version": "0.1.0",
   "type": "module",
   "scripts": {

@@ -116,6 +116,19 @@ export interface SpendRecord {
   cumulative_usd: number | null;
   cap_usd: number | null;
   note: string;
+  /**
+   * Only on a row whose cost is unknown (a call that never answered, or whose connection was
+   * lost, may still have been billed): the most it could have cost. The spend gate counts it
+   * against the caps in place of the missing cost. Totals do not: known_usd stays a floor.
+   */
+  worst_case_usd?: number;
+  /**
+   * Only as false: spend no user may be charged for, because nothing reached them (a request
+   * that answered after the caller gave up, that never answered, or that answered with nothing).
+   * The house pays it (owner decision, 2026-09-28). Absent means billable, which is every ordinary
+   * row, so older rows need no rewrite.
+   */
+  billable?: false;
 }
 
 export interface HeaderRecord {
@@ -289,6 +302,10 @@ export interface EntryOptions {
   note?: string;
   ts?: string | null;
   project?: string;
+  /** See SpendRecord.worst_case_usd. Only for a row with no recoverable cost. */
+  worstCaseUsd?: number | null;
+  /** See SpendRecord.billable. */
+  billable?: boolean;
 }
 
 /**
@@ -314,6 +331,8 @@ export function entry(options: EntryOptions): SpendRecord {
     note = "",
     ts = new Date().toISOString(),
     project = PROJECT_SLUG,
+    worstCaseUsd = null,
+    billable = true,
   } = options;
 
   const price = priceFor(model);
@@ -337,6 +356,17 @@ export function entry(options: EntryOptions): SpendRecord {
     );
   }
 
+  // A worst case stands in for a cost nobody could recover, and only for that: beside a known
+  // cost it would be a second, contradicting figure for the same call.
+  if (worstCaseUsd !== null) {
+    if (resolvedCost !== null) {
+      throw new RangeError("worst_case_usd is for a row whose cost is unknown, and this one has a cost");
+    }
+    if (!Number.isFinite(worstCaseUsd) || worstCaseUsd < 0) {
+      throw new RangeError(`worst_case_usd must be a non negative amount, got ${String(worstCaseUsd)}`);
+    }
+  }
+
   return {
     ts,
     project,
@@ -353,6 +383,9 @@ export function entry(options: EntryOptions): SpendRecord {
     cumulative_usd: cumulativeUsd === null ? null : roundMoney(cumulativeUsd),
     cap_usd: capUsd,
     note,
+    // Written only when they say something, so every ordinary row stays byte for byte as before.
+    ...(worstCaseUsd !== null ? { worst_case_usd: roundMoney(worstCaseUsd) } : {}),
+    ...(billable ? {} : { billable: false as const }),
   };
 }
 

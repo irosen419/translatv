@@ -24,6 +24,30 @@ import { DIALECT_CODES } from "./languages.js";
  */
 export const WS_PATH = "/ws";
 
+/**
+ * How a BROWSER proves who it is on the socket.
+ *
+ * A browser cannot set headers on a WebSocket, so it offers two subprotocols:
+ * [WS_SUBPROTOCOL, `${WS_BEARER_PREFIX}<access token>`]. The server reads the token from the
+ * second and selects the first, so the token is never echoed back and never appears in the URL,
+ * where proxy logs and browser history would keep it. Native clients send
+ * `Authorization: Bearer <access token>` instead and need neither.
+ */
+export const WS_SUBPROTOCOL = "translatv.v1";
+export const WS_BEARER_PREFIX = "bearer.";
+
+/**
+ * The version of the wire format described by this file.
+ *
+ * Served on /healthz so a client built separately from this server (the iOS app, which ships on
+ * its own schedule through an app store review) can find out what it is about to speak BEFORE it
+ * opens a socket, and refuse politely instead of failing on the first frame it cannot decode.
+ * Bump it on any change a client already in the field could not parse: a removed or renamed
+ * field, a new required field, or a changed meaning. Adding an optional field or a new message
+ * type an old client can ignore does not need a bump.
+ */
+export const PROTOCOL_VERSION = 2;
+
 /** Room codes are 8 Crockford base32 characters. The alphabet excludes I, L, O, and U. */
 export const ROOM_CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{8}$/;
 
@@ -87,21 +111,16 @@ export const clientMessage = z.discriminatedUnion("t", [
     username,
     dialect: dialectCode,
     wantsVideo: z.boolean(),
-    // Proof the person starting this call is the admin. Optional on the WIRE and required by
-    // the SERVER, which is deliberate: a client that omits it must get the same refusal as one
-    // that sends a forged one, rather than a parse error that tells an attacker which of the
-    // two mistakes they made. Length capped so a huge value cannot be used to burn CPU on
-    // signature checks.
-    adminToken: z.string().max(512).optional(),
+    // No credential here. WHO is starting the call was settled when the socket was opened: the
+    // upgrade carries an access token (Authorization: Bearer, or the "bearer." subprotocol from a
+    // browser) and an unauthenticated upgrade is refused before any frame is read. The admin
+    // token that used to ride on this message is retired with the admin password (M3).
   }),
   z.object({
     t: z.literal("room.join"),
     code: roomCode,
     username,
     dialect: dialectCode,
-    // Present when the joiner is the admin. A guest legitimately has none: they are allowed in
-    // only while the admin is actually sitting in the room, which is the server's call to make.
-    adminToken: z.string().max(512).optional(),
   }),
   z.object({
     t: z.literal("room.resume"),
@@ -188,17 +207,20 @@ export const errorCode = z.enum([
   "MALFORMED",
   "NOT_IN_ROOM",
   "ALREADY_IN_ROOM",
-  /** Starting a call is admin only, and this connection did not prove it was the admin. */
-  "ADMIN_REQUIRED",
   /**
-   * The room exists, but its admin is not in it, so there is nobody to be a guest OF.
+   * The room's host is not in it, so there is nobody to be a guest OF. Also the answer for a code
+   * with no live room behind it, so a guesser learns nothing about which codes exist.
    *
-   * Deliberately distinct from ROOM_NOT_FOUND. Collapsing the two would be kinder to a room
-   * code guesser, who would learn nothing, but it would lie to the ordinary case: someone
-   * holding a real invite who arrived early, and who needs to be told to wait rather than that
-   * their link is wrong.
+   * Deliberately distinct from ROOM_ENDED, which a code that WAS a room still gets: someone who
+   * arrives after the host ended the call is owed "it ended", not "wait for them".
    */
-  "ADMIN_NOT_PRESENT",
+  "HOST_NOT_PRESENT",
+  /**
+   * This connection is not signed in. Unreachable through an ordinary upgrade, which refuses an
+   * unauthenticated socket with 401 before any frame is read; kept so that if a socket ever did
+   * arrive at create or join without an account, the refusal would say so rather than guess.
+   */
+  "UNAUTHENTICATED",
 ]);
 export const ERROR_CODES = errorCode.options;
 export type ErrorCode = z.infer<typeof errorCode>;
@@ -270,39 +292,51 @@ export const CLOSE = {
   protocolViolation: 4003,
 } as const;
 
-export interface Member {
-  id: string;
-  username: string;
-  dialect: string;
-  connection: "connected" | "reconnecting";
+/** An ICE server entry, sent on room.created and room.joined for the peer connection. */
+export const rtcIceServerConfig = z.object({
+  urls: z.union([z.string(), z.array(z.string())]),
+  username: z.string().optional(),
+  credential: z.string().optional(),
+});
+export type RTCIceServerConfig = z.infer<typeof rtcIceServerConfig>;
+
+const connectionState = z.enum(["connected", "reconnecting"]);
+
+export const member = z.object({
+  id: z.string(),
+  username: z.string(),
+  dialect: z.string(),
+  connection: connectionState,
   /** Their microphone is live. A muted person is not transcribed either. */
-  micEnabled: boolean;
+  micEnabled: z.boolean(),
   /** They are sending live video RIGHT NOW. Not the same as owning a camera: someone who joined
    *  without one and someone who turned theirs off need different words on screen, and only the
    *  receiver's track list can tell those apart. */
-  cameraEnabled: boolean;
+  cameraEnabled: z.boolean(),
   /** They want to READ translations. Off means nothing anyone says gets translated FOR THEM,
    *  which is what saves the API call, and says nothing about the other direction. */
-  wantsTranslation: boolean;
+  wantsTranslation: z.boolean(),
   /**
-   * This member proved they were the admin when they entered.
+   * This member CREATED the room, which makes them its host: the room ends when they leave, and a
+   * guest can join only while they are in it.
    *
-   * Decided by the SERVER at create and join time and never sent by the client, so it is a fact
-   * about what was proved rather than a claim. The client reads it off `me` to decide what to
-   * show, which keeps one authority for the answer instead of the client also deciding from
-   * whether it happens to be holding a token.
+   * Decided by the SERVER and never sent by the client, so it is a fact rather than a claim. The
+   * client reads it off `me` to decide what to show, which keeps one authority for the answer.
+   * Renamed from isAdmin (protocol version 2): with accounts, every signed in person can host.
    */
-  isAdmin: boolean;
-}
+  isHost: z.boolean(),
+});
+export type Member = z.infer<typeof member>;
 
-export interface TranscriptLine {
-  lineId: string;
-  from: string;
-  srcDialect: string;
-  text: string;
-  source: "speech" | "chat";
-  ts: string;
-}
+export const transcriptLine = z.object({
+  lineId: z.string(),
+  from: z.string(),
+  srcDialect: z.string(),
+  text: z.string(),
+  source: z.enum(["speech", "chat"]),
+  ts: z.string(),
+});
+export type TranscriptLine = z.infer<typeof transcriptLine>;
 
 /**
  * What happened to a line's translation.
@@ -312,12 +346,14 @@ export interface TranscriptLine {
  * there is nobody else in the room. Rendering it as a failure would offer a retry button whose
  * only effect is to spend money on a line nobody asked to translate.
  */
-export type TranslationStatus =
-  | "ok"
-  | "skipped"
-  | "unavailable"
-  | "rate_limited"
-  | "budget_exceeded";
+export const translationStatus = z.enum([
+  "ok",
+  "skipped",
+  "unavailable",
+  "rate_limited",
+  "budget_exceeded",
+]);
+export type TranslationStatus = z.infer<typeof translationStatus>;
 
 /**
  * WHY a line was skipped.
@@ -330,104 +366,14 @@ export type TranslationStatus =
  * RenderedLine itself. The server used to declare its own copy of this union, which is the
  * duplicate wire type this file exists to prevent.
  */
-export type SkipReason = "same_language" | "recipient_off" | "no_peer";
-
-export type ServerMessage =
-  | {
-      t: "room.created";
-      code: string;
-      selfId: string;
-      resumeToken: string;
-      you: Member;
-      /**
-       * Perfect negotiation role. The creator is impolite (it wins offer collisions and is the
-       * side that initiates), so the two peers can never both be polite and deadlock.
-       */
-      polite: boolean;
-      config: { graceMs: number; maxMembers: number };
-      iceServers: RTCIceServerConfig[];
-    }
-  | {
-      t: "room.joined";
-      code: string;
-      selfId: string;
-      resumeToken: string;
-      you: Member;
-      peer: Member | null;
-      polite: boolean;
-      config: { graceMs: number; maxMembers: number };
-      iceServers: RTCIceServerConfig[];
-      snapshot: { lines: RenderedLine[]; glossary: GlossaryEntry[] };
-    }
-  | { t: "peer.joined"; peer: Member }
-  | { t: "peer.left"; peerId: string; reason: "left" | "timeout" | "ended" }
-  | {
-      t: "peer.updated";
-      peerId: string;
-      username?: string;
-      dialect?: string;
-      micEnabled?: boolean;
-      cameraEnabled?: boolean;
-      wantsTranslation?: boolean;
-    }
-  | { t: "peer.state"; peerId: string; connection: "connected" | "reconnecting" }
-  | { t: "room.ended"; by: string; byUsername: string }
-  | { t: "rtc.offer"; from: string; sdp: string }
-  | { t: "rtc.answer"; from: string; sdp: string }
-  | { t: "rtc.ice"; from: string; candidate: unknown }
-  | { t: "transcript.interim"; from: string; text: string; seq: number }
-  // Carries a RenderedLine, not a bare TranscriptLine: a line arriving in a resume snapshot
-  // already has translation state, and the client stores both shapes in one list.
-  | { t: "transcript.final"; line: RenderedLine }
-  | { t: "translation.pending"; lineId: string }
-  // Only the retry path needs this. On a fresh line the server decides BEFORE creating it, so the
-  // line is born "skipped" and arrives that way on transcript.final, with no second frame. A
-  // retry acts on a line the client already has, so that one needs telling.
-  | {
-      t: "translation.skipped";
-      lineId: string;
-      reason: SkipReason;
-      /** Carried for the same reason translation.result carries it: a late skip must not clobber
-       *  a glossary correction that landed first. */
-      revision: number;
-    }
-  | {
-      t: "translation.result";
-      lineId: string;
-      targetDialect: string;
-      text: string;
-      /** Bumped when a glossary correction supersedes an earlier translation of the same line. */
-      revision: number;
-      origin: "model" | "correction" | "echo";
-    }
-  | {
-      t: "translation.failed";
-      lineId: string;
-      status: Exclude<TranslationStatus, "ok" | "skipped">;
-      retriable: boolean;
-      /** The code the reader's own copy is looked up by. Never prose. */
-      reason: TranslationFailureCode;
-    }
-  | { t: "glossary.updated"; entries: GlossaryEntry[] }
-  // `detail` is DIAGNOSTIC, for a developer reading a console or a log, and is never rendered:
-  // the sentence a user reads comes from `code`. It is named detail rather than message so that
-  // putting it on screen out of habit reads as the mistake it is. MALFORMED is why it survives
-  // at all: "expected boolean, received string" is exactly what a client author needs and
-  // exactly what a person in a call must never be shown.
-  | { t: "error"; code: ErrorCode; detail?: string; fatal: boolean }
-  | { t: "pong" };
-
-export interface RTCIceServerConfig {
-  urls: string | string[];
-  username?: string;
-  credential?: string;
-}
+export const skipReason = z.enum(["same_language", "recipient_off", "no_peer"]);
+export type SkipReason = z.infer<typeof skipReason>;
 
 /** A transcript line plus whatever translation state it currently has. */
-export interface RenderedLine extends TranscriptLine {
-  translated: string | null;
-  translationStatus: TranslationStatus | "pending";
-  revision: number;
+export const renderedLine = transcriptLine.extend({
+  translated: z.string().nullable(),
+  translationStatus: z.enum([...translationStatus.options, "pending"]),
+  revision: z.number(),
   /**
    * Why this line's translation failed, when it did.
    *
@@ -437,7 +383,7 @@ export interface RenderedLine extends TranscriptLine {
    * papering over, and the alternative is the server keeping a per line failure log that nothing
    * else needs.
    */
-  failureReason?: TranslationFailureCode;
+  failureReason: translationFailureCode.optional(),
   /**
    * Why this line was skipped, or null because it was not.
    *
@@ -453,8 +399,120 @@ export interface RenderedLine extends TranscriptLine {
    * Required rather than optional, and null rather than absent, so "not skipped" is a thing the
    * line SAYS instead of a thing a reader infers from a missing key.
    */
-  skipReason: SkipReason | null;
-}
+  skipReason: skipReason.nullable(),
+});
+export type RenderedLine = z.infer<typeof renderedLine>;
+
+const roomConfig = z.object({ graceMs: z.number(), maxMembers: z.number() });
+
+/**
+ * Every message the server sends.
+ *
+ * A schema rather than a plain TypeScript union so it can be exported (shared/wire/schema.json)
+ * and checked against golden fixtures, which is what lets a second client in another language
+ * (the iOS app) be verified against this file instead of against somebody's reading of it. The
+ * server does not parse its own output with it at runtime: it is the contract, not a filter.
+ */
+export const serverMessage = z.discriminatedUnion("t", [
+  z.object({
+    t: z.literal("room.created"),
+    code: z.string(),
+    selfId: z.string(),
+    resumeToken: z.string(),
+    you: member,
+    /**
+     * Perfect negotiation role. The creator is impolite (it wins offer collisions and is the
+     * side that initiates), so the two peers can never both be polite and deadlock.
+     */
+    polite: z.boolean(),
+    config: roomConfig,
+    iceServers: z.array(rtcIceServerConfig),
+  }),
+  z.object({
+    t: z.literal("room.joined"),
+    code: z.string(),
+    selfId: z.string(),
+    resumeToken: z.string(),
+    you: member,
+    peer: member.nullable(),
+    polite: z.boolean(),
+    config: roomConfig,
+    iceServers: z.array(rtcIceServerConfig),
+    snapshot: z.object({ lines: z.array(renderedLine), glossary: z.array(glossaryEntry) }),
+  }),
+  z.object({ t: z.literal("peer.joined"), peer: member }),
+  z.object({
+    t: z.literal("peer.left"),
+    peerId: z.string(),
+    reason: z.enum(["left", "timeout", "ended"]),
+  }),
+  z.object({
+    t: z.literal("peer.updated"),
+    peerId: z.string(),
+    username: z.string().optional(),
+    dialect: z.string().optional(),
+    micEnabled: z.boolean().optional(),
+    cameraEnabled: z.boolean().optional(),
+    wantsTranslation: z.boolean().optional(),
+  }),
+  z.object({ t: z.literal("peer.state"), peerId: z.string(), connection: connectionState }),
+  z.object({ t: z.literal("room.ended"), by: z.string(), byUsername: z.string() }),
+  z.object({ t: z.literal("rtc.offer"), from: z.string(), sdp: z.string() }),
+  z.object({ t: z.literal("rtc.answer"), from: z.string(), sdp: z.string() }),
+  z.object({ t: z.literal("rtc.ice"), from: z.string(), candidate: z.unknown() }),
+  z.object({
+    t: z.literal("transcript.interim"),
+    from: z.string(),
+    text: z.string(),
+    seq: z.number(),
+  }),
+  // Carries a RenderedLine, not a bare TranscriptLine: a line arriving in a resume snapshot
+  // already has translation state, and the client stores both shapes in one list.
+  z.object({ t: z.literal("transcript.final"), line: renderedLine }),
+  z.object({ t: z.literal("translation.pending"), lineId: z.string() }),
+  // Only the retry path needs this. On a fresh line the server decides BEFORE creating it, so the
+  // line is born "skipped" and arrives that way on transcript.final, with no second frame. A
+  // retry acts on a line the client already has, so that one needs telling.
+  z.object({
+    t: z.literal("translation.skipped"),
+    lineId: z.string(),
+    reason: skipReason,
+    /** Carried for the same reason translation.result carries it: a late skip must not clobber
+     *  a glossary correction that landed first. */
+    revision: z.number(),
+  }),
+  z.object({
+    t: z.literal("translation.result"),
+    lineId: z.string(),
+    targetDialect: z.string(),
+    text: z.string(),
+    /** Bumped when a glossary correction supersedes an earlier translation of the same line. */
+    revision: z.number(),
+    origin: z.enum(["model", "correction", "echo"]),
+  }),
+  z.object({
+    t: z.literal("translation.failed"),
+    lineId: z.string(),
+    status: translationStatus.exclude(["ok", "skipped"]),
+    retriable: z.boolean(),
+    /** The code the reader's own copy is looked up by. Never prose. */
+    reason: translationFailureCode,
+  }),
+  z.object({ t: z.literal("glossary.updated"), entries: z.array(glossaryEntry) }),
+  // `detail` is DIAGNOSTIC, for a developer reading a console or a log, and is never rendered:
+  // the sentence a user reads comes from `code`. It is named detail rather than message so that
+  // putting it on screen out of habit reads as the mistake it is. MALFORMED is why it survives
+  // at all: "expected boolean, received string" is exactly what a client author needs and
+  // exactly what a person in a call must never be shown.
+  z.object({
+    t: z.literal("error"),
+    code: errorCode,
+    detail: z.string().optional(),
+    fatal: z.boolean(),
+  }),
+  z.object({ t: z.literal("pong") }),
+]);
+export type ServerMessage = z.infer<typeof serverMessage>;
 
 /**
  * Parse an inbound frame.

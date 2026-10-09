@@ -9,7 +9,7 @@ app is fully usable without one, and says so plainly at boot.
 
 | Thing | Why |
 |---|---|
-| **Node 20 or newer** | The only hard requirement to RUN the app. Check with `node --version`. |
+| **Node 22.16 or newer** | The only hard requirement to RUN the app. Check with `node --version`. |
 | **Chrome** | Subtitles use the Web Speech API. **Firefox does not have it at all**, so the call and typed chat work there but subtitles never appear. |
 | **Python 3** | ONLY for the Python test suite and the spend CLI. Not needed to run the app. |
 
@@ -34,8 +34,8 @@ correctly** and anything that goes wrong after this is the app, not the install.
 npm run dev          # server on 8080, client on http://localhost:5173
 ```
 
-Vite proxies `/ws` and `/healthz` through to the server, so the WebSocket origin check behaves in
-development exactly as it does in production.
+Vite proxies `/ws`, `/healthz` and the account API under `/api` through to the server, so the
+WebSocket origin check behaves in development exactly as it does in production.
 
 > **On Windows `npm run dev` does not work as written.** The script backgrounds the server with
 > `&`, which is a POSIX shell operator; `cmd.exe` reads it as "run these in sequence", so the
@@ -59,6 +59,29 @@ ANTHROPIC_API_KEY is NOT set: translation is DISABLED.
 ```
 
 That is a documented degraded mode, not an error.
+
+## Accounts
+
+Every call needs a signed in account. Signup is invite only by default, so on a laptop either
+open it up for the session:
+
+```bash
+SIGNUP_MODE=open npm run dev
+```
+
+or keep it invite only and mint a code to sign up with:
+
+```bash
+npm run invite       # prints one single use code, valid for 7 days
+```
+
+With no `AUTH_SECRET` set, development generates a random one per process and says so at boot:
+restarting the server signs everyone out, which is expected here.
+
+The first screen is sign in, with a link to create an account. The refresh token lives in
+`localStorage`, so every tab of one browser profile shares one sign in. That is fine for the test
+below (one account can be in a room from two tabs), but to see two different people, sign the
+second one in from a private window or a second browser profile.
 
 ## The manual test
 

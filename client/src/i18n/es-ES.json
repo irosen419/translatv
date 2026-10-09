@@ -5,5 +5,7 @@
 
   "room.translation.mootTitle": "Vosotros dos habláis el mismo idioma, así que no se está traduciendo nada.",
 
-  "overlay.empty": "Todo lo que digáis los dos aparece aquí, traducido."
+  "overlay.empty": "Todo lo que digáis los dos aparece aquí, traducido.",
+
+  "account.delete.changed": "Esta pestaña ahora usa otra cuenta. No se ha eliminado nada."
 }
