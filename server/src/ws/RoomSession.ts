@@ -18,7 +18,7 @@ import {
   type SkipReason,
   type TranslationStatus,
 } from "@translatv/shared";
-import { mergeNewestFirst } from "../account/corrections.js";
+import { mergeNewestFirst, screenCorrection } from "../account/corrections.js";
 import type { ContextTurn } from "../translate/prompt.js";
 import { CONTEXT_TURNS, GLOSSARY_MAX } from "../translate/prompt.js";
 
@@ -192,11 +192,17 @@ export class RoomSession {
     };
     this.addGlossaryEntry(entry);
     // Newest first, one per phrase, at most GLOSSARY_MAX: the same rules the account's merge
-    // applies, so nothing that would have been saved is lost, and a client sending corrections
-    // all call long holds this list to the glossary's size (it grew without bound, measured in
-    // review round 1).
-    const made = this.corrections.get(input.authorMemberId) ?? [];
-    this.corrections.set(input.authorMemberId, mergeNewestFirst(made, [entry], GLOSSARY_MAX));
+    // applies, and a client sending corrections all call long holds this list to the glossary's
+    // size (it grew without bound, measured in review round 1).
+    //
+    // Only a correction that passes the screen is kept for saving. Deduplicating first let a later
+    // correction of the same phrase that the screen then drops push out an earlier one it would
+    // have saved (review round 2). The account screens again when it saves, so this is not the
+    // lock, only the order.
+    if (screenCorrection(entry).ok) {
+      const made = this.corrections.get(input.authorMemberId) ?? [];
+      this.corrections.set(input.authorMemberId, mergeNewestFirst(made, [entry], GLOSSARY_MAX));
+    }
 
     if (!samePhrase(phrase, line.text)) return { line, replacedTranslation: false };
 

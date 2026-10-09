@@ -35,8 +35,11 @@ export function samePhrase(a: string, b: string): boolean {
  * merely fits 200 characters because "That still stores the other person's words." The dialog
  * prefills the whole line, so without a word limit the untouched default, open and press Save,
  * would be exactly the rejected option: a whole sentence of somebody's, kept for good (measured in
- * review). Six words holds a name, a term or an idiom ("no le cuentes a nadie") and not a sentence
- * of news. A longer correction still fixes the call it was made in; it is just not saved.
+ * review). Six words holds a name, a term or an idiom ("no le cuentes a nadie"). It does not make
+ * a short sentence a term: "mi hermana está embarazada" is four words, and an untrimmed four word
+ * line is still saved whole. The cap narrows what C1 rejected without ending it, which is the
+ * owner's call to accept or tighten. A longer correction still fixes the call it was made in; it
+ * is just not saved.
  */
 export const TERM_MAX_WORDS = 6;
 

@@ -57,4 +57,11 @@ describe("savableTerm", () => {
   it("refuses a phrase with no word in it", () => {
     expect(savableTerm(" ... ")).toBe(false);
   });
+
+  it("counts a contraction as one word, a number as a word, and an accent typed as two code points as part of its letter", () => {
+    expect(savableTerm("don't won't can't isn't aren't wasn't")).toBe(true);
+    expect(savableTerm("24 7")).toBe(true);
+    expect(savableTerm("1 2 3 4 5 6 7")).toBe(false);
+    expect(savableTerm("Mari\u0301a Mari\u0301a Mari\u0301a Mari\u0301a Mari\u0301a Mari\u0301a")).toBe(true);
+  });
 });

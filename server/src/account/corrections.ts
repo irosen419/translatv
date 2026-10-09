@@ -55,12 +55,15 @@ const near = (first: string, second: string) =>
  * "a partir de ahora" (from now on) are all real terms, and corrections.test.ts keeps them passing.
  */
 const INSTRUCTION_PATTERNS: readonly RegExp[] = [
-  // Markup and fences: the prompt's own tags, code fences, template braces, square brackets (a
-  // "[SYSTEM]" header), and so the arrows the prompt writes between a term and its translation
-  // ("->", "=>", both caught by ">"). No glossary term needs any of them.
-  /[<>`{}[\]]/u,
-  // A role label, as in a chat transcript. Not "modelo:", which is how a product is described.
-  new RegExp(`${word("system|assistant|user|human|sistema|asistente|usuario")}\\s*:`, "iu"),
+  // Markup and fences: the prompt's own tags, code fences, template braces, and so the arrows the
+  // prompt writes between a term and its translation ("->", "=>", both caught by ">"). No glossary
+  // term needs any of them. Square brackets alone are ordinary ("[risas]"), so only a bracketed
+  // role header ("[SYSTEM]") counts.
+  /[<>`{}]/u,
+  new RegExp(`\\[\\s*${word("system|assistant|user|human|instructions?|sistema|asistente|usuario|instrucciones")}\\s*\\]`, "iu"),
+  // A role label, as in a chat transcript, or a header ("new instructions:"). Not "modelo:", which
+  // is how a product is described, and not "nuevas instrucciones de uso", with no colon.
+  new RegExp(`${word("system|assistant|user|human|instructions?|sistema|asistente|usuario|instrucciones")}\\s*:`, "iu"),
   // "Ignore the instructions", "olvida las reglas" and their kin. The verbs are the imperatives
   // and infinitives only: "olvidé las reglas" (I forgot the rules) and "ignoró las indicaciones"
   // (she ignored the directions) are things people say, and the first screen dropped them.
@@ -68,10 +71,9 @@ const INSTRUCTION_PATTERNS: readonly RegExp[] = [
     "ignore|disregard|forget|override|bypass|ignora|ignorá|ignorar|ignoren|olvida|olvidá|olvidar|olviden|olvidate|omite|omití|omitir|descarta|descartá|descartar",
     "instructions?|prompts?|rules|guidelines|above|previous|prior|before|instrucci\\p{L}*|reglas|indicaciones|anteriore?s?|previas?",
   ),
-  near("new|nuevas?", "instructions?|rules|instrucciones|reglas"),
   // Talking to the model about itself, or giving it a part to play.
   new RegExp(
-    `${word("system prompt|prompt del sistema|you are now|as an ai|como (?:una )?ia|ahora eres|ahora sos|pretend you are|pretend to be|act as|finge que eres|hac[ée] de cuenta que sos")}`,
+    `${word("system prompt|prompt del sistema|you are now|as an ai|como (?:una )?ia|ahora eres|ahora sos|pretend you are|you're now|finge que eres|hac[ée] de cuenta que sos")}`,
     "iu",
   ),
   near("you are|eres|sos", "an? (?:ai|assistant|language model|chatbot)|una? (?:ia|asistente)"),

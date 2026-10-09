@@ -435,7 +435,13 @@ function CorrectionDialog({
             lang={line.srcDialect}
             value={draft.phrase}
             onChange={(event) => setDraft((d) => ({ ...d, phrase: event.target.value }))}
-            aria-describedby={shown ? "correction-hint correction-problem" : "correction-hint"}
+            aria-describedby={[
+              "correction-hint",
+              !willBeSaved(draft.phrase) && draft.phrase.trim() !== "" ? "correction-not-saved" : null,
+              shown ? "correction-problem" : null,
+            ]
+              .filter(Boolean)
+              .join(" ")}
             aria-invalid={phraseBad || undefined}
             autoFocus
           />
@@ -446,7 +452,9 @@ function CorrectionDialog({
               the untouched whole line is a choice they can see the outcome of. */}
           <div aria-live="polite">
             {!willBeSaved(draft.phrase) && draft.phrase.trim() !== "" && (
-              <p className="hint">{copy.t("correct.notSaved", { max: TERM_MAX_WORDS })}</p>
+              <p id="correction-not-saved" className="hint">
+                {copy.t("correct.notSaved", { max: TERM_MAX_WORDS })}
+              </p>
             )}
           </div>
         </div>
