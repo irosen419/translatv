@@ -27,6 +27,10 @@ describe("scrub", () => {
       "candidate",
       "note",
       "resumeToken",
+      // A saved correction's two halves, and a batch of them (the corrections pull request).
+      "source",
+      "target",
+      "corrections",
     ];
     for (const key of carriers) {
       const scrubbed = scrub({ [key]: "secret words" }) as Record<string, unknown>;

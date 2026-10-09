@@ -271,6 +271,9 @@
               "minLength": 1,
               "type": "string"
             },
+            "source": {
+              "type": "string"
+            },
             "t": {
               "const": "glossary.correct",
               "type": "string"

@@ -93,6 +93,10 @@ const bodyText = (max: number) =>
     .transform((v) => v.replace(/[\p{Cc}]/gu, " ").replace(/\r\n/g, "\n").trim())
     .refine((v) => v.length <= max, { message: `text must be at most ${max} characters` });
 
+/** bodyText that must still have text in it once cleaned. */
+const nonEmpty = (text: ReturnType<typeof bodyText>) =>
+  text.refine((v) => v.length > 0, { message: "text must not be empty" });
+
 export const glossaryEntry = z.object({
   source: bodyText(LIMITS.glossaryTerm),
   target: bodyText(LIMITS.glossaryTranslation),
@@ -165,10 +169,19 @@ export const clientMessage = z.discriminatedUnion("t", [
   z.object({ t: z.literal("chat.send"), text: bodyText(LIMITS.chat) }),
 
   z.object({ t: z.literal("translation.retry"), lineId: z.string().min(1).max(64) }),
+  // A TERM level correction (owner decision C1, 2026-10-09): a phrase from the line, and its fix.
+  // It used to carry the fix alone, and the server made the whole line the glossary term, up to
+  // 2000 characters of somebody's words, past the 200 a term may have everywhere else.
+  //
+  // `source` is optional so a tab loaded before that change still corrects. Without it the whole
+  // line is the phrase, and the server refuses a line too long to be a term. Adding an optional
+  // field does not bump PROTOCOL_VERSION. Both texts must have something in them once cleaned: an
+  // empty fix used to pass here and blank the line it corrected.
   z.object({
     t: z.literal("glossary.correct"),
     lineId: z.string().min(1).max(64),
-    correctedTranslation: bodyText(LIMITS.glossaryTranslation),
+    source: nonEmpty(bodyText(LIMITS.glossaryTerm)).optional(),
+    correctedTranslation: nonEmpty(bodyText(LIMITS.glossaryTranslation)),
   }),
   z.object({
     t: z.literal("glossary.import"),

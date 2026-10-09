@@ -89,3 +89,32 @@ describe("user facing codes", () => {
     expect([...translationFailureCode.options]).toEqual([...TRANSLATION_FAILURE_CODES]);
   });
 });
+
+// A correction is a TERM (owner decision C1, 2026-10-09): the phrase from the line and its fix.
+// The phrase is optional on the wire so a tab loaded before this change still corrects, as a whole
+// line; the server then refuses a line too long to be a term.
+describe("glossary.correct", () => {
+  it("accepts a phrase and its fix", () => {
+    expect(accepts({ t: "glossary.correct", lineId: "L1", source: "che", correctedTranslation: "hey" })).toBe(true);
+  });
+
+  it("still accepts the older form with no phrase", () => {
+    expect(accepts({ t: "glossary.correct", lineId: "L1", correctedTranslation: "hey" })).toBe(true);
+  });
+
+  it("refuses an empty fix, or one that is only whitespace or control characters", () => {
+    expect(accepts({ t: "glossary.correct", lineId: "L1", correctedTranslation: "" })).toBe(false);
+    expect(accepts({ t: "glossary.correct", lineId: "L1", correctedTranslation: " \u0007 " })).toBe(false);
+  });
+
+  it("refuses an empty phrase", () => {
+    expect(accepts({ t: "glossary.correct", lineId: "L1", source: "  ", correctedTranslation: "hey" })).toBe(false);
+  });
+
+  it("holds the phrase to a glossary term's length and the fix to a translation's", () => {
+    const base = { t: "glossary.correct", lineId: "L1" };
+    expect(accepts({ ...base, source: "a".repeat(200), correctedTranslation: "b".repeat(400) })).toBe(true);
+    expect(accepts({ ...base, source: "a".repeat(201), correctedTranslation: "b" })).toBe(false);
+    expect(accepts({ ...base, source: "a", correctedTranslation: "b".repeat(401) })).toBe(false);
+  });
+});

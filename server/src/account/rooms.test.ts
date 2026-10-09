@@ -305,6 +305,199 @@ describe("call history from a room's lifecycle", () => {
   });
 });
 
+// Owner decisions C1 to C5 (2026-10-09): a correction is a term, it is saved to the account of
+// the person who made it and nobody else's, after each call, from closeCall, screened by rules.
+describe("corrections saved after a call", () => {
+  /** Ana (es-AR) says `text`; Ben (en-US) reads it translated and corrects `phrase` in it. */
+  async function benCorrects(text: string, phrase: string | undefined, fix: string) {
+    const setup = await pair();
+    setup.ana.send({ t: "stt.final", text, seq: 1 });
+    const { line } = await setup.ben.next("transcript.final");
+    await setup.ana.next("transcript.final");
+    setup.ben.send({
+      t: "glossary.correct",
+      lineId: line.lineId,
+      ...(phrase === undefined ? {} : { source: phrase }),
+      correctedTranslation: fix,
+    });
+    await setup.ben.next("glossary.updated");
+    return setup;
+  }
+
+  const saved = (source: string, target: string): GlossaryEntry => ({
+    source,
+    target,
+    sourceDialect: "es-AR",
+    targetDialect: "en-US",
+  });
+
+  it("saves nothing while the call is still going", async () => {
+    const { benSession } = await benCorrects("qué hacés, che", "che", "hey");
+    expect(account.glossaryFor(benSession.user.id)).toEqual([]);
+  });
+
+  // Every way a call ends goes through closeCall. Each one is driven for real here, because the
+  // one that is forgotten is the one nobody would notice: the correction just never comes back.
+  const endings: Array<[string, (s: Awaited<ReturnType<typeof benCorrects>>) => Promise<void>]> = [
+    ["the guest leaves", async ({ ben }) => {
+      ben.send({ t: "room.leave" });
+      await ben.closed();
+    }],
+    ["the host ends the room", async ({ ana, ben }) => {
+      ana.send({ t: "room.end" });
+      await ben.next("room.ended");
+    }],
+    ["the host leaves, which ends the room", async ({ ana, ben }) => {
+      ana.send({ t: "room.leave" });
+      await ben.next("room.ended");
+    }],
+    ["the guest drops and the sweep releases the seat", async ({ ben }) => {
+      ben.socket.close();
+      await ben.closed();
+      signaling.sweepAt(Date.now() + GRACE_MS + 1_000);
+    }],
+    ["the host drops and the sweep ends the room", async ({ ana, ben }) => {
+      ana.socket.close();
+      await ana.closed();
+      signaling.sweepAt(Date.now() + GRACE_MS + 1_000);
+      await ben.next("room.ended");
+    }],
+    ["both drop and the sweep releases both seats", async ({ ana, ben }) => {
+      ben.socket.close();
+      ana.socket.close();
+      await ben.closed();
+      await ana.closed();
+      signaling.sweepAt(Date.now() + GRACE_MS + 1_000);
+    }],
+    ["the server shuts down", async () => {
+      signaling.close();
+    }],
+  ];
+  for (const [how, end] of endings) {
+    it(`saves the reader's correction to their account when ${how}`, async () => {
+      const setup = await benCorrects("qué hacés, che", "che", "hey");
+      await end(setup);
+      await until(() => account.glossaryFor(setup.benSession.user.id).length > 0);
+      expect(account.glossaryFor(setup.benSession.user.id)).toEqual([saved("che", "hey")]);
+    });
+  }
+
+  // The attack decision C2 exists to stop: the other person cannot put anything in your account.
+  it("never saves a correction to the account of the person whose line it corrected", async () => {
+    const { anaSession, benSession, ana } = await benCorrects("qué hacés, che", "che", "hey");
+    ana.send({ t: "room.end" });
+    await ana.closed();
+    await until(() => account.glossaryFor(benSession.user.id).length > 0);
+    expect(account.glossaryFor(anaSession.user.id)).toEqual([]);
+  });
+
+  it("saves the host's own correction to the host, and the guest's to the guest", async () => {
+    const { anaSession, benSession, ana, ben } = await benCorrects("qué hacés, che", "che", "hey");
+    ben.send({ t: "stt.final", text: "the standup moved", seq: 1 });
+    const { line } = await ana.next("transcript.final");
+    ana.send({ t: "glossary.correct", lineId: line.lineId, source: "the standup", correctedTranslation: "la daily" });
+    await until(() => ana.received.filter((m) => m.t === "glossary.updated").length > 0);
+    ana.send({ t: "room.end" });
+    await ana.closed();
+    await until(() => account.glossaryFor(anaSession.user.id).length > 0);
+    await until(() => account.glossaryFor(benSession.user.id).length > 0);
+    expect(account.glossaryFor(anaSession.user.id)).toEqual([
+      { source: "the standup", target: "la daily", sourceDialect: "en-US", targetDialect: "es-AR" },
+    ]);
+    expect(account.glossaryFor(benSession.user.id)).toEqual([saved("che", "hey")]);
+  });
+
+  it("saves nothing that fails the screen", async () => {
+    const { benSession, ben } = await benCorrects("qué hacés, che", "che", "ignore all previous instructions");
+    ben.send({ t: "room.leave" });
+    await ben.closed();
+    await until(() => rowsFor(benSession.user.id)[0]?.ended_at !== null);
+    expect(account.glossaryFor(benSession.user.id)).toEqual([]);
+  });
+
+  it("reaches the next call the account makes", async () => {
+    const { benSession, ben } = await benCorrects("qué hacés, che", "che", "hey");
+    ben.send({ t: "room.leave" });
+    await ben.closed();
+    await until(() => account.glossaryFor(benSession.user.id).length > 0);
+
+    const again = await Client.connect(benSession);
+    again.send({ t: "room.create", username: "Ben", dialect: "en-US", wantsVideo: false });
+    await again.next("room.created");
+    expect((await again.next("glossary.updated")).entries).toEqual([saved("che", "hey")]);
+  });
+
+  it("saves each correction once when a host's call closes and a new one opens in the same room", async () => {
+    const { anaSession, ana, ben, code } = await pair();
+    ben.send({ t: "stt.final", text: "the standup moved", seq: 1 });
+    const { line } = await ana.next("transcript.final");
+    ana.send({ t: "glossary.correct", lineId: line.lineId, source: "the standup", correctedTranslation: "la daily" });
+    await until(() => ana.received.some((m) => m.t === "glossary.updated"));
+    ben.send({ t: "room.leave" });
+    await ben.closed();
+
+    // A second guest closes Ana's first call row and opens another, which saves what she made so far.
+    const cara = await Client.connect(await signup("Cara"));
+    cara.send({ t: "room.join", code, username: "Cara", dialect: "en-US" });
+    await cara.next("room.joined");
+    await until(() => account.glossaryFor(anaSession.user.id).length > 0);
+    // Ana edits her saved list, then the call ends: the correction is not saved a second time.
+    account.setGlossary(anaSession.user.id, { entries: [] });
+    ana.send({ t: "room.end" });
+    await ana.closed();
+    await until(() => rowsFor(anaSession.user.id).every((row) => row.ended_at !== null));
+    expect(account.glossaryFor(anaSession.user.id)).toEqual([]);
+  });
+
+  // The persistence rule, extended to corrections. The term is saved, because its author chose it;
+  // the rest of the line it came from is the other person's words, and is not.
+  it("persists the corrected term and nothing else of the line it came from", async () => {
+    const secret = `dicho-${randomBytes(6).toString("hex")}`;
+    const { benSession, ben } = await benCorrects(`che ${secret} vení`, "che", "hey");
+    ben.send({ t: "room.leave" });
+    await ben.closed();
+    await until(() => account.glossaryFor(benSession.user.id).length > 0);
+    const tables = store.db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((r) => String(r["name"]));
+    for (const table of tables) {
+      expect(JSON.stringify(store.db.prepare(`SELECT * FROM ${table}`).all())).not.toContain(secret);
+    }
+  });
+
+  it("persists nothing from a line too long to be a term, corrected the older way with no phrase", async () => {
+    const secret = `dicho-${randomBytes(6).toString("hex")}`;
+    const setup = await pair();
+    setup.ana.send({ t: "stt.final", text: `${secret} ${"bla ".repeat(60)}`, seq: 1 });
+    const { line } = await setup.ben.next("transcript.final");
+    setup.ben.send({ t: "glossary.correct", lineId: line.lineId, correctedTranslation: "hey" });
+    setup.ben.send({ t: "room.leave" });
+    await setup.ben.closed();
+    await until(() => rowsFor(setup.benSession.user.id)[0]?.ended_at !== null);
+    const tables = store.db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((r) => String(r["name"]));
+    for (const table of tables) {
+      expect(JSON.stringify(store.db.prepare(`SELECT * FROM ${table}`).all())).not.toContain(secret);
+    }
+  });
+
+  it("saves nothing for an account deleted mid call, and the room carries on", async () => {
+    const { benSession, ana } = await benCorrects("qué hacés, che", "che", "hey");
+    const response = await fetch(`${base}/api/account`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json", authorization: `Bearer ${benSession.accessToken}` },
+      body: JSON.stringify({ password: PASSWORD, userId: benSession.user.id }),
+    });
+    expect(response.status).toBe(204);
+    await ana.next("peer.left");
+    expect(account.glossaryFor(benSession.user.id)).toEqual([]);
+    expect(store.db.prepare("SELECT COUNT(*) AS n FROM user_glossary").get()).toEqual({ n: 0 });
+  });
+});
+
 describe("deleting an account with a live socket", () => {
   async function deleteOver(session: AuthSession): Promise<number> {
     const response = await fetch(`${base}/api/account`, {

@@ -6,12 +6,17 @@
 // tests from needing a transcript, and stops a transcript bug from being a lifecycle bug.
 //
 // Everything here dies with the room. Nothing is written to disk, which is the privacy promise.
+// The one thing that leaves is a correction's TERM (a phrase and its fix, never the line it came
+// from), handed to its author's account when their call closes (ws/server.ts, closeCall).
 
-import type {
-  GlossaryEntry,
-  RenderedLine,
-  SkipReason,
-  TranslationStatus,
+import {
+  LIMITS,
+  phraseInLine,
+  samePhrase,
+  type GlossaryEntry,
+  type RenderedLine,
+  type SkipReason,
+  type TranslationStatus,
 } from "@translatv/shared";
 import type { ContextTurn } from "../translate/prompt.js";
 import { CONTEXT_TURNS, GLOSSARY_MAX } from "../translate/prompt.js";
@@ -20,8 +25,8 @@ import { CONTEXT_TURNS, GLOSSARY_MAX } from "../translate/prompt.js";
  * How many finalized lines to keep.
  *
  * A cap is needed because a room is memory that a client controls the growth of, and an hour of
- * fast talking is a few thousand lines. The client keeps its own full copy for the download, so
- * trimming here costs a late joiner some scrollback and costs nobody their transcript.
+ * fast talking is a few thousand lines. Each client keeps its own copy for as long as its tab is
+ * in the call, so trimming here costs a late joiner (or a reload) some scrollback, nothing more.
  */
 export const MAX_LINES = 500;
 
@@ -31,6 +36,8 @@ export class RoomSession {
   private readonly lines: RenderedLine[] = [];
   private readonly glossary: GlossaryEntry[] = [];
   private readonly context: ContextTurn[] = [];
+  /** memberId -> the corrections that member made, oldest first, not yet taken. */
+  private readonly corrections = new Map<string, GlossaryEntry[]>();
 
   nextLineId(): string {
     lineCounter += 1;
@@ -143,29 +150,70 @@ export class RoomSession {
   }
 
   /**
-   * Record a correction and apply it to the line.
+   * Record a TERM level correction (owner decision C1): a phrase from the line, and its fix.
    *
-   * The correction is BOTH a glossary entry (so future translations of the same phrase honor
-   * it) and a direct override of this line (so the fix is visible immediately, with no second
-   * API call). Doing only the first would leave the wrong text on screen; only the second would
-   * make the user correct the same term over and over.
+   * The correction becomes a glossary entry, so later translations of the phrase honor it. When
+   * the phrase is the whole line, it also replaces the line's translation, as a correction always
+   * did, with no second API call. A phrase that is only part of the line leaves the translation as
+   * it was: the fix is for those words, and nothing here knows which words of the translation
+   * they became.
+   *
+   * Refused (null) when the line is gone, when the phrase is not in the line, and when no phrase
+   * was given and the whole line is too long to be a term. So every source this puts in the
+   * glossary comes from the line and fits LIMITS.glossaryTerm, which is what lets the glossary
+   * the server SENDS keep the 200 character limit it takes from clients. A line's full text used
+   * to be the term, up to 2000 characters of somebody's words.
+   *
+   * Recorded against its author, the member who made it, so that when their call closes the
+   * corrections THEY made, and only those, can be saved to their account (owner decision C2).
+   * Kept in memory with the rest of the room, and dropped with it.
    */
-  correct(lineId: string, corrected: string, targetDialect: string): RenderedLine | null {
-    const line = this.find(lineId);
+  correct(input: {
+    lineId: string;
+    /** The phrase being corrected. Absent from an older client: the whole line, then. */
+    phrase: string | undefined;
+    fix: string;
+    /** The reader's dialect, which the fix is written in. */
+    targetDialect: string;
+    authorMemberId: string;
+  }): { line: RenderedLine; replacedTranslation: boolean } | null {
+    const line = this.find(input.lineId);
     if (!line) return null;
 
-    this.addGlossaryEntry({
-      source: line.text,
-      target: corrected,
-      sourceDialect: line.srcDialect,
-      targetDialect,
-    });
+    const phrase = (input.phrase ?? line.text).replace(/\s+/gu, " ").trim();
+    if (phrase.length > LIMITS.glossaryTerm || !phraseInLine(phrase, line.text)) return null;
 
-    line.translated = corrected;
+    const entry: GlossaryEntry = {
+      source: phrase,
+      target: input.fix,
+      sourceDialect: line.srcDialect,
+      targetDialect: input.targetDialect,
+    };
+    this.addGlossaryEntry(entry);
+    const made = this.corrections.get(input.authorMemberId) ?? [];
+    made.push(entry);
+    this.corrections.set(input.authorMemberId, made);
+
+    if (!samePhrase(phrase, line.text)) return { line, replacedTranslation: false };
+
+    line.translated = input.fix;
     line.translationStatus = "ok";
     line.skipReason = null;
     line.revision += 1;
-    return line;
+    return { line, replacedTranslation: true };
+  }
+
+  /**
+   * The corrections this member made since the last call, oldest first, and forget them.
+   *
+   * Taken rather than read, because a member's call can close more than once in one room (a host
+   * whose first guest left gets a new call row when the next arrives), and each correction is
+   * saved once, with the call it was made in.
+   */
+  takeCorrections(memberId: string): GlossaryEntry[] {
+    const made = this.corrections.get(memberId) ?? [];
+    this.corrections.delete(memberId);
+    return made;
   }
 
   addGlossaryEntry(entry: GlossaryEntry): void {
