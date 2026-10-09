@@ -5,6 +5,7 @@ import { useCopy } from "../i18n/useCopy.js";
 import type { CopyRef } from "../i18n/copy.js";
 import type { AuthOutcome } from "../lib/session.js";
 import { DeleteAccount } from "./DeleteAccount.jsx";
+import { SavedCorrections, type SavedCorrectionsApi } from "./SavedCorrections.jsx";
 
 /** Longest thing worth keeping as a typed code, once it is clear it is not a link. */
 const MAX_TYPED = 12;
@@ -26,6 +27,8 @@ interface Props {
   onCreateInvite(): Promise<string | null>;
   /** Delete the account `userId` (the one shown) after the password is typed again. */
   onDeleteAccount(password: string, userId: string): Promise<AuthOutcome>;
+  /** An account's saved corrections, to list and delete. Acts only as that account. */
+  savedCorrectionsFor(userId: string): SavedCorrectionsApi;
 }
 
 export function Landing({
@@ -37,6 +40,7 @@ export function Landing({
   onSignOut,
   onCreateInvite,
   onDeleteAccount,
+  savedCorrectionsFor,
 }: Props) {
   const [code, setCode] = useState(initialCode ?? "");
   const ready = isLikelyCode(code);
@@ -115,6 +119,9 @@ export function Landing({
               one sign in, and when another tab moves this one to another account, the form, its
               typed password and any refusal go with the old account. The deletion names the
               account the form was opened for, which the server checks against the bearer. */}
+          {/* Keyed by the account for the same reason as the deletion form below: a list opened
+              for one account must never be shown, or deleted from, as another. */}
+          {user && <SavedCorrections key={`saved:${user.id}`} api={savedCorrectionsFor(user.id)} />}
           {user && <DeleteAccount key={user.id} onDelete={(password) => onDeleteAccount(password, user.id)} />}
         </div>
       </div>

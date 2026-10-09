@@ -1,11 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { DIALECTS } from "@translatv/shared";
 import { detectCapabilities } from "../stt/WebSpeechAdapter.js";
-import { parseImport } from "../lib/transcript.js";
 import { useStore } from "../state/store.js";
 import { useCopy } from "../i18n/useCopy.js";
 import type { CopyRef } from "../i18n/copy.js";
-import type { GlossaryEntry } from "@translatv/shared";
 
 interface Props {
   mode: "create" | "join";
@@ -15,7 +13,6 @@ interface Props {
     username: string;
     dialect: string;
     wantsVideo: boolean;
-    glossary: GlossaryEntry[];
   }): void;
 }
 
@@ -27,14 +24,11 @@ export function PreJoin({ mode, code, onCancel, onReady }: Props) {
   const dialect = useStore((state) => state.uiDialect);
   const setDialect = useStore((state) => state.setUiDialect);
   const [wantsVideo, setWantsVideo] = useState(true);
-  const [glossary, setGlossary] = useState<GlossaryEntry[]>([]);
-  const [importNote, setImportNote] = useState<CopyRef | null>(null);
   const [capability, setCapability] = useState<{
     supported: boolean;
     onDevice: boolean;
     notice?: CopyRef;
   } | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
   const copy = useCopy();
 
   useEffect(() => {
@@ -65,24 +59,6 @@ export function PreJoin({ mode, code, onCancel, onReady }: Props) {
     };
   }, [dialect]);
 
-  async function onFile(file: File): Promise<void> {
-    const result = parseImport(await file.text());
-    if (result.ok) {
-      setGlossary(result.glossary);
-      // Two keys and a ternary rather than a pluralization engine. This is the only string in
-      // the app that counts anything, and both languages split at exactly one, so the machinery
-      // a full plural system brings would be carried entirely for this line.
-      setImportNote(
-        result.glossary.length === 1
-          ? { key: "prejoin.glossary.loaded.one" }
-          : { key: "prejoin.glossary.loaded.many", params: { count: result.glossary.length } },
-      );
-    } else {
-      setGlossary([]);
-      setImportNote(result.notice);
-    }
-  }
-
   const ready = username.trim().length > 0;
 
   return (
@@ -110,7 +86,7 @@ export function PreJoin({ mode, code, onCancel, onReady }: Props) {
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (ready) onReady({ username: username.trim(), dialect, wantsVideo, glossary });
+            if (ready) onReady({ username: username.trim(), dialect, wantsVideo });
           }}
         >
           <div className="field">
@@ -159,31 +135,6 @@ export function PreJoin({ mode, code, onCancel, onReady }: Props) {
               />
               <span>{copy.t("prejoin.video")}</span>
             </label>
-          </div>
-
-          <div className="field">
-            <button
-              type="button"
-              onClick={() => fileInput.current?.click()}
-              style={{ width: "100%" }}
-            >
-              {copy.t("prejoin.glossary.load")}
-            </button>
-            <input
-              ref={fileInput}
-              type="file"
-              accept=".json,application/json"
-              hidden
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void onFile(file);
-              }}
-            />
-            {importNote && (
-              <p style={{ fontSize: 12, color: "var(--muted)", margin: "7px 0 0" }}>
-                {copy.ref(importNote)}
-              </p>
-            )}
           </div>
 
           <div className="row" style={{ marginTop: 20 }}>

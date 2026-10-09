@@ -55,7 +55,7 @@ describe("interpolation", () => {
   });
 
   it("renders a number", () => {
-    expect(copyFor("en-US").t("prejoin.glossary.loaded.many", { count: 4 })).toContain("4");
+    expect(copyFor("en-US").t("correct.problem.fixTooLong", { max: 400 })).toContain("400");
   });
 
   // The house rule from the spend ledger, applied to words: an unrecoverable value is reported
@@ -186,7 +186,7 @@ const PINNED_OVERRIDES: Record<string, string[]> = {
     "error.PAYLOAD_TOO_LARGE", "error.RATE_LIMITED", "error.ROOM_NOT_FOUND",
     "error.UNAUTHENTICATED", "failure.EMPTY_RESULT", "failure.PROVIDER_ERROR",
     "failure.PROVIDER_RATE_LIMITED", "failure.TIMED_OUT", "failure.TOO_MANY_IN_FLIGHT",
-    "failure.UNRESOLVED_DIALECT", "import.notJson", "landing.codeHint", "media.denied.camera",
+    "failure.UNRESOLVED_DIALECT", "landing.codeHint", "media.denied.camera",
     "media.denied.microphone", "media.inUse.camera", "media.inUse.microphone",
     "media.insecure.camera", "media.insecure.microphone", "media.noDevice.camera",
     "media.noDevice.microphone", "overlay.empty", "overlay.you", "panel.empty",
@@ -194,6 +194,10 @@ const PINNED_OVERRIDES: Record<string, string[]> = {
     "room.end.alt.before", "room.end.body", "room.end.host.note", "room.invite.lead",
     "room.mic.muteLabel", "room.mic.unmuteLabel", "room.translation.title", "room.you",
     "stt.keepsDropping", "stt.noMicrophone", "stt.permission",
+    // The corrections pull request: the term dialog and the saved list, in voseo.
+    "correct.body", "correct.phrase.hint", "correct.problem.empty", "correct.problem.fixTooLong",
+    "correct.problem.notInLine", "correct.problem.phraseTooLong", "saved.deleteFailed",
+    "saved.empty", "saved.lead", "saved.loadFailed",
   ],
   "es-CO": [
     "account.delete.expired", "account.delete.lead", "account.delete.password",
@@ -202,22 +206,25 @@ const PINNED_OVERRIDES: Record<string, string[]> = {
     "auth.error.INVALID_INPUT", "auth.error.LOCKED", "auth.error.RATE_LIMITED",
     "auth.error.WEAK_PASSWORD", "auth.error.unavailable", "auth.invite.hint", "auth.sub",
     "auth.switch.toSignIn", "auth.switch.toSignUp", "chips.cloud.title", "chips.onDevice.title",
-    "chips.translationOff.title", "composer.placeholder", "correct.body", "correct.youSaid",
+    "chips.translationOff.title", "composer.placeholder", "correct.body",
     "error.ALREADY_IN_ROOM", "error.HOST_NOT_PRESENT", "error.INVALID_RESUME", "error.MALFORMED",
     "error.NOT_IN_ROOM", "error.PAYLOAD_TOO_LARGE", "error.RATE_LIMITED", "error.ROOM_NOT_FOUND",
-    "error.UNAUTHENTICATED", "export.glossary", "failure.EMPTY_RESULT", "failure.PROVIDER_ERROR",
+    "error.UNAUTHENTICATED", "failure.EMPTY_RESULT", "failure.PROVIDER_ERROR",
     "failure.PROVIDER_RATE_LIMITED", "failure.TIMED_OUT", "failure.TOO_MANY_IN_FLIGHT",
-    "failure.UNRESOLVED_DIALECT", "import.notJson", "landing.codeHint", "media.denied.camera",
+    "failure.UNRESOLVED_DIALECT", "landing.codeHint", "media.denied.camera",
     "media.denied.microphone", "media.inUse.camera", "media.inUse.microphone",
     "media.insecure.camera", "media.insecure.microphone", "media.noDevice.camera",
     "media.noDevice.microphone", "media.other.camera", "media.other.microphone", "overlay.you",
-    "panel.empty", "panel.export.json", "prejoin.dialect.label", "prejoin.glossary.loaded.many",
-    "prejoin.glossary.loaded.one", "prejoin.name.label", "prejoin.stt.cloud",
+    "panel.empty", "prejoin.dialect.label", "prejoin.name.label", "prejoin.stt.cloud",
     "prejoin.stt.onDevice", "prejoin.sub.create", "prejoin.title.create", "room.camera.offLabel",
     "room.camera.onLabel", "room.dialect.label", "room.dialect.title", "room.end.alt.before",
     "room.end.body", "room.end.host.note", "room.invite.lead", "room.mic.level",
     "room.mic.muteLabel", "room.mic.unmuteLabel", "room.translation.title", "room.you",
     "stt.keepsDropping", "stt.noMicrophone", "stt.permission",
+    // The corrections pull request: the term dialog and the saved list, in usted.
+    "correct.phrase.hint", "correct.problem.empty", "correct.problem.fixTooLong",
+    "correct.problem.notInLine", "correct.problem.phraseTooLong", "saved.deleteFailed",
+    "saved.empty", "saved.lead", "saved.loadFailed", "saved.title",
   ],
   "es-ES": [
     "account.delete.changed", "landing.sub", "overlay.empty", "prejoin.stt.cloud",

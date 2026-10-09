@@ -60,7 +60,12 @@ plan of record for the multi-user server and the iOS app.
   `shared/src/account.ts`: dialect preferences, a stored glossary (merged into a room through the
   same path as `glossary.import`), and call history (a room code HASH, never the code). Contacts
   are derived from call history, never stored. Transcripts, chat and room glossaries are NEVER
-  persisted. `DELETE /api/account` re authenticates, deletes the user row and lets ON DELETE do
+  persisted. The one exception is a person's OWN corrections (owner decisions C1 to C5,
+  2026-10-09): a correction is a term (a phrase from the line, up to 200 characters, and its fix,
+  up to 400), and when that person's call closes (`closeCall` in `server/src/ws/server.ts`) the
+  ones they made are screened by rules (`server/src/account/corrections.ts`, no model call) and
+  added to their stored glossary, newest first, 40 kept. The rest of the line is never saved, and
+  nothing the other person typed reaches your account. Nobody downloads a transcript. `DELETE /api/account` re authenticates, deletes the user row and lets ON DELETE do
   the rest (CASCADE for what the user owns, SET NULL for what only mentions them, such as a
   peer's call history), then closes that user's live sockets. It never touches the spend ledger.
 

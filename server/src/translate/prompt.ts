@@ -80,7 +80,8 @@ export function buildSystemPrompt(
 
   if (glossary.length > 0) {
     // Delimited and described as vocabulary, not as authority. These pairs come from whoever is
-    // in the room, through glossary.import, which takes 40 entries of up to 600 characters. They
+    // in the room: their corrections, their saved glossaries, and glossary.import, up to 40
+    // entries of up to 600 characters (a 200 character term and a 400 character fix). They
     // deserve exactly the trust an utterance gets, which is none: prefer these renderings, do not
     // read them.
     lines.push(

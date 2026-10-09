@@ -1178,8 +1178,10 @@ export class SignalingServer {
 
   /**
    * A signed in user's stored glossary joins the room they just created or joined. Sent AFTER
-   * room.created or room.joined, as a glossary.updated, exactly like an import from the pre join
-   * screen, so a client needs nothing new to receive it. Nothing is sent for an empty glossary.
+   * room.created or room.joined, as a glossary.updated, exactly like a glossary.import, so a client
+   * needs nothing new to receive it. Nothing is sent for an empty glossary. This is how saved
+   * corrections reach the next call: closeCall saves them to the stored glossary, and this merges
+   * it in.
    */
   private mergeStoredGlossary(roomCode: string, userId: string): void {
     const entries = this.userData?.glossaryFor(userId) ?? [];

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { GlossaryEntry, Member, RenderedLine } from "@translatv/shared";
+import { LIMITS, type Member, type RenderedLine } from "@translatv/shared";
 import { captionFor } from "../lib/caption.js";
 import {
   DRAFT_MAX,
@@ -10,34 +10,25 @@ import {
   submittableText,
   textToInsert,
 } from "../lib/composer.js";
-import { buildExport, download, toPlainText } from "../lib/transcript.js";
+import { canCorrect, correctionDraft, correctionProblem } from "../lib/correction.js";
 import { failureCopyKey } from "../i18n/codes.js";
 import { useCopy } from "../i18n/useCopy.js";
 
 interface Props {
   lines: readonly RenderedLine[];
-  glossary: readonly GlossaryEntry[];
   selfId: string | null;
   me: Member | null;
   peer: Member | null;
-  roomCode: string;
-  /**
-   * May this reader download the conversation?
-   *
-   * A UX affordance, NOT access control, and the difference matters enough to say twice. This
-   * reader's browser already holds every line, because it needs them to render their own
-   * subtitles, so anyone who opens devtools has the whole conversation whatever this says.
-   * Hiding the buttons keeps a feature out of a guest's way; it does not keep anything from
-   * them. Nothing downstream should be built as though it did.
-   */
-  canExport: boolean;
-  onCorrect(lineId: string, corrected: string): void;
+  // No transcript download any more (owner decision 2026-09-28): nobody downloads the chat. The
+  // .txt and .json buttons, and canExport with them, are gone.
+  /** A term level correction (owner decision C1): a phrase from the line, and its fix. */
+  onCorrect(lineId: string, phrase: string, fix: string): void;
   onRetry(lineId: string): void;
   onSendChat(text: string): void;
 }
 
 export function TranscriptPanel(props: Props) {
-  const { lines, glossary, selfId, me, peer, roomCode, canExport } = props;
+  const { lines, selfId, me, peer } = props;
   const scroller = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState("");
   const [correcting, setCorrecting] = useState<RenderedLine | null>(null);
@@ -200,31 +191,10 @@ export function TranscriptPanel(props: Props) {
     return copy.t("panel.someone");
   }
 
-  function exportTranscript(kind: "txt" | "json"): void {
-    const data = buildExport({ roomCode, lines, glossary, nameFor });
-    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
-    if (kind === "json") {
-      download(`chat-${roomCode}-${stamp}.json`, JSON.stringify(data, null, 2), "json");
-    } else {
-      download(`chat-${roomCode}-${stamp}.txt`, toPlainText(data, copy), "txt");
-    }
-  }
-
   return (
     <aside className="panel">
       <div className="panel-head">
         <span>{copy.t("panel.title")}</span>
-        <span className="spacer" />
-        {canExport && (
-          <>
-            <button onClick={() => exportTranscript("txt")} title={copy.t("panel.export.txt")}>
-              .txt
-            </button>
-            <button onClick={() => exportTranscript("json")} title={copy.t("panel.export.json")}>
-              .json
-            </button>
-          </>
-        )}
       </div>
 
       <div className="transcript" ref={scroller}>
@@ -279,7 +249,9 @@ export function TranscriptPanel(props: Props) {
               )}
 
               <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
-                {!failed && line.translationStatus === "ok" && (
+                {/* Only on the other person's lines (owner decision C2): the fix is for the
+                    translation you read, and your own line is shown to you as you said it. */}
+                {canCorrect(line, selfId) && (
                   <button className="fix" onClick={() => setCorrecting(line)}>
                     {copy.t("panel.fix")}
                   </button>
@@ -374,10 +346,9 @@ export function TranscriptPanel(props: Props) {
       {correcting && (
         <CorrectionDialog
           line={correcting}
-          mine={correcting.from === selfId}
           onClose={() => setCorrecting(null)}
-          onSave={(text) => {
-            props.onCorrect(correcting.lineId, text);
+          onSave={(phrase, fix) => {
+            props.onCorrect(correcting.lineId, phrase, fix);
             setCorrecting(null);
           }}
         />
@@ -397,71 +368,109 @@ function placeCaretAtEnd(node: HTMLElement): void {
   selection.addRange(range);
 }
 
+/**
+ * A term level correction (owner decision C1, 2026-10-09): the words that came out wrong, and
+ * how they should read. Both fields start from the line, the whole of what they said and the
+ * whole translation, for the person to trim. A phrase that is the whole line replaces the line's
+ * translation; a shorter one applies from the next line on. Either way it is saved to this
+ * person's account when the call ends.
+ *
+ * The limits are not maxLength attributes: a prefilled line can be longer than a term, and a
+ * maxLength would neither cut it nor say why Save does nothing. The problem is said in words
+ * instead, under the fields, and Save waits for it to be fixed.
+ */
 function CorrectionDialog({
   line,
-  mine,
   onClose,
   onSave,
 }: {
   line: RenderedLine;
-  /** You are the one who spoke it, so the original row is your own words, not theirs. */
-  mine: boolean;
   onClose(): void;
-  onSave(text: string): void;
+  onSave(phrase: string, fix: string): void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [text, setText] = useState(line.translated ?? "");
+  const [draft, setDraft] = useState(() => correctionDraft(line));
+  // Said only after the first try, so a dialog that opens on a whole long line does not greet the
+  // person with an error before they have touched it.
+  const [tried, setTried] = useState(false);
   const copy = useCopy();
+  const problem = correctionProblem(draft.phrase, draft.fix, line.text);
+  const shown = tried ? problem : null;
+  // Which field the problem is in, for aria-invalid. An empty pair can be either, or both.
+  const phraseBad =
+    shown !== null &&
+    (shown === "correct.problem.empty" ? draft.phrase.trim() === "" : shown !== "correct.problem.fixTooLong");
+  const fixBad =
+    shown !== null &&
+    (shown === "correct.problem.empty" ? draft.fix.trim() === "" : shown === "correct.problem.fixTooLong");
 
   useEffect(() => {
     ref.current?.showModal();
   }, []);
 
   return (
-    <dialog ref={ref} onClose={onClose}>
-      <h2>{copy.t("correct.title")}</h2>
+    <dialog ref={ref} onClose={onClose} aria-labelledby="correction-title">
+      <h2 id="correction-title">{copy.t("correct.title")}</h2>
       <p>{copy.t("correct.body")}</p>
 
       <div className="field">
-        <label>{copy.t(mine ? "correct.youSaid" : "correct.theySaid")}</label>
-        <div
-          style={{
-            background: "var(--panel-2)",
-            border: "1px solid var(--line)",
-            borderRadius: 8,
-            padding: "9px 11px",
-            fontStyle: "italic",
-            fontSize: 14,
-          }}
-        >
+        <span className="label">{copy.t("correct.theySaid")}</span>
+        <div className="correction-original" lang={line.srcDialect}>
           {line.text}
         </div>
       </div>
 
-      <div className="field">
-        <label htmlFor="correction">{copy.t("correct.shouldSay")}</label>
-        <input
-          id="correction"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          maxLength={400}
-          autoFocus
-        />
-      </div>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          setTried(true);
+          if (problem === null) onSave(draft.phrase.trim(), draft.fix.trim());
+        }}
+      >
+        <div className="field">
+          <label htmlFor="correction-phrase">{copy.t("correct.phrase")}</label>
+          <textarea
+            id="correction-phrase"
+            rows={2}
+            lang={line.srcDialect}
+            value={draft.phrase}
+            onChange={(event) => setDraft((d) => ({ ...d, phrase: event.target.value }))}
+            aria-describedby={shown ? "correction-hint correction-problem" : "correction-hint"}
+            aria-invalid={phraseBad || undefined}
+            autoFocus
+          />
+          <p id="correction-hint" className="hint">
+            {copy.t("correct.phrase.hint")}
+          </p>
+        </div>
 
-      <div className="row">
-        <button type="button" onClick={() => ref.current?.close()} style={{ flex: "0 0 auto" }}>
-          {copy.t("correct.cancel")}
-        </button>
-        <button
-          type="button"
-          className="primary"
-          disabled={!text.trim()}
-          onClick={() => onSave(text.trim())}
-        >
-          {copy.t("correct.save")}
-        </button>
-      </div>
+        <div className="field">
+          <label htmlFor="correction-fix">{copy.t("correct.shouldSay")}</label>
+          <textarea
+            id="correction-fix"
+            rows={2}
+            value={draft.fix}
+            onChange={(event) => setDraft((d) => ({ ...d, fix: event.target.value }))}
+            aria-describedby={shown ? "correction-problem" : undefined}
+            aria-invalid={fixBad || undefined}
+          />
+        </div>
+
+        {shown && (
+          <p id="correction-problem" className="hint bad" role="alert">
+            {copy.t(shown, { max: shown === "correct.problem.fixTooLong" ? LIMITS.glossaryTranslation : LIMITS.glossaryTerm })}
+          </p>
+        )}
+
+        <div className="row">
+          <button type="button" onClick={() => ref.current?.close()} style={{ flex: "0 0 auto" }}>
+            {copy.t("correct.cancel")}
+          </button>
+          <button type="submit" className="primary">
+            {copy.t("correct.save")}
+          </button>
+        </div>
+      </form>
     </dialog>
   );
 }

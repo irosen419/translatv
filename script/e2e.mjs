@@ -509,6 +509,12 @@ try {
   );
   await ben.getByRole("button", { name: "Join chat" }).click();
   await ben.getByLabel("Your name, just for this chat").fill("Ben");
+  // "Load corrections from a past chat" read the transcript download, and both are gone: saved
+  // corrections come from the account now (owner decisions of 2026-09-28 and 2026-10-09).
+  check(
+    "the pre join screen offers no file to load corrections from",
+    (await ben.locator('input[type="file"]').count()) === 0,
+  );
   await ben.getByLabel("Your language and region").selectOption("es-AR");
   // Everything Ben sees is Spanish from here. The button he is about to press already says so.
   check(
@@ -688,10 +694,11 @@ try {
     "and the text is still on screen rather than removed with the duplicate",
     lastRow.split("the standup is at nine").length - 1 === 1,
   );
-  check("both export formats are offered", (await ben.locator(".panel-head button").count()) === 2);
+  // Nobody downloads the transcript any more (owner decision, 2026-09-28).
   check(
-    "no HTML export is offered",
-    !(await ben.locator(".panel-head").innerText()).toLowerCase().includes("html"),
+    "no transcript download is offered, in any format",
+    (await ben.locator(".panel-head button").count()) === 0 &&
+      !/\.txt|\.json/i.test(await ben.locator(".panel").innerText()),
   );
 
   // ---------------------------------------------------------------------
@@ -1063,6 +1070,76 @@ try {
   );
   await phone.getByRole("button", { name: "Cancel" }).click();
   await phoneContext.close();
+
+  // ---------------------------------------------------------------------
+  section("Saved corrections, on a phone, in Spanish");
+  // The backstop for what the after call screen cannot see (owner decision C5). The server tests
+  // carry saving them, since this run has no API key and so never reaches a correction; this is
+  // the list a person reads and deletes from, at 390 pixels, in the language that runs longest.
+  const fayContext = await signedInContext("Fay", { viewport: { width: 390, height: 844 } });
+  const fayToken = (await apiSignIn(BASE, "Fay")).accessToken;
+  const fayHeaders = { "content-type": "application/json", authorization: `Bearer ${fayToken}` };
+  const longFix =
+    "cuando termina la reunión de la mañana, la que todos llaman la daily, aunque nadie sepa bien por qué ".repeat(3).trim();
+  const fayEntries = [
+    { source: "the standup", target: longFix, sourceDialect: "en-US", targetDialect: "es-AR" },
+    { source: "deadline", target: "fecha límite", sourceDialect: "en-US", targetDialect: "es-AR" },
+  ];
+  await fetch(`${BASE}/api/me/preferences`, {
+    method: "PUT",
+    headers: fayHeaders,
+    body: JSON.stringify({ dialect: "es-AR", uiDialect: "es-AR" }),
+  });
+  await fetch(`${BASE}/api/me/glossary`, { method: "PUT", headers: fayHeaders, body: JSON.stringify({ entries: fayEntries }) });
+  const fay = await fayContext.newPage();
+  fay.on("pageerror", (e) => errors.push(`fay: ${e.message}`));
+  await fay.goto(BASE);
+  const savedOpen = fay.getByRole("button", { name: es("saved.open") });
+  await savedOpen.waitFor({ timeout: 10_000 });
+  await savedOpen.click();
+  check(
+    "the list opens with focus on its heading",
+    await waitFor(async () => ((await fay.evaluate(() => document.activeElement?.id)) === "saved-title" ? true : null), "focus on the heading")
+      .catch(() => false),
+  );
+  await fay.locator(".saved-item").first().waitFor();
+  check("every saved correction is listed", (await fay.locator(".saved-item").count()) === 2);
+  check(
+    "a long fix is shown in full, wrapped rather than cut",
+    (await fay.locator(".saved-target").first().innerText()).replace(/\s+/g, " ").trim() === longFix,
+  );
+  check(
+    "nothing on the page is wider than the phone",
+    await fay.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth),
+  );
+  check(
+    "no entry overflows its box",
+    await fay.evaluate(() =>
+      [...document.querySelectorAll(".saved-text, .saved-item > button")].every(
+        (node) => node.scrollWidth <= node.clientWidth + 1 && node.scrollHeight <= node.clientHeight + 1,
+      ),
+    ),
+  );
+  await fay
+    .getByRole("button", { name: es("saved.deleteLabel").replace("{source}", "deadline") })
+    .click();
+  await waitFor(async () => ((await fay.locator(".saved-item").count()) === 1 ? true : null), "the entry to go");
+  const fayStored = await fetch(`${BASE}/api/me/glossary`, { headers: fayHeaders }).then((r) => r.json());
+  check(
+    "deleting one removes it from the account and keeps the other",
+    JSON.stringify(fayStored.entries) === JSON.stringify([fayEntries[0]]),
+    JSON.stringify(fayStored).slice(0, 200),
+  );
+  check(
+    "after a delete, focus lands on the list's heading rather than on the page",
+    (await fay.evaluate(() => document.activeElement?.id)) === "saved-title",
+  );
+  await fay.getByRole("button", { name: es("saved.close"), exact: true }).click();
+  check(
+    "closing puts focus back on the link that opened it",
+    (await fay.evaluate(() => document.activeElement?.textContent)) === es("saved.open"),
+  );
+  await fayContext.close();
 
   // ---------------------------------------------------------------------
   section("Ending kills the room permanently");
