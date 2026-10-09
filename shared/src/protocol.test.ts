@@ -164,6 +164,17 @@ describe("text limits", () => {
     expect(clean("a\r\n".repeat(999) + "a")).toBeNull();
   });
 
+  it("treats every control character as one, C1 and DEL included, and trims Unicode spaces", () => {
+    // The exported description says "control characters ... replaced by spaces, ends trimmed",
+    // which a client reimplements; these are the edges where a narrower reading would differ.
+    const clean = (text: string) => {
+      const parsed = parseClientMessage(JSON.stringify({ t: "chat.send", text }));
+      return parsed.ok && parsed.message.t === "chat.send" ? parsed.message.text : null;
+    };
+    expect(clean("a\u0000b\u007fc\u0085d")).toBe("a b c d");
+    expect(clean("\u3000\u00a0\ufeffa\u3000")).toBe("a");
+  });
+
   it("cleans a username before measuring it", () => {
     expect(username.safeParse(`  ${"a".repeat(LIMITS.username)}​ `).success).toBe(true);
     expect(username.safeParse("a".repeat(LIMITS.username + 1)).success).toBe(false);

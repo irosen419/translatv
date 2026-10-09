@@ -44,10 +44,39 @@ describe("check_wire.mjs", () => {
   });
 
   it("fails, naming the message type, when a fixture is missing", () => {
+    // Taken out of the index too, so the index check cannot be what catches it.
     unlinkSync(join(wire, "fixtures", "server", "pong.json"));
+    const path = join(wire, "fixtures", "index.json");
+    const index = JSON.parse(readFileSync(path, "utf8"));
+    index.server = index.server.filter((t) => t !== "pong");
+    writeFileSync(path, JSON.stringify(index, null, 2) + "\n");
     const result = run(wire);
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toMatch(/pong/);
+    expect(result.stderr).toMatch(/pong\.json: missing, so server message "pong" has no fixture/);
+  });
+
+  it("fails, naming the file, when a fixture is not readable JSON", () => {
+    writeFileSync(join(wire, "fixtures", "client", "ping.json"), "{ not json\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/ping\.json: not readable JSON/);
+  });
+
+  it("fails when a fixture's t is not its file name", () => {
+    writeFileSync(join(wire, "fixtures", "client", "ping.json"), JSON.stringify({ t: "room.leave" }) + "\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/ping\.json: its t is "room\.leave", expected "ping"/);
+  });
+
+  it("fails when the exported HTTP schema has no definition a route names", () => {
+    const path = join(wire, "http.schema.json");
+    const schema = JSON.parse(readFileSync(path, "utf8"));
+    delete schema.definitions.contactsResponse;
+    writeFileSync(path, JSON.stringify(schema, null, 2) + "\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/me\.contacts\.response\.json: the exported schema has no definition contactsResponse/);
   });
 
   it("fails, naming the file, when a fixture does not parse with its schema", () => {
