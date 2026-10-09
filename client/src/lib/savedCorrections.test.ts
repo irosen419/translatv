@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GlossaryEntry } from "@translatv/shared";
-import { fetchAs, SavedCorrections } from "./savedCorrections.js";
+import { fetchAs, SavedCorrections, savedCorrectionsRegistry } from "./savedCorrections.js";
 
 const che: GlossaryEntry = { source: "che", target: "hey", sourceDialect: "es-AR", targetDialect: "en-US" };
 const pibe: GlossaryEntry = { source: "pibe", target: "kid", sourceDialect: "es-AR", targetDialect: "en-US" };
@@ -132,5 +132,30 @@ describe("fetchAs", () => {
     expect(await saved.remove(che)).toBeNull();
     expect(api.calls.map((c) => c.method)).toEqual(["GET"]);
     expect(api.state.entries).toEqual([che, pibe]);
+  });
+});
+
+describe("savedCorrectionsRegistry", () => {
+  function fakeSession(entries: GlossaryEntry[]) {
+    const api = fakeApi(entries);
+    const session = { who: "ana", state: () => ({ user: { id: session.who } }), authorizedFetch: api.fetch };
+    return { session, api };
+  }
+
+  it("gives the same list object for an account each time, so a screen does not reload it every render", () => {
+    const { session } = fakeSession([che]);
+    const forAccount = savedCorrectionsRegistry(session);
+    expect(forAccount("ana")).toBe(forAccount("ana"));
+    expect(forAccount("ana")).not.toBe(forAccount("ben"));
+  });
+
+  it("pins each list to its account: once another is signed in, it sends nothing", async () => {
+    const { session, api } = fakeSession([che]);
+    const anas = savedCorrectionsRegistry(session)("ana");
+    expect(await anas.load()).toEqual([che]);
+    session.who = "ben";
+    expect(await anas.remove(che)).toBeNull();
+    expect(api.calls.map((c) => c.method)).toEqual(["GET"]);
+    expect(api.state.entries).toEqual([che]);
   });
 });

@@ -12,12 +12,13 @@ import {
   comparablePhrase,
   DIALECT_CODES,
   LIMITS,
+  savableTerm,
   translationNeed,
   type GlossaryEntry,
 } from "@translatv/shared";
 
 /** Why a correction was not saved. Counted in the log, never shown with its text. */
-export type ScreenReason = "empty" | "identical" | "too_long" | "instruction" | "direction";
+export type ScreenReason = "empty" | "identical" | "too_long" | "not_a_term" | "instruction" | "direction";
 
 export type ScreenVerdict = { ok: true; entry: GlossaryEntry } | { ok: false; reason: ScreenReason };
 
@@ -54,38 +55,54 @@ const near = (first: string, second: string) =>
  * "a partir de ahora" (from now on) are all real terms, and corrections.test.ts keeps them passing.
  */
 const INSTRUCTION_PATTERNS: readonly RegExp[] = [
-  // Markup and fences: the prompt's own tags, code fences, template braces, and the arrow the
-  // prompt writes between a term and its translation. No glossary term needs any of them.
-  /[<>`{}]/u,
-  /->|=>/u,
-  // A role label, as in a chat transcript.
-  new RegExp(`${word("system|assistant|user|human|sistema|asistente|usuario|modelo|model")}\\s*:`, "iu"),
-  // "Ignore the instructions", "olvida las reglas" and their kin.
+  // Markup and fences: the prompt's own tags, code fences, template braces, square brackets (a
+  // "[SYSTEM]" header), and so the arrows the prompt writes between a term and its translation
+  // ("->", "=>", both caught by ">"). No glossary term needs any of them.
+  /[<>`{}[\]]/u,
+  // A role label, as in a chat transcript. Not "modelo:", which is how a product is described.
+  new RegExp(`${word("system|assistant|user|human|sistema|asistente|usuario")}\\s*:`, "iu"),
+  // "Ignore the instructions", "olvida las reglas" and their kin. The verbs are the imperatives
+  // and infinitives only: "olvidé las reglas" (I forgot the rules) and "ignoró las indicaciones"
+  // (she ignored the directions) are things people say, and the first screen dropped them.
   near(
-    "ignore|disregard|forget|override|bypass|ignor\\p{L}*|olvid\\p{L}*|omit\\p{L}*|descart\\p{L}*|saltea\\p{L}*",
-    "instructions?|prompts?|rules|guidelines|above|previous|prior|instrucci\\p{L}*|reglas|indicaciones|anteriores|previas",
+    "ignore|disregard|forget|override|bypass|ignora|ignorá|ignorar|ignoren|olvida|olvidá|olvidar|olviden|olvidate|omite|omití|omitir|descarta|descartá|descartar",
+    "instructions?|prompts?|rules|guidelines|above|previous|prior|before|instrucci\\p{L}*|reglas|indicaciones|anteriore?s?|previas?",
   ),
-  // Talking to the model about itself.
+  near("new|nuevas?", "instructions?|rules|instrucciones|reglas"),
+  // Talking to the model about itself, or giving it a part to play.
   new RegExp(
-    `${word("system prompt|prompt del sistema|you are now|as an ai|como (?:una )?ia|ahora eres|ahora sos")}`,
+    `${word("system prompt|prompt del sistema|you are now|as an ai|como (?:una )?ia|ahora eres|ahora sos|pretend you are|pretend to be|act as|finge que eres|hac[ée] de cuenta que sos")}`,
     "iu",
   ),
-  near("you are|eres|sos", "an? (?:ai|assistant|language model|chatbot)|una? (?:ia|asistente|modelo)"),
-  // A blanket order about translating: "translate everything as yes".
+  near("you are|eres|sos", "an? (?:ai|assistant|language model|chatbot)|una? (?:ia|asistente)"),
+  // A blanket order about translating: "translate everything as yes", "instead of translating".
   near("translate|traduc\\p{L}*", "everything|every|all|always|instead|todo|todas?|todos|siempre"),
-  // An order about how to answer: "respond only with OK". Not "answer the phone", which is a term.
-  near(
-    "respond|reply|answer|output|responde|respond[ée]|contesta|contest[áa]",
-    "only|solo|solamente|únicamente",
-  ),
+  near("instead of|en vez de|en lugar de", "translat\\p{L}*|traduc\\p{L}*"),
+  // An order about how to answer: "respond only with OK". Not "answer the phone", and not
+  // "responde solo a su jefe" (she answers only to her boss), which are terms.
+  near("respond|reply|answer|output", "only with|with only|nothing but"),
+  near("responde|respondé|contesta|contestá", "(?:solo|solamente|únicamente) con"),
 ];
 
+/**
+ * Checked on the NFKC form as well as the text itself, so fullwidth and other compatibility forms
+ * ("ＳＹＳＴＥＭ:", "＜/glossary＞") fold to the plain characters the patterns name. What is saved
+ * is the text as typed; only the check folds. A look alike from another script (a Cyrillic "о" in
+ * "ignоre") does not fold, and gets through: rules have a ceiling, which is why the saved list has
+ * a delete.
+ */
 function readsAsInstructions(text: string): boolean {
-  return INSTRUCTION_PATTERNS.some((pattern) => pattern.test(text));
+  const folded = text.normalize("NFKC");
+  return INSTRUCTION_PATTERNS.some((pattern) => pattern.test(text) || pattern.test(folded));
 }
 
 /**
  * Screen one correction. On success the entry carries the CLEANED texts, which are what is saved.
+ *
+ * The term rule: the phrase is at most TERM_MAX_WORDS words (shared/src/corrections.ts). The dialog
+ * prefills the whole line, so without it the untouched default would save the other person's whole
+ * sentence, which owner decision C1 rejected. The fix is not limited in words: one term can take a
+ * longer rendering.
  *
  * The direction rule: a correction fixes a translation someone read, so its phrase is in the
  * line's dialect and its fix in the reader's, and those are two different languages. The socket
@@ -100,6 +117,7 @@ export function screenCorrection(candidate: GlossaryEntry): ScreenVerdict {
   if (source.length > LIMITS.glossaryTerm || target.length > LIMITS.glossaryTranslation) {
     return { ok: false, reason: "too_long" };
   }
+  if (!savableTerm(source)) return { ok: false, reason: "not_a_term" };
   if (comparablePhrase(source) === comparablePhrase(target)) return { ok: false, reason: "identical" };
   if (readsAsInstructions(source) || readsAsInstructions(target)) return { ok: false, reason: "instruction" };
 

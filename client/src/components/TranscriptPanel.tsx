@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { LIMITS, type Member, type RenderedLine } from "@translatv/shared";
+import { LIMITS, TERM_MAX_WORDS, type Member, type RenderedLine } from "@translatv/shared";
 import { captionFor } from "../lib/caption.js";
 import {
   DRAFT_MAX,
@@ -10,7 +10,7 @@ import {
   submittableText,
   textToInsert,
 } from "../lib/composer.js";
-import { canCorrect, correctionDraft, correctionProblem } from "../lib/correction.js";
+import { canCorrect, correctionDraft, correctionProblem, willBeSaved } from "../lib/correction.js";
 import { failureCopyKey } from "../i18n/codes.js";
 import { useCopy } from "../i18n/useCopy.js";
 
@@ -442,6 +442,13 @@ function CorrectionDialog({
           <p id="correction-hint" className="hint">
             {copy.t("correct.phrase.hint")}
           </p>
+          {/* Not a problem: it still fixes this call. Said as the person types, so pressing Save on
+              the untouched whole line is a choice they can see the outcome of. */}
+          <div aria-live="polite">
+            {!willBeSaved(draft.phrase) && draft.phrase.trim() !== "" && (
+              <p className="hint">{copy.t("correct.notSaved", { max: TERM_MAX_WORDS })}</p>
+            )}
+          </div>
         </div>
 
         <div className="field">

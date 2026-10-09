@@ -82,3 +82,29 @@ export class SavedCorrections {
     }
   }
 }
+
+/** The slice of SessionManager the registry needs. */
+export interface AccountSession {
+  state(): { user: { id: string } | null };
+  authorizedFetch(path: string, init?: RequestInit): Promise<Response>;
+}
+
+/**
+ * One SavedCorrections per account, kept so the list's identity is stable across renders, and each
+ * acting only as its own account (fetchAs). Here rather than in App.tsx so that pinning the
+ * account is tested where it is wired: dropping fetchAs from this path went unnoticed by every
+ * test in review round 1.
+ */
+export function savedCorrectionsRegistry(session: AccountSession): (userId: string) => SavedCorrections {
+  const byAccount = new Map<string, SavedCorrections>();
+  return (userId) => {
+    let api = byAccount.get(userId);
+    if (!api) {
+      api = new SavedCorrections(
+        fetchAs(userId, () => session.state().user?.id ?? null, (path, init) => session.authorizedFetch(path, init)),
+      );
+      byAccount.set(userId, api);
+    }
+    return api;
+  };
+}

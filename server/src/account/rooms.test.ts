@@ -466,6 +466,21 @@ describe("corrections saved after a call", () => {
     }
   });
 
+  // Review round 1 measured this: the dialog prefills the whole line, and pressing Save untouched
+  // stored the other person's whole sentence in the reader's account. A sentence is not a term
+  // (owner decision C1), so it fixes this call and is not saved.
+  it("does not save the other person's whole sentence when the prefilled line is saved untrimmed", async () => {
+    const sentence = "mi hermana se separó la semana pasada y está viviendo en casa";
+    const { benSession, ben } = await benCorrects(sentence, sentence, "my sister split up");
+    ben.send({ t: "room.leave" });
+    await ben.closed();
+    await until(() => rowsFor(benSession.user.id)[0]?.ended_at !== null);
+    expect(account.glossaryFor(benSession.user.id)).toEqual([]);
+    for (const table of ["user_glossary", "call_history", "users"]) {
+      expect(JSON.stringify(store.db.prepare(`SELECT * FROM ${table}`).all())).not.toContain("hermana");
+    }
+  });
+
   it("persists nothing from a line too long to be a term, corrected the older way with no phrase", async () => {
     const secret = `dicho-${randomBytes(6).toString("hex")}`;
     const setup = await pair();

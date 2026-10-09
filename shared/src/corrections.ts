@@ -27,3 +27,21 @@ export function phraseInLine(phrase: string, lineText: string): boolean {
 export function samePhrase(a: string, b: string): boolean {
   return comparablePhrase(a) === comparablePhrase(b);
 }
+
+/**
+ * The most words a correction may have and still be saved to an account.
+ *
+ * Owner decision C1 (2026-10-09) made a saved correction a TERM, and rejected saving any line that
+ * merely fits 200 characters because "That still stores the other person's words." The dialog
+ * prefills the whole line, so without a word limit the untouched default, open and press Save,
+ * would be exactly the rejected option: a whole sentence of somebody's, kept for good (measured in
+ * review). Six words holds a name, a term or an idiom ("no le cuentes a nadie") and not a sentence
+ * of news. A longer correction still fixes the call it was made in; it is just not saved.
+ */
+export const TERM_MAX_WORDS = 6;
+
+/** Whether `phrase` is short enough to be saved as a term: 1 to TERM_MAX_WORDS words. */
+export function savableTerm(phrase: string): boolean {
+  const words = phrase.normalize("NFC").match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu) ?? [];
+  return words.length >= 1 && words.length <= TERM_MAX_WORDS;
+}

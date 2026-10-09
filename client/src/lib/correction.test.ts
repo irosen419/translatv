@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LIMITS, type RenderedLine } from "@translatv/shared";
-import { canCorrect, correctionDraft, correctionMessage, correctionProblem } from "./correction.js";
+import { canCorrect, correctionDraft, correctionMessage, correctionProblem, willBeSaved } from "./correction.js";
 
 function line(overrides: Partial<RenderedLine> = {}): RenderedLine {
   return {
@@ -90,5 +90,17 @@ describe("correctionMessage", () => {
       source: "che",
       correctedTranslation: "hey",
     });
+  });
+});
+
+// The prefill is the whole line. Saved untouched, it would keep the other person's sentence, so the
+// dialog says when a correction will fix this call only (review round 1).
+describe("willBeSaved", () => {
+  it("is true for a few words, the term a correction is meant to be", () => {
+    expect(willBeSaved(" che boludo ")).toBe(true);
+  });
+
+  it("is false for the whole of a sentence, which the untouched prefill is", () => {
+    expect(willBeSaved(correctionDraft(line({ text: "mi hermana se separó la semana pasada" })).phrase)).toBe(false);
   });
 });

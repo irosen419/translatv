@@ -198,8 +198,10 @@ export class AccountService implements RoomUserData {
     log.info("account.corrections_screened", { user: userId, saved: passed.length, dropped });
     if (passed.length === 0) return;
     try {
-      // Read and write in one transaction, so a PUT from the saved list cannot land between them
-      // and be overwritten by a list read before it.
+      // Read and write in one transaction, so a half written list never lands. node:sqlite is
+      // synchronous, so nothing else in this process runs between the two anyway. A PUT from the
+      // saved list is a separate read and write on the client, with no version check, so a save
+      // landing between that list's read and its write is lost (a small window, disclosed).
       this.store.transaction(() => {
         const merged = mergeNewestFirst(findGlossary(this.store, userId), passed, LIMITS.glossaryEntries);
         replaceGlossary(this.store, userId, merged);

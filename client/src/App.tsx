@@ -13,7 +13,7 @@ import { useStore } from "./state/store.js";
 import { AuthScreen } from "./components/AuthScreen.jsx";
 import { browserLock, browserStore, SessionManager } from "./lib/session.js";
 import { PreferenceSync } from "./lib/preferences.js";
-import { fetchAs, SavedCorrections } from "./lib/savedCorrections.js";
+import { savedCorrectionsRegistry } from "./lib/savedCorrections.js";
 import { correctionMessage } from "./lib/correction.js";
 import { useCopy } from "./i18n/useCopy.js";
 import type { CopyRef } from "./i18n/copy.js";
@@ -59,22 +59,8 @@ useStore.getState().setSession(session.state());
 /** The signed in account's stored dialect, loaded on sign in and saved when the picker moves. */
 const preferenceSync = new PreferenceSync((path, init) => session.authorizedFetch(path, init));
 
-/**
- * An account's saved corrections, listed on the start page with a delete. One per account, kept,
- * so the list's identity is stable across renders, and each acts only as its own account
- * (fetchAs): a delete is a read and a write, and another tab can switch accounts between them.
- */
-const savedCorrectionsByAccount = new Map<string, SavedCorrections>();
-function savedCorrectionsFor(userId: string): SavedCorrections {
-  let api = savedCorrectionsByAccount.get(userId);
-  if (!api) {
-    api = new SavedCorrections(
-      fetchAs(userId, () => session.state().user?.id ?? null, (path, init) => session.authorizedFetch(path, init)),
-    );
-    savedCorrectionsByAccount.set(userId, api);
-  }
-  return api;
-}
+/** An account's saved corrections, listed on the start page with a delete, each pinned to its account. */
+const savedCorrectionsFor = savedCorrectionsRegistry(session);
 
 /**
  * Mint an invite as the owner. The server checks ownership; this only asks.

@@ -5,7 +5,14 @@
 // handleCorrect, and RoomSession.correct) and refuses quietly, so each one is checked here first,
 // where there is someone to tell.
 
-import { LIMITS, phraseInLine, samePhrase, type ClientMessage, type RenderedLine } from "@translatv/shared";
+import {
+  LIMITS,
+  phraseInLine,
+  samePhrase,
+  savableTerm,
+  type ClientMessage,
+  type RenderedLine,
+} from "@translatv/shared";
 import type { CopyKey } from "../i18n/copy.js";
 
 /**
@@ -37,4 +44,15 @@ export function correctionProblem(phrase: string, fix: string, lineText: string)
 
 export function correctionMessage(lineId: string, phrase: string, fix: string): Extract<ClientMessage, { t: "glossary.correct" }> {
   return { t: "glossary.correct", lineId, source: phrase.trim(), correctedTranslation: fix.trim() };
+}
+
+/**
+ * Whether this phrase will be saved to the account when the call ends, as far as length goes.
+ *
+ * A phrase over TERM_MAX_WORDS words still corrects this call, so it is not a problem that blocks
+ * Save; the dialog says it will not be kept. The untouched prefill is the whole line, and saving
+ * that would keep the other person's whole sentence, which owner decision C1 rejected.
+ */
+export function willBeSaved(phrase: string): boolean {
+  return savableTerm(phrase.trim());
 }

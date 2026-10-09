@@ -18,6 +18,7 @@ import {
   type SkipReason,
   type TranslationStatus,
 } from "@translatv/shared";
+import { mergeNewestFirst } from "../account/corrections.js";
 import type { ContextTurn } from "../translate/prompt.js";
 import { CONTEXT_TURNS, GLOSSARY_MAX } from "../translate/prompt.js";
 
@@ -36,7 +37,7 @@ export class RoomSession {
   private readonly lines: RenderedLine[] = [];
   private readonly glossary: GlossaryEntry[] = [];
   private readonly context: ContextTurn[] = [];
-  /** memberId -> the corrections that member made, oldest first, not yet taken. */
+  /** memberId -> the corrections that member made, newest first, not yet taken. */
   private readonly corrections = new Map<string, GlossaryEntry[]>();
 
   nextLineId(): string {
@@ -190,9 +191,12 @@ export class RoomSession {
       targetDialect: input.targetDialect,
     };
     this.addGlossaryEntry(entry);
+    // Newest first, one per phrase, at most GLOSSARY_MAX: the same rules the account's merge
+    // applies, so nothing that would have been saved is lost, and a client sending corrections
+    // all call long holds this list to the glossary's size (it grew without bound, measured in
+    // review round 1).
     const made = this.corrections.get(input.authorMemberId) ?? [];
-    made.push(entry);
-    this.corrections.set(input.authorMemberId, made);
+    this.corrections.set(input.authorMemberId, mergeNewestFirst(made, [entry], GLOSSARY_MAX));
 
     if (!samePhrase(phrase, line.text)) return { line, replacedTranslation: false };
 
@@ -213,7 +217,7 @@ export class RoomSession {
   takeCorrections(memberId: string): GlossaryEntry[] {
     const made = this.corrections.get(memberId) ?? [];
     this.corrections.delete(memberId);
-    return made;
+    return [...made].reverse();
   }
 
   addGlossaryEntry(entry: GlossaryEntry): void {

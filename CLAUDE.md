@@ -61,12 +61,15 @@ plan of record for the multi-user server and the iOS app.
   same path as `glossary.import`), and call history (a room code HASH, never the code). Contacts
   are derived from call history, never stored. Transcripts, chat and room glossaries are NEVER
   persisted. The one exception is a person's OWN corrections (owner decisions C1 to C5,
-  2026-10-09): a correction is a term (a phrase from the line, up to 200 characters, and its fix,
-  up to 400), and when that person's call closes (`closeCall` in `server/src/ws/server.ts`) the
+  2026-10-09). A correction is a term: a phrase from the line it fixes (up to 200 characters, and
+  saved only at six words or fewer, `TERM_MAX_WORDS` in `shared/src/corrections.ts`) and its fix
+  (up to 400). When that person's call closes (`closeCall` in `server/src/ws/server.ts`), the
   ones they made are screened by rules (`server/src/account/corrections.ts`, no model call) and
-  added to their stored glossary, newest first, 40 kept. The rest of the line is never saved, and
-  nothing the other person typed reaches your account. Nobody downloads a transcript. `DELETE /api/account` re authenticates, deletes the user row and lets ON DELETE do
-  the rest (CASCADE for what the user owns, SET NULL for what only mentions them, such as a
+  added to their stored glossary, newest first, 40 kept. The term's words come from the other
+  person's line by design, but the rest of the line is never saved, a line of more than six words
+  is never saved whole, and no correction the other person made reaches your account. Nobody
+  downloads a transcript. `DELETE /api/account` re authenticates, deletes the user row and lets
+  ON DELETE do the rest (CASCADE for what the user owns, SET NULL for what only mentions them, such as a
   peer's call history), then closes that user's live sockets. It never touches the spend ledger.
 
 ## Spend tracking

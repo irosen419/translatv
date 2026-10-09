@@ -195,7 +195,7 @@ const PINNED_OVERRIDES: Record<string, string[]> = {
     "room.mic.muteLabel", "room.mic.unmuteLabel", "room.translation.title", "room.you",
     "stt.keepsDropping", "stt.noMicrophone", "stt.permission",
     // The corrections pull request: the term dialog and the saved list, in voseo.
-    "correct.body", "correct.phrase.hint", "correct.problem.empty", "correct.problem.fixTooLong",
+    "correct.body", "correct.notSaved", "correct.phrase.hint", "correct.problem.empty", "correct.problem.fixTooLong",
     "correct.problem.notInLine", "correct.problem.phraseTooLong", "saved.deleteFailed",
     "saved.empty", "saved.lead", "saved.loadFailed",
   ],
@@ -222,7 +222,7 @@ const PINNED_OVERRIDES: Record<string, string[]> = {
     "room.mic.muteLabel", "room.mic.unmuteLabel", "room.translation.title", "room.you",
     "stt.keepsDropping", "stt.noMicrophone", "stt.permission",
     // The corrections pull request: the term dialog and the saved list, in usted.
-    "correct.phrase.hint", "correct.problem.empty", "correct.problem.fixTooLong",
+    "correct.notSaved", "correct.phrase.hint", "correct.problem.empty", "correct.problem.fixTooLong",
     "correct.problem.notInLine", "correct.problem.phraseTooLong", "saved.deleteFailed",
     "saved.empty", "saved.lead", "saved.loadFailed", "saved.title",
   ],
