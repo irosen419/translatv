@@ -24,9 +24,14 @@ export const MAX_EMAIL_LENGTH = 254;
 export const email = z
   .string()
   .transform((v) => v.trim().toLowerCase())
-  .refine((v) => v.length <= MAX_EMAIL_LENGTH && /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(v), {
-    message: "not an email address",
-  });
+  // A pipe rather than a refine, so the exported schema carries the length and the pattern.
+  .pipe(
+    z
+      .string()
+      .max(MAX_EMAIL_LENGTH, { message: "not an email address" })
+      .regex(/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/, { message: "not an email address" }),
+  )
+  .describe("Trimmed and lowercased before it is checked, so send it already normalized.");
 
 /** Length only. The policy check (and its specific error code) happens on the server. */
 const password = z.string().max(MAX_PASSWORD_LENGTH);
@@ -49,6 +54,10 @@ export type LoginRequest = z.input<typeof loginRequest>;
 export const refreshRequest = z.object({ refreshToken: z.string().min(1).max(256) });
 export type RefreshRequest = z.input<typeof refreshRequest>;
 
+/** POST /api/auth/logout takes the same body as refresh: the token to revoke. */
+export const logoutRequest = refreshRequest;
+export type LogoutRequest = RefreshRequest;
+
 export const publicUser = z.object({
   id: z.string(),
   displayName: z.string(),
@@ -65,6 +74,10 @@ export const authSession = z.object({
   user: publicUser,
 });
 export type AuthSession = z.infer<typeof authSession>;
+
+/** GET /api/auth/me. Wrapped, so the answer can grow a field beside the user without a version. */
+export const meResponse = z.object({ user: publicUser });
+export type MeResponse = z.infer<typeof meResponse>;
 
 export const inviteResponse = z.object({ code: z.string(), expiresAt: z.number() });
 export type InviteResponse = z.infer<typeof inviteResponse>;
@@ -102,6 +115,20 @@ export const authErrorCode = z.enum([
 ]);
 export const AUTH_ERROR_CODES = authErrorCode.options;
 export type AuthErrorCode = z.infer<typeof authErrorCode>;
+
+/**
+ * Every code an error body under /api can carry: the account API's own, plus the two the router
+ * answers itself. NOT_FOUND is an unknown path under /api (rather than the web app's index.html
+ * with a 200), and INTERNAL is an unexpected failure. Kept out of authErrorCode because no
+ * service ever returns them, and the router's status table is keyed by that type.
+ */
+export const apiErrorCode = z.enum([...AUTH_ERROR_CODES, "NOT_FOUND", "INTERNAL"]);
+export const API_ERROR_CODES = apiErrorCode.options;
+export type ApiErrorCode = z.infer<typeof apiErrorCode>;
+
+/** The body of every refusal under /api. The code and nothing else: the client picks the words. */
+export const apiError = z.object({ error: apiErrorCode });
+export type ApiError = z.infer<typeof apiError>;
 
 export const signupMode = z.enum(["invite", "open"]);
 export type SignupMode = z.infer<typeof signupMode>;

@@ -8,14 +8,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { PROTOCOL_VERSION } from "@translatv/shared";
+import { API_VERSION, PROTOCOL_VERSION } from "@translatv/shared";
 import type { Config } from "./config.js";
-import { createApp } from "./http.js";
+import { expectContract } from "./contract.testkit.js";
+import { createApp, type TranslationStatus } from "./http.js";
 
 let server: Server;
 let base: string;
 
-function config(): Config {
+function config(overrides: Partial<Config> = {}): Config {
   return {
     port: 0,
     repoRoot: tmpdir(),
@@ -31,15 +32,20 @@ function config(): Config {
     trustProxy: false,
     dataDir: tmpdir(),
     databasePath: ":memory:",
+    ...overrides,
   };
+}
+
+async function listen(app: Parameters<typeof createServer>[1]): Promise<void> {
+  server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 }
 
 beforeEach(async () => {
   // A client dist that does not exist, so the SPA fallback is the 503 page and nothing on disk
   // is served.
-  server = createServer(createApp(config(), join(tmpdir(), "translatv-no-such-dist")));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  await listen(createApp(config(), join(tmpdir(), "translatv-no-such-dist")));
 });
 
 afterEach(async () => {
@@ -55,6 +61,29 @@ describe("GET /healthz", () => {
     // undefined and this test would pass while proving nothing.
     expect(typeof body.protocolVersion).toBe("number");
     expect(body.protocolVersion).toBe(PROTOCOL_VERSION);
+  });
+
+  it("reports the account API version this server speaks", async () => {
+    const body = (await (await fetch(`${base}/healthz`)).json()) as Record<string, unknown>;
+    // As above: a number first, so a missing constant cannot pass as undefined equal to undefined.
+    expect(typeof body.apiVersion).toBe("number");
+    expect(body.apiVersion).toBe(API_VERSION);
+  });
+
+  it("answers the shape the exported contract describes", async () => {
+    const response = await fetch(`${base}/healthz`);
+    expect((await expectContract("GET", `${base}/healthz`, response))?.id).toBe("healthz");
+  });
+
+  it("answers the exported shape when translation broke at runtime, reason included", async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    const broken: TranslationStatus = { enabled: false, disabled: "the provider rejected the key" };
+    await listen(createApp(config({ anthropicApiKey: "not-a-real-key" }), join(tmpdir(), "translatv-no-such-dist"), broken));
+    const response = await fetch(`${base}/healthz`);
+    const body = (await response.clone().json()) as Record<string, unknown>;
+    expect(body.translation).toBe("failed");
+    expect(body.reason).toBe("the provider rejected the key");
+    expect((await expectContract("GET", `${base}/healthz`, response))?.id).toBe("healthz");
   });
 
   it("says whether signup needs an invite, and nothing about any account", async () => {

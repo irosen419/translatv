@@ -76,4 +76,92 @@ describe("check_wire.mjs", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toMatch(/schema\.json/);
   });
+
+  it("fails when a fixture carries a dialect outside the enum", () => {
+    const path = join(wire, "fixtures", "server", "peer.updated.json");
+    const fixture = JSON.parse(readFileSync(path, "utf8"));
+    writeFileSync(path, JSON.stringify({ ...fixture, dialect: "xx-YY" }, null, 2) + "\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/peer\.updated\.json/);
+  });
+
+  it("fails when a fixture carries text over its limit", () => {
+    const path = join(wire, "fixtures", "client", "chat.send.json");
+    const fixture = JSON.parse(readFileSync(path, "utf8"));
+    writeFileSync(path, JSON.stringify({ ...fixture, text: "a".repeat(2001) }, null, 2) + "\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/chat\.send\.json/);
+  });
+
+  it("fails, naming the route, when an HTTP route has no fixture", () => {
+    // Taken out of the index too, so the index check cannot be what catches it.
+    unlinkSync(join(wire, "fixtures", "http", "me.contacts.response.json"));
+    const path = join(wire, "fixtures", "index.json");
+    const index = JSON.parse(readFileSync(path, "utf8"));
+    index.http = index.http.filter((name) => name !== "me.contacts.response");
+    writeFileSync(path, JSON.stringify(index, null, 2) + "\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/me\.contacts\.response\.json: missing/);
+  });
+
+  it("fails when a committed schema does not compile under Ajv strict mode", () => {
+    // The nonstandard top level keyword the old schema.json carried, which strict mode refuses.
+    const path = join(wire, "schema.json");
+    const schema = JSON.parse(readFileSync(path, "utf8"));
+    writeFileSync(path, JSON.stringify({ ...schema, protocolVersion: 2 }, null, 2) + "\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/schema\.json: does not compile under Ajv strict mode/);
+  });
+
+  it("fails, naming the file, when an HTTP fixture does not parse", () => {
+    const path = join(wire, "fixtures", "http", "me.preferences.put.request.json");
+    writeFileSync(path, JSON.stringify({ dialect: "xx-YY", uiDialect: null }, null, 2) + "\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/me\.preferences\.put\.request\.json/);
+  });
+
+  it("fails when an HTTP fixture is not canonical", () => {
+    const path = join(wire, "fixtures", "http", "auth.login.request.json");
+    const fixture = JSON.parse(readFileSync(path, "utf8"));
+    writeFileSync(path, JSON.stringify({ ...fixture, email: fixture.email.toUpperCase() }, null, 2) + "\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/auth\.login\.request\.json/);
+  });
+
+  it("fails when index.json leaves out an HTTP fixture", () => {
+    const path = join(wire, "fixtures", "index.json");
+    const index = JSON.parse(readFileSync(path, "utf8"));
+    index.http = index.http.filter((name) => name !== "healthz.response");
+    writeFileSync(path, JSON.stringify(index, null, 2) + "\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/index\.json/);
+  });
+
+  it.each(["http.schema.json", "constants.json"])("fails when the committed %s is stale", (name) => {
+    const path = join(wire, name);
+    writeFileSync(path, readFileSync(path, "utf8").replace("\n", '\n  "stale": true,\n'));
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(name);
+  });
+
+  it("fails when a fixture the zod schema accepts is refused by the exported schema", () => {
+    // The two can disagree only if the export loses or invents a rule. Fixtures are validated
+    // against the COMMITTED files, the ones the Swift tests read, so a hand narrowed schema.json
+    // is reported for refusing the fixture as well as for being stale.
+    const path = join(wire, "schema.json");
+    const schema = JSON.parse(readFileSync(path, "utf8"));
+    schema.definitions.dialectCode.enum = schema.definitions.dialectCode.enum.filter((code) => code !== "es-AR");
+    writeFileSync(path, JSON.stringify(schema, null, 2) + "\n");
+    const result = run(wire);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/room\.create\.json: refused by the exported schema/);
+  });
 });

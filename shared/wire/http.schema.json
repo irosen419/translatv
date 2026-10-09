@@ -1,0 +1,472 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "apiError": {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/apiErrorCode"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "type": "object"
+    },
+    "apiErrorCode": {
+      "enum": [
+        "INVALID_INPUT",
+        "WEAK_PASSWORD",
+        "INVITE_INVALID",
+        "EMAIL_TAKEN",
+        "INVALID_CREDENTIALS",
+        "LOCKED",
+        "INVALID_REFRESH",
+        "UNAUTHENTICATED",
+        "FORBIDDEN",
+        "ACCOUNT_MISMATCH",
+        "RATE_LIMITED",
+        "NOT_FOUND",
+        "INTERNAL"
+      ],
+      "type": "string"
+    },
+    "apiVersion": {
+      "const": 1,
+      "description": "API_VERSION: the HTTP account API this schema describes. /healthz serves the server's as apiVersion.",
+      "type": "integer"
+    },
+    "authSession": {
+      "additionalProperties": true,
+      "properties": {
+        "accessExpiresAt": {
+          "type": "number"
+        },
+        "accessToken": {
+          "type": "string"
+        },
+        "refreshToken": {
+          "type": "string"
+        },
+        "user": {
+          "$ref": "#/definitions/publicUser"
+        }
+      },
+      "required": [
+        "accessToken",
+        "accessExpiresAt",
+        "refreshToken",
+        "user"
+      ],
+      "type": "object"
+    },
+    "callPeer": {
+      "additionalProperties": true,
+      "properties": {
+        "contactId": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "contactId",
+        "displayName"
+      ],
+      "type": "object"
+    },
+    "callRecord": {
+      "additionalProperties": true,
+      "properties": {
+        "endedAt": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "peer": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/callPeer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "peer",
+        "startedAt",
+        "endedAt"
+      ],
+      "type": "object"
+    },
+    "callsPage": {
+      "additionalProperties": true,
+      "properties": {
+        "calls": {
+          "items": {
+            "$ref": "#/definitions/callRecord"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "calls",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "callsQuery": {
+      "additionalProperties": true,
+      "properties": {
+        "before": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "limit": {
+          "default": 20,
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "contact": {
+      "additionalProperties": true,
+      "properties": {
+        "callCount": {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        "contactId": {
+          "$ref": "#/definitions/callPeer/properties/contactId"
+        },
+        "displayName": {
+          "$ref": "#/definitions/callPeer/properties/displayName"
+        },
+        "lastCallAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "contactId",
+        "displayName",
+        "lastCallAt",
+        "callCount"
+      ],
+      "type": "object"
+    },
+    "contactsResponse": {
+      "additionalProperties": true,
+      "properties": {
+        "contacts": {
+          "items": {
+            "$ref": "#/definitions/contact"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "contacts"
+      ],
+      "type": "object"
+    },
+    "deleteAccountRequest": {
+      "additionalProperties": true,
+      "properties": {
+        "password": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        },
+        "userId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "password",
+        "userId"
+      ],
+      "type": "object"
+    },
+    "dialectCode": {
+      "enum": [
+        "en-US",
+        "en-GB",
+        "es-AR",
+        "es-MX",
+        "es-ES",
+        "es-CO"
+      ],
+      "type": "string"
+    },
+    "glossaryDocument": {
+      "additionalProperties": true,
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/definitions/storedGlossaryEntry"
+          },
+          "maxItems": 40,
+          "type": "array"
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object"
+    },
+    "healthResponse": {
+      "additionalProperties": true,
+      "properties": {
+        "apiVersion": {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "protocolVersion": {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "signup": {
+          "$ref": "#/definitions/signupMode"
+        },
+        "translation": {
+          "enum": [
+            "enabled",
+            "not_configured",
+            "failed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "protocolVersion",
+        "apiVersion",
+        "signup",
+        "translation"
+      ],
+      "type": "object"
+    },
+    "inviteResponse": {
+      "additionalProperties": true,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "code",
+        "expiresAt"
+      ],
+      "type": "object"
+    },
+    "loginRequest": {
+      "additionalProperties": true,
+      "properties": {
+        "email": {
+          "$ref": "#/definitions/signupRequest/properties/email"
+        },
+        "password": {
+          "$ref": "#/definitions/signupRequest/properties/password"
+        }
+      },
+      "required": [
+        "email",
+        "password"
+      ],
+      "type": "object"
+    },
+    "logoutRequest": {
+      "additionalProperties": true,
+      "properties": {
+        "refreshToken": {
+          "$ref": "#/definitions/refreshRequest/properties/refreshToken"
+        }
+      },
+      "required": [
+        "refreshToken"
+      ],
+      "type": "object"
+    },
+    "meResponse": {
+      "additionalProperties": true,
+      "properties": {
+        "user": {
+          "$ref": "#/definitions/publicUser"
+        }
+      },
+      "required": [
+        "user"
+      ],
+      "type": "object"
+    },
+    "preferences": {
+      "additionalProperties": false,
+      "properties": {
+        "dialect": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/dialectCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uiDialect": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/dialectCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "dialect",
+        "uiDialect"
+      ],
+      "type": "object"
+    },
+    "publicUser": {
+      "additionalProperties": true,
+      "properties": {
+        "displayName": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "isOwner": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "displayName",
+        "isOwner"
+      ],
+      "type": "object"
+    },
+    "refreshRequest": {
+      "additionalProperties": true,
+      "properties": {
+        "refreshToken": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "refreshToken"
+      ],
+      "type": "object"
+    },
+    "signupMode": {
+      "enum": [
+        "invite",
+        "open"
+      ],
+      "type": "string"
+    },
+    "signupRequest": {
+      "additionalProperties": true,
+      "properties": {
+        "displayName": {
+          "$ref": "#/definitions/username"
+        },
+        "email": {
+          "description": "Trimmed and lowercased before it is checked, so send it already normalized.",
+          "maxLength": 254,
+          "pattern": "^[^\\s@]+@[^\\s@.]+(\\.[^\\s@.]+)+$",
+          "type": "string"
+        },
+        "invite": {
+          "maxLength": 64,
+          "type": "string"
+        },
+        "password": {
+          "maxLength": 1024,
+          "type": "string"
+        }
+      },
+      "required": [
+        "email",
+        "password",
+        "displayName"
+      ],
+      "type": "object"
+    },
+    "storedGlossaryEntry": {
+      "additionalProperties": true,
+      "properties": {
+        "source": {
+          "description": "At most 200 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 200 UTF-16 units is always accepted.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "sourceDialect": {
+          "$ref": "#/definitions/dialectCode"
+        },
+        "target": {
+          "description": "At most 400 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 400 UTF-16 units is always accepted.",
+          "maxLength": 400,
+          "minLength": 1,
+          "type": "string"
+        },
+        "targetDialect": {
+          "$ref": "#/definitions/dialectCode"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "sourceDialect",
+        "targetDialect"
+      ],
+      "type": "object"
+    },
+    "username": {
+      "description": "At most 24 UTF-16 code units once cleaned (control characters dropped or replaced, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 24 UTF-16 units is always accepted.",
+      "maxLength": 24,
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "description": "GENERATED by script/gen_wire.mjs from shared/src/http.ts, auth.ts and account.ts. Do not edit by hand. Each route's request and response schema is named in HTTP_ROUTES in constants.json; every non success answer under /api is apiError. callsQuery is a query string, not a body. The version is definitions.apiVersion.",
+  "title": "Translatv HTTP account API"
+}

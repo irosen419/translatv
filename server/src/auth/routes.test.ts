@@ -1,19 +1,41 @@
 // /api/auth and /api/invites over real HTTP: status codes, error codes, body limits, and the per
 // IP limits. The rules themselves are proved in service.test.ts; this proves the mapping.
+//
+// Every request in this file goes through the `fetch` declared below, which checks each answer
+// against the exported contract (shared/wire/http.schema.json, through contract.testkit.ts). So
+// every response any test here provokes is also a contract test, and the last test proves every
+// route in HTTP_ROUTES was answered successfully at least once.
 
 import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { LIMITS } from "@translatv/shared";
+import { HTTP_ROUTES, LIMITS } from "@translatv/shared";
 import type { Config } from "../config.js";
+import { expectContract } from "../contract.testkit.js";
 import { createApp } from "../http.js";
 import { AccountService } from "../account/service.js";
 import { openStore, type Store } from "../store/index.js";
-import { AUTH_LIMITS } from "./routes.js";
+import { AUTH_LIMITS, createAuthRouter } from "./routes.js";
 import { AuthService } from "./service.js";
+
+const realFetch = globalThis.fetch;
+/** The ids of the routes that have answered with their success status in this file. */
+const answered = new Set<string>();
+
+/**
+ * Shadows the global for this module: the real request, then the answer checked against the
+ * exported contract before any test sees it. A clone is checked, so the test reads the body as it
+ * always did.
+ */
+async function fetch(input: string, init?: RequestInit): Promise<Response> {
+  const response = await realFetch(input, init);
+  const route = await expectContract(init?.method ?? "GET", input, response.clone());
+  if (route) answered.add(route.id);
+  return response;
+}
 
 const PASSWORD = randomBytes(12).toString("hex");
 
@@ -389,3 +411,38 @@ describe("DELETE /api/account", () => {
     expect((await send("GET", "/api/auth/me", ana.body.accessToken)).status).toBe(200);
   });
 });
+
+describe("the exported contract", () => {
+  it("answers an unknown path under /api with the NOT_FOUND error body", async () => {
+    const response = await fetch(`${base}/api/no/such/route`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "NOT_FOUND" });
+  });
+
+  it("lists exactly the routes the router mounts", () => {
+    const router = createAuthRouter(config(), auth, account) as unknown as {
+      stack: Array<{ route?: { path: string; methods: Record<string, boolean> } }>;
+    };
+    const mounted = router.stack
+      .flatMap((layer) =>
+        layer.route
+          ? Object.keys(layer.route.methods).map((method) => `${method.toUpperCase()} /api${layer.route?.path ?? ""}`)
+          : [],
+      )
+      .sort();
+    const listed = HTTP_ROUTES.filter((route) => route.path.startsWith("/api/"))
+      .map((route) => `${route.method} ${route.path}`)
+      .sort();
+    expect(mounted).toEqual(listed);
+  });
+});
+
+// Runs after every test above. A route listed in the contract that no test here ever got a
+// success from is a route whose real answer nothing has compared with the exported schema.
+afterAll(() => {
+  const missing = HTTP_ROUTES.filter((route) => route.path.startsWith("/api/") && !answered.has(route.id)).map(
+    (route) => route.id,
+  );
+  expect(missing).toEqual([]);
+});
+
