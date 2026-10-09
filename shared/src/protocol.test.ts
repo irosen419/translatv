@@ -151,6 +151,19 @@ describe("text limits", () => {
     expect(name.ok ? "" : name.reason).toBe(`username must be 1 to ${LIMITS.username} characters`);
   });
 
+  it("turns every line break into a space, CRLF into two, as the exported description says", () => {
+    // \r and \n are both control characters, so the control character replace takes them before
+    // the CRLF replace after it can match. That is the behavior on main; this pins the published
+    // description of it ("line breaks included, replaced by spaces").
+    const clean = (text: string) => {
+      const parsed = parseClientMessage(JSON.stringify({ t: "chat.send", text }));
+      return parsed.ok && parsed.message.t === "chat.send" ? parsed.message.text : null;
+    };
+    expect(clean("a\r\nb\nc\td")).toBe("a  b c d");
+    // So a client counting CRLF as one unit is refused for text it thought was in bounds.
+    expect(clean("a\r\n".repeat(999) + "a")).toBeNull();
+  });
+
   it("cleans a username before measuring it", () => {
     expect(username.safeParse(`  ${"a".repeat(LIMITS.username)}​ `).success).toBe(true);
     expect(username.safeParse("a".repeat(LIMITS.username + 1)).success).toBe(false);

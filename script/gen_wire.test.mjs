@@ -148,6 +148,10 @@ describe("text limits", () => {
     expect(node.description).toMatch(/UTF-16/);
     expect(node.description).toMatch(/code point/);
     expect(node.description).not.toMatch(/minLength/);
+    // What bodyText really does: \r and \n are control characters, so every line break becomes a
+    // space (protocol.test.ts pins the behavior). A description promising CRLF to LF was false.
+    expect(node.description).toMatch(/control characters, line breaks included, replaced by spaces/);
+    expect(node.description).not.toMatch(/LF/);
   });
 
   it("describes a username's cleaning and minimum as the server applies them", () => {

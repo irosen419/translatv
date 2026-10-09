@@ -97,7 +97,7 @@ const measured = (max: number, min: number, cleaning: string) =>
   `${min > 0 ? `${min} to ` : ""}${max} UTF-16 units is always accepted.`;
 
 const USERNAME_CLEANING = "control and format characters removed, whitespace collapsed, ends trimmed";
-const BODY_CLEANING = "control characters replaced by spaces, CRLF made LF, ends trimmed";
+const BODY_CLEANING = "control characters, line breaks included, replaced by spaces, ends trimmed";
 
 /**
  * Usernames: trimmed, length capped, and stripped of control and format characters.
@@ -119,8 +119,11 @@ export const username = z
   .describe(measured(LIMITS.username, 1, USERNAME_CLEANING));
 
 /**
- * Body text: control characters become spaces, CRLF becomes LF, the ends are trimmed, and THEN the
- * limit applies. `nonEmpty` adds a refusal of text that is empty once cleaned, with its own message.
+ * Body text: control characters become spaces, the ends are trimmed, and THEN the limit applies.
+ * Line breaks are control characters, so each \r and \n becomes a space (a CRLF becomes two), and
+ * the CRLF replace below never matches; it is kept as it was on main, since this text is only
+ * DESCRIBED by the contract export, not changed by it. `nonEmpty` adds a refusal of text that is
+ * empty once cleaned, with its own message.
  */
 export const bodyText = (max: number, nonEmpty?: { message: string }) => {
   const limited = z.string().max(max, { message: `text must be at most ${max} characters` });
