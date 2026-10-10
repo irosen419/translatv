@@ -340,12 +340,18 @@ try {
     { source: "standup", target: "la daily", sourceDialect: "en-US", targetDialect: "es-AR" },
   ]);
 
-  if (withoutGlossary.ok) console.log(`        without: "${withoutGlossary.text}"`);
+  console.log(
+    withoutGlossary.ok
+      ? `        without: "${withoutGlossary.text}"`
+      : `        without: failed, ${describeFailure(withoutGlossary)}`,
+  );
   if (withGlossary.ok) console.log(`        with:    "${withGlossary.text}"`);
   check(
     "a glossary entry changes the translation",
     withGlossary.ok && /daily/i.test(withGlossary.text),
-    withGlossary.ok ? `glossary term absent from: ${withGlossary.text}` : "call failed",
+    withGlossary.ok
+      ? `glossary term absent from: ${withGlossary.text}`
+      : `the call failed: ${describeFailure(withGlossary)}`,
   );
 
   // ---------------------------------------------------------------------

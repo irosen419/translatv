@@ -11,6 +11,9 @@
 export function describeFailure(result) {
   const reason = typeof result?.reason === "string" ? result.reason : "no failure code";
   const status = typeof result?.status === "string" ? result.status : "unknown status";
-  const retry = result?.retriable === true ? "retriable" : "terminal";
+  // Only an explicit boolean earns a claim either way. "terminal" tells someone a retry cannot
+  // help, which is not something to say about a result that never said.
+  const retry =
+    result?.retriable === true ? "retriable" : result?.retriable === false ? "terminal" : "retry unknown";
   return `${reason} (${status}, ${retry})`;
 }
