@@ -261,8 +261,8 @@ plain Set.
   an instrument (it needs a key pair, which this public repository will not carry); an unpriced
   model's null worst case has no test; the e2e runs with no API key, so it never reaches this
   code.
-- **`npm run verify` prints "Reason: undefined"** when its first call fails. Pre-existing; the
-  one line fix is in section 8.
+- **`npm run verify` printed "Reason: undefined"** when its first call failed. Fixed by #5
+  (section 8.3).
 
 ## 6. Commits made straight to `main`, at the owner's request
 
@@ -353,9 +353,12 @@ today (the panel renders only from 860 pixels); the pull request should say whet
 
 ### 8.3 Small fixes
 
-- **`npm run verify` prints "Reason: undefined"** when its first call fails. A failed
-  translation carries `reason`, not `message`: the fix is `smoke.reason` in
-  `script/verify_translation.mjs`, with a test. A small pull request of its own.
+- **Done in #5:** `npm run verify` printed "Reason: undefined" when its first call failed, because
+  a failed translation carries `reason`, not `message`. Every failure it prints now goes through
+  `describeFailure` (`script/translate_failure.mjs`): the code, the status, and whether a retry
+  can help. Still open: no test runs the script, so its wiring is unguarded (deleting the import
+  stays green). Seeing it needs a loopback stub run, which first needs the script's ledger root
+  made configurable.
 
 ### 8.4 Waiting on the owner
 
