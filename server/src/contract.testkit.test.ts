@@ -27,12 +27,35 @@ describe("expectContract", () => {
 
   it("accepts an empty 204, and refuses a success status the contract does not list", async () => {
     const { expectContract } = await import("./contract.testkit.js");
-    expect((await expectContract("POST", `${BASE}/api/auth/logout`, new Response(null, { status: 204 })))?.id).toBe(
-      "auth.logout",
-    );
+    const logout = JSON.stringify({ refreshToken: "r".repeat(40) });
+    expect(
+      (await expectContract("POST", `${BASE}/api/auth/logout`, new Response(null, { status: 204 }), logout))?.id,
+    ).toBe("auth.logout");
     await expect(expectContract("POST", `${BASE}/api/invites`, json({ code: "x", expiresAt: 1 }, 200))).rejects.toThrow(
       /a success status the contract does not list/,
     );
+  });
+
+  // The server accepted the request, so the table's request schema must accept it too. These are
+  // the branches that catch a table naming the wrong request schema.
+  it("refuses a success whose request the table's request schema does not accept", async () => {
+    const { expectContract } = await import("./contract.testkit.js");
+    const deleted = new Response(null, { status: 204 });
+    await expect(
+      expectContract("DELETE", `${BASE}/api/account`, deleted.clone(), JSON.stringify({ email: "a@b.test", password: "x" })),
+    ).rejects.toThrow(/its request.*does not parse as deleteAccountRequest/);
+    await expect(expectContract("DELETE", `${BASE}/api/account`, deleted.clone())).rejects.toThrow(/sent none/);
+    expect(
+      (await expectContract("DELETE", `${BASE}/api/account`, deleted.clone(), JSON.stringify({ password: "x", userId: "u1" })))
+        ?.id,
+    ).toBe("account.delete");
+  });
+
+  it("checks a query route's query string against its schema", async () => {
+    const { expectContract } = await import("./contract.testkit.js");
+    const page = { calls: [], nextCursor: null };
+    await expect(expectContract("GET", `${BASE}/api/me/calls?limit=0`, json(page))).rejects.toThrow(/query does not parse/);
+    expect((await expectContract("GET", `${BASE}/api/me/calls?limit=5`, json(page)))?.id).toBe("me.calls");
   });
 
   it("requires the error body on any other status, and returns null for it", async () => {
