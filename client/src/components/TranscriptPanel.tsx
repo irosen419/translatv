@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { LIMITS, TERM_MAX_WORDS, type Member, type RenderedLine } from "@translatv/shared";
+import { LIMITS, TERM_MAX_WORDS, type ClientMessage, type Member, type RenderedLine } from "@translatv/shared";
 import { captionFor } from "../lib/caption.js";
 import {
   DRAFT_MAX,
@@ -10,7 +10,7 @@ import {
   submittableText,
   textToInsert,
 } from "../lib/composer.js";
-import { canCorrect, correctionDraft, correctionProblem, willBeSaved } from "../lib/correction.js";
+import { canCorrect, correctionDraft, correctionMessage, correctionProblem, willBeSaved } from "../lib/correction.js";
 import { failureCopyKey } from "../i18n/codes.js";
 import { useCopy } from "../i18n/useCopy.js";
 
@@ -21,8 +21,12 @@ interface Props {
   peer: Member | null;
   // No transcript download any more (owner decision 2026-09-28): nobody downloads the chat. The
   // .txt and .json buttons, and canExport with them, are gone.
-  /** A term level correction (owner decision C1): a phrase from the line, and its fix. */
-  onCorrect(lineId: string, phrase: string, fix: string): void;
+  /**
+   * A term level correction (owner decision C1), as the finished glossary.correct message. Built
+   * here rather than by the caller, so the phrase and the fix cannot be passed in the wrong order
+   * on the way out: the caller only sends it.
+   */
+  onCorrect(message: Extract<ClientMessage, { t: "glossary.correct" }>): void;
   onRetry(lineId: string): void;
   onSendChat(text: string): void;
 }
@@ -217,7 +221,7 @@ export function TranscriptPanel(props: Props) {
             line.translationStatus === "budget_exceeded";
 
           return (
-            <div key={line.lineId} className={`line${mine ? " mine" : ""}`}>
+            <div key={line.lineId} className={`line${mine ? " mine" : ""}`} data-line-id={line.lineId}>
               <div className="who">
                 {nameFor(line.from)}
                 {line.source === "chat" ? ` ${copy.t("panel.typed")}` : ""}
@@ -348,7 +352,7 @@ export function TranscriptPanel(props: Props) {
           line={correcting}
           onClose={() => setCorrecting(null)}
           onSave={(phrase, fix) => {
-            props.onCorrect(correcting.lineId, phrase, fix);
+            props.onCorrect(correctionMessage(correcting.lineId, phrase, fix));
             setCorrecting(null);
           }}
         />

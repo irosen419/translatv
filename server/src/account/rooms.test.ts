@@ -240,6 +240,18 @@ describe("a stored glossary in a room", () => {
   });
 });
 
+// glossary.import stays in the protocol (decision C6), though the web client no longer sends it:
+// a client that does still adds to the SHARED room glossary, which both people are sent. Review
+// found nothing sent it any more, so breaking it stayed green.
+describe("glossary.import", () => {
+  it("still merges into the room glossary, and reaches both people", async () => {
+    const { ana, ben } = await pair();
+    ana.send({ t: "glossary.import", entries: [pibe] });
+    expect((await ana.next("glossary.updated")).entries).toEqual([pibe]);
+    expect((await ben.next("glossary.updated")).entries).toEqual([pibe]);
+  });
+});
+
 describe("call history from a room's lifecycle", () => {
   it("opens a row per participant, names the peer once both are present, and holds only the hash", async () => {
     const { anaSession, benSession, code } = await pair();

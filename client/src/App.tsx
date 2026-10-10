@@ -14,7 +14,6 @@ import { AuthScreen } from "./components/AuthScreen.jsx";
 import { browserLock, browserStore, SessionManager } from "./lib/session.js";
 import { PreferenceSync } from "./lib/preferences.js";
 import { savedCorrectionsRegistry } from "./lib/savedCorrections.js";
-import { correctionMessage } from "./lib/correction.js";
 import { useCopy } from "./i18n/useCopy.js";
 import type { CopyRef } from "./i18n/copy.js";
 import { WebSpeechAdapter } from "./stt/WebSpeechAdapter.js";
@@ -662,7 +661,7 @@ export function App() {
           useStore.getState().setUiDialect(dialect);
           stt.current?.setLanguage(dialect);
         }}
-        onCorrect={(lineId, phrase, fix) => socket.current?.send(correctionMessage(lineId, phrase, fix))}
+        onCorrect={(message) => socket.current?.send(message)}
         onRetry={(lineId) => socket.current?.send({ t: "translation.retry", lineId })}
         onSendChat={(text) => socket.current?.send({ t: "chat.send", text })}
         onToggleSttEngine={() => {

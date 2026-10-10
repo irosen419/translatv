@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DIALECTS, translationNeed } from "@translatv/shared";
+import { DIALECTS, translationNeed, type ClientMessage } from "@translatv/shared";
 import { useStore } from "../state/store.js";
 import { SubtitleOverlay } from "./SubtitleOverlay.jsx";
 import { TranscriptPanel } from "./TranscriptPanel.jsx";
@@ -68,7 +68,7 @@ interface Props {
   onToggleTranslation(enabled: boolean): void;
   onChangeDialect(dialect: string): void;
   /** A term level correction: a phrase from the line, and its fix. */
-  onCorrect(lineId: string, phrase: string, fix: string): void;
+  onCorrect(message: Extract<ClientMessage, { t: "glossary.correct" }>): void;
   onRetry(lineId: string): void;
   onSendChat(text: string): void;
   /** Switch between the on device and cloud recognizers, which trade privacy against accuracy. */
