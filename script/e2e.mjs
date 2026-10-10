@@ -1139,6 +1139,31 @@ try {
     "closing puts focus back on the link that opened it",
     (await fay.evaluate(() => document.activeElement?.textContent)) === es("saved.open"),
   );
+  // A full list, 40 entries (the cap), on a phone. The document never scrolls (styles.css), so the
+  // start page has to be a scroll region of its own. Review found it was not: only 3 of 40 entries
+  // could be seen, and a wheel moved nothing. Playwright's click scrolls an element into view by
+  // itself, which is how two entries hid that, so this scrolls with the wheel, as a person would.
+  // Fay's account again, since another signup here would run into the per address signup limit.
+  const fullList = Array.from({ length: 40 }, (_, i) => ({
+    source: `término ${i}`,
+    target: `the term numbered ${i}, with a fix long enough to wrap onto a second line`,
+    sourceDialect: "es-AR",
+    targetDialect: "en-US",
+  }));
+  await fetch(`${BASE}/api/me/glossary`, { method: "PUT", headers: fayHeaders, body: JSON.stringify({ entries: fullList }) });
+  await fay.reload();
+  await fay.getByRole("button", { name: es("saved.open") }).click();
+  await fay.locator(".saved-item").nth(39).waitFor({ state: "attached" });
+  const inView = (locator) =>
+    locator.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      return box.top >= 0 && box.bottom <= window.innerHeight;
+    });
+  check("the top of the start page is on screen before any scrolling", await inView(fay.locator(".card h1").first()));
+  await fay.mouse.move(195, 422);
+  for (let i = 0; i < 40; i += 1) await fay.mouse.wheel(0, 400);
+  await fay.waitForTimeout(200);
+  check("a full saved list scrolls with the wheel on a phone, to its last entry", await inView(fay.locator(".saved-item").nth(39)));
   await fayContext.close();
 
   // ---------------------------------------------------------------------

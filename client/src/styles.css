@@ -178,11 +178,24 @@ label, .label { display: block; font-size: 13px; color: var(--muted); margin-bot
 .linklike:hover { color: var(--text); }
 
 /* Centered card layouts for landing and prejoin. */
+/* The full screen pages (sign in, start, pre join). The document never scrolls (above), so each
+   is a scroll region of its own, pinned to the viewport, rather than a 100vh box: on iOS Safari
+   100vh is the large viewport, and anything taller than the screen was simply cut off. Review
+   measured 3 of 40 saved corrections reachable on a phone, and a wheel moving nothing. The card
+   is centered by its auto margins, so a short page sits in the middle and a tall one starts at
+   the top and scrolls; grid centering would push a tall card's top above the scroll origin,
+   where nothing can reach it. */
 .center {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
   padding: 24px;
+}
+.center > * {
+  margin: auto;
 }
 .card {
   width: 100%;
