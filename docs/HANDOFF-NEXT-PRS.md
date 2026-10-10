@@ -1,9 +1,12 @@
 # Handoff: the iOS contract and corrections pull requests
 
-Written 2026-09-29 by reading the code on `main` at a8d1828. Two pull requests come next. Each
-part below stands on its own and ends with a prompt to start a fresh Claude Code session on it.
-[`HANDOFF.md`](HANDOFF.md) has the wider picture; this file is the working brief. Line numbers
-will drift; the names will not.
+Written 2026-09-29 by reading the code on `main` at a8d1828. Two pull requests come next, and
+each part below stands on its own. [`HANDOFF.md`](HANDOFF.md) has the wider picture; this file
+is the working brief. Line numbers will drift; the names will not.
+
+**Decided 2026-10-09.** The owner took every recommendation below ("All recommended"), so A1,
+A2 and C1 to C6 are settled. [`HANDOFF-AGENT.md`](HANDOFF-AGENT.md) spells out each decision,
+records every review so far, and has the prompt that starts each pull request.
 
 ## Before either one
 
@@ -173,6 +176,8 @@ it comes next. It unblocks the iOS milestones M7 and M9.
 
 ### Decisions for the owner
 
+**Decided 2026-10-09: the recommended option for each.**
+
 - **A1. How the account API is versioned.**
   - **Recommended:** an `API_VERSION` constant in `shared/`, with the same bump rule as
     `PROTOCOL_VERSION`. `/healthz` serves it beside the socket's version, and the exported schema
@@ -197,20 +202,7 @@ it comes next. It unblocks the iOS milestones M7 and M9.
 
 ### Kickoff prompt
 
-```text
-Build the iOS contract pull request for github.com/irosen419/translatv.
-
-Read CLAUDE.md, then docs/HANDOFF-NEXT-PRS.md (Part A and "The shared snag"), then D7 in
-docs/PLAN.md. Work on a new branch cut from main, named claude/ios-contract.
-
-Owner decisions: A1 = <fill in; the recommended one is a version on /healthz and in the schema>.
-A2 = <fill in>.
-
-Verify each fact in the handoff against the code before relying on it, and say where it was
-wrong. Follow TDD. Run every gate the handoff lists. Open a pull request and never merge it. If
-the /review-loop skill is available, run it on the pull request. Report what you built, what the
-review found, and what is left for the owner.
-```
+In [`HANDOFF-AGENT.md`](HANDOFF-AGENT.md#kickoff-prompts), with the owner's decisions filled in.
 
 ## Part B: corrections
 
@@ -300,6 +292,8 @@ review found, and what is left for the owner.
 
 ### Decisions for the owner, before building
 
+**Decided 2026-10-09: the recommended option for each.**
+
 - **C1. What a saved correction is.** Today it is a whole utterance, often the other person's
   words (the shared snag). Saving that as it is would persist transcript text, which CLAUDE.md
   forbids, and the stored glossary's 200 character term would refuse it anyway. The options:
@@ -381,22 +375,4 @@ review found, and what is left for the owner.
 
 ### Kickoff prompt
 
-```text
-Build the corrections pull request for github.com/irosen419/translatv.
-
-Read CLAUDE.md, then docs/HANDOFF-NEXT-PRS.md (Part B and "The shared snag"), then section 8 of
-docs/HANDOFF.md. Work on a new branch cut from main, named claude/corrections.
-
-Owner decisions:
-C1 = <fill in; the recommended one is term level corrections>
-C2 = <fill in>
-C3 = <fill in>
-C4 = <fill in>
-C5 = <fill in; rules only keeps it free of spend>
-C6 = <fill in>
-
-Verify each fact in the handoff against the code before relying on it, and say where it was
-wrong. Follow TDD. Run every gate the handoff lists. Open a pull request and never merge it. If
-the /review-loop skill is available, run it on the pull request. Report what you built, what the
-review found, and what is left for the owner.
-```
+In [`HANDOFF-AGENT.md`](HANDOFF-AGENT.md#kickoff-prompts), with the owner's decisions filled in.
