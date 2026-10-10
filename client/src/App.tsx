@@ -702,16 +702,10 @@ export function App() {
   if (phase === "prejoin") {
     return (
       <>
-        {error && (
-          <div style={{ padding: "16px 16px 0" }}>
-            <div className="notice bad" style={{ maxWidth: 440, margin: "0 auto" }}>
-              {copy.ref(error)}
-            </div>
-          </div>
-        )}
         <PreJoin
           mode={mode}
           code={pendingCode}
+          notice={error}
           onCancel={() => {
             useStore.getState().setError(null);
             useStore.getState().setPhase("landing");

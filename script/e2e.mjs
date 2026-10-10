@@ -1166,6 +1166,52 @@ try {
   check("a full saved list scrolls with the wheel on a phone, to its last entry", await inView(fay.locator(".saved-item").nth(39)));
   await fayContext.close();
 
+  // A pre join error, on a small phone, with the microphone refused (this context grants no
+  // permissions). App draws the notice above PreJoin's page, and that page is a fixed scroll
+  // region now, so a notice outside it is drawn underneath: review measured the card covering the
+  // last line of the microphone notice at 390x667. Fay again, by sign in: another signup here
+  // would run into the per address signup limit.
+  const fayAgain = await apiSignIn(BASE, "Fay");
+  const smallContext = await browser.newContext({
+    viewport: { width: 390, height: 667 },
+    storageState: {
+      cookies: [],
+      origins: [{ origin: BASE, localStorage: [{ name: "translatv.refresh", value: fayAgain.refreshToken }] }],
+    },
+  });
+  // The browser here is launched to accept every media prompt (chromium.mjs), so the refusal is
+  // played in the page, as the browser reports it: getUserMedia rejects with NotAllowedError.
+  await smallContext.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = () =>
+      Promise.reject(new DOMException("Permission denied", "NotAllowedError"));
+  });
+  const small = await smallContext.newPage();
+  small.on("pageerror", (e) => errors.push(`small: ${e.message}`));
+  await small.goto(BASE);
+  await small.getByRole("button", { name: es("landing.create") }).click();
+  await small.getByLabel(es("prejoin.name.label")).fill("Fay");
+  await small.getByRole("button", { name: es("prejoin.submit.create") }).click();
+  const deniedNotice = small.locator(".notice.bad", { hasText: es("media.denied.microphone").slice(0, 20) });
+  await deniedNotice.first().waitFor({ timeout: 10_000 }).catch(() => {});
+  check(
+    "a pre join error is drawn on top, readable to its last line, on a small phone",
+    await deniedNotice
+      .first()
+      .evaluate((notice) => {
+        const box = notice.getBoundingClientRect();
+        const points = [
+          [box.left + box.width / 2, box.top + 4],
+          [box.left + box.width / 2, box.bottom - 4],
+        ];
+        return points.every(([x, y]) => {
+          const hit = document.elementFromPoint(x, y);
+          return hit !== null && notice.contains(hit);
+        });
+      })
+      .catch(() => false),
+  );
+  await smallContext.close();
+
   // ---------------------------------------------------------------------
   section("Ending kills the room permanently");
   await openSettings(ana);

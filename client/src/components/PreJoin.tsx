@@ -8,6 +8,12 @@ import type { CopyRef } from "../i18n/copy.js";
 interface Props {
   mode: "create" | "join";
   code: string | null;
+  /**
+   * Why the last attempt failed (a refused microphone, a full room), shown at the top of the card.
+   * Inside the page rather than above it: the page is a fixed scroll region (styles.css, .center),
+   * and a notice outside it was drawn underneath, its last line covered on a small phone.
+   */
+  notice?: CopyRef | null;
   onCancel(): void;
   onReady(input: {
     username: string;
@@ -16,7 +22,7 @@ interface Props {
   }): void;
 }
 
-export function PreJoin({ mode, code, onCancel, onReady }: Props) {
+export function PreJoin({ mode, code, notice, onCancel, onReady }: Props) {
   const [username, setUsername] = useState("");
   // The dialect picker IS the language control, by owner decision: what you speak is what you
   // read. So it writes straight into the store rather than holding a local copy, and the form
@@ -64,6 +70,7 @@ export function PreJoin({ mode, code, onCancel, onReady }: Props) {
   return (
     <div className="center">
       <div className="card">
+        {notice && <div className="notice bad">{copy.ref(notice)}</div>}
         <h1>{mode === "create" ? copy.t("prejoin.title.create") : copy.t("prejoin.title.join")}</h1>
         <p className="sub">
           {mode === "create"
