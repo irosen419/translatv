@@ -11,6 +11,7 @@
 // *.testkit.ts, so Ajv, a dev dependency, never reaches the image.
 
 import { readFileSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv from "ajv";
@@ -30,11 +31,18 @@ function exported(name: HttpSchemaName | "apiError") {
   return validate;
 }
 
-function conforms(where: string, name: HttpSchemaName | "apiError", body: unknown): void {
+function conforms(where: string, name: HttpSchemaName | "apiError", body: unknown, whole = false): void {
   const schema = name === "apiError" ? apiError : HTTP_SCHEMAS[name];
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
     throw new Error(`${where}: the answer does not parse as ${name}: ${JSON.stringify(parsed.error.issues)}`);
+  }
+  // An answer must come back from its schema unchanged. zod drops keys a schema does not know and
+  // the exported schema allows extra keys, so without this a table naming a schema with FEWER
+  // fields than the server sends passes, and a client built from it never decodes them (review
+  // round 2 named meResponse for signup, which dropped both tokens, with every gate green).
+  if (whole && !isDeepStrictEqual(parsed.data, body)) {
+    throw new Error(`${where}: ${name} does not describe the whole answer: ${JSON.stringify(body)}`);
   }
   const validate = exported(name);
   if (!validate(body)) {
@@ -79,7 +87,7 @@ export async function expectContract(
     if (route.response === null) {
       if (text !== "") throw new Error(`${where}: expected no body, got ${text.length} characters`);
     } else {
-      conforms(where, route.response, JSON.parse(text) as unknown);
+      conforms(where, route.response, JSON.parse(text) as unknown, true);
     }
     if (route.request?.in === "body") {
       if (typeof body !== "string") throw new Error(`${where}: the route takes a JSON body, and the request sent none`);

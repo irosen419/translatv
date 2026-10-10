@@ -14,7 +14,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { HTTP_ROUTES, LIMITS } from "@translatv/shared";
+import { HTTP_ROUTES, HTTP_SCHEMAS, LIMITS } from "@translatv/shared";
 import type { Config } from "../config.js";
 import { expectContract } from "../contract.testkit.js";
 import { createApp } from "../http.js";
@@ -29,13 +29,36 @@ const HTTP_FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".
 const answered = new Set<string>();
 
 /**
+ * Which of the contract's schemas the server parsed a request with. The services validate every
+ * body and query with a schema from @translatv/shared, the same objects HTTP_SCHEMAS names, so each
+ * one's safeParse is wrapped here to record it. A route table entry naming a different request
+ * schema than the one the server parses with is then caught in both directions: stricter, or
+ * laxer (review round 2 named loginRequest for signup, which has no displayName, with every gate
+ * green). Recorded by object, because one schema can carry two names (logoutRequest is
+ * refreshRequest).
+ */
+const parsedBy: object[] = [];
+for (const schema of new Set(Object.values(HTTP_SCHEMAS))) {
+  const original = schema.safeParse.bind(schema);
+  (schema as { safeParse: (value: unknown) => unknown }).safeParse = (value: unknown) => {
+    parsedBy.push(schema);
+    return original(value);
+  };
+}
+
+/**
  * Shadows the global for this module: the real request, then the answer checked against the
  * exported contract before any test sees it. A clone is checked, so the test reads the body as it
  * always did.
  */
 async function fetch(input: string, init?: RequestInit): Promise<Response> {
+  parsedBy.length = 0;
   const response = await realFetch(input, init);
+  const parsed = [...parsedBy];
   const route = await expectContract(init?.method ?? "GET", input, response.clone(), init?.body);
+  if (route?.request && !parsed.includes(HTTP_SCHEMAS[route.request.schema])) {
+    throw new Error(`${route.id}: the server did not parse its request with ${route.request.schema}, the schema the table names`);
+  }
   if (route) answered.add(route.id);
   return response;
 }

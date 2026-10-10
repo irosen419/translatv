@@ -20,6 +20,13 @@ describe("expectContract", () => {
     expect((await expectContract("GET", `${BASE}/api/auth/me`, json({ user })))?.id).toBe("auth.me");
   });
 
+  it("refuses a success body with more than its schema describes", async () => {
+    const { expectContract } = await import("./contract.testkit.js");
+    await expect(
+      expectContract("GET", `${BASE}/api/auth/me`, json({ user, accessToken: "a".repeat(20) })),
+    ).rejects.toThrow(/does not describe the whole answer/);
+  });
+
   it("refuses a success body that does not parse as the route's schema", async () => {
     const { expectContract } = await import("./contract.testkit.js");
     await expect(expectContract("GET", `${BASE}/api/auth/me`, json(user))).rejects.toThrow(/does not parse as meResponse/);
