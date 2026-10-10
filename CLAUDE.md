@@ -57,8 +57,10 @@ plan of record for the multi-user server and the iOS app.
   for browsers, never the URL); a browser's Origin must still match the allowlist. The HTTP account
   API's schemas and error codes are in `shared/src/auth.ts`. `ADMIN_PASSWORD` is retired.
 - Per user data (M5) lives in `server/src/account/`, with its HTTP schemas in
-  `shared/src/account.ts`: dialect preferences, a stored glossary (merged into a room through the
-  same path as `glossary.import`), and call history (a room code HASH, never the code). Contacts
+  `shared/src/account.ts`: dialect preferences, a stored glossary, and call history (a room code
+  HASH, never the code). A stored glossary is PRIVATE to its owner (owner decision, 2026-10-10):
+  held for them in the room (`RoomSession.setSaved`) and used only in the prompts of translations
+  they read, never merged into the room glossary, broadcast, or put in a snapshot. Contacts
   are derived from call history, never stored. Transcripts, chat and room glossaries are NEVER
   persisted. The one exception is a person's OWN corrections (owner decisions C1 to C5,
   2026-10-09). A correction is a term: a phrase from the line it fixes (up to 200 characters, and
@@ -67,7 +69,8 @@ plan of record for the multi-user server and the iOS app.
   ones they made are screened by rules (`server/src/account/corrections.ts`, no model call) and
   added to their stored glossary, newest first, 40 kept. The term's words come from the other
   person's line by design, but the rest of the line is never saved, a line of more than six words
-  is never saved whole, and no correction the other person made reaches your account. Nobody
+  is never saved whole, no correction the other person made reaches your account, and a saved
+  term never reaches anyone else's browser (the stored glossary is private, above). Nobody
   downloads a transcript. `DELETE /api/account` re authenticates, deletes the user row and lets
   ON DELETE do the rest (CASCADE for what the user owns, SET NULL for what only mentions them, such as a
   peer's call history), then closes that user's live sockets. It never touches the spend ledger.

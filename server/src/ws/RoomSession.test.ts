@@ -59,3 +59,50 @@ describe("RoomSession corrections", () => {
     expect(session.takeCorrections("ben").map((e) => `${e.source}=${e.target}`)).toEqual(["che=hey"]);
   });
 });
+
+// A member's saved glossary is private to them (owner decision, 2026-10-10): held per member,
+// never part of the room glossary, and in the prompt only for what that member reads.
+describe("RoomSession saved glossaries", () => {
+  const term = (source: string, target: string) => ({
+    source,
+    target,
+    sourceDialect: "es-AR",
+    targetDialect: "en-US",
+  });
+
+  it("keeps a member's saved terms out of the room glossary and the snapshot", () => {
+    const session = new RoomSession();
+    session.setSaved("ben", [term("che", "hey")]);
+    expect(session.glossaryEntries).toEqual([]);
+    expect(session.snapshot().glossary).toEqual([]);
+  });
+
+  it("gives a reader the room glossary first, then their own saved terms, minus phrases the room has", () => {
+    const session = new RoomSession();
+    session.addGlossaryEntry(term("Che", "hey there"));
+    session.setSaved("ben", [term("che", "hey"), term("boludo", "dude")]);
+    session.setSaved("carla", [term("pibe", "kid")]);
+    expect(session.glossaryFor("ben")).toEqual([term("Che", "hey there"), term("boludo", "dude")]);
+    expect(session.glossaryFor("carla")).toEqual([term("Che", "hey there"), term("pibe", "kid")]);
+    expect(session.glossaryFor(undefined)).toEqual([term("Che", "hey there")]);
+  });
+
+  it("holds the combined list to GLOSSARY_MAX", () => {
+    const session = new RoomSession();
+    session.setSaved("ben", Array.from({ length: 40 }, (_, i) => term(`s${i}`, `t${i}`)));
+    session.addGlossaryEntry(term("room", "room"));
+    const list = session.glossaryFor("ben");
+    expect(list).toHaveLength(40);
+    expect(list[0]).toEqual(term("room", "room"));
+  });
+
+  it("forgets a member's saved terms when dropped, and when set to nothing", () => {
+    const session = new RoomSession();
+    session.setSaved("ben", [term("che", "hey")]);
+    session.dropSaved("ben");
+    expect(session.glossaryFor("ben")).toEqual([]);
+    session.setSaved("ben", [term("che", "hey")]);
+    session.setSaved("ben", []);
+    expect(session.glossaryFor("ben")).toEqual([]);
+  });
+});

@@ -39,6 +39,13 @@ export class RoomSession {
   private readonly context: ContextTurn[] = [];
   /** memberId -> the corrections that member made, newest first, not yet taken. */
   private readonly corrections = new Map<string, GlossaryEntry[]>();
+  /**
+   * memberId -> that member's saved glossary, from their account. PRIVATE (owner decision,
+   * 2026-10-10): it is never part of the room glossary, so it is never broadcast or put in a
+   * snapshot. A saved term's phrase comes from someone else's line, and broadcast it reached every
+   * later caller. It joins only the prompts of translations its owner reads (glossaryFor).
+   */
+  private readonly saved = new Map<string, readonly GlossaryEntry[]>();
 
   nextLineId(): string {
     lineCounter += 1;
@@ -244,6 +251,29 @@ export class RoomSession {
 
   get glossaryEntries(): readonly GlossaryEntry[] {
     return this.glossary;
+  }
+
+  /** Holds a member's saved glossary for this room, replacing any held before. */
+  setSaved(memberId: string, entries: readonly GlossaryEntry[]): void {
+    if (entries.length === 0) this.saved.delete(memberId);
+    else this.saved.set(memberId, [...entries]);
+  }
+
+  /** Forgets a member's saved glossary: called when their call closes, on every end path. */
+  dropSaved(memberId: string): void {
+    this.saved.delete(memberId);
+  }
+
+  /**
+   * The glossary for a translation READ by `readerId`: the room's glossary first, since a
+   * correction made in this call is the newest word on a phrase, then the reader's saved terms,
+   * minus any phrase the room already has. The prompt takes the first GLOSSARY_MAX. Nobody else's
+   * saved terms are in it.
+   */
+  glossaryFor(readerId: string | undefined): GlossaryEntry[] {
+    const own = readerId === undefined ? [] : (this.saved.get(readerId) ?? []);
+    const seen = new Set(this.glossary.map((e) => e.source.toLowerCase()));
+    return [...this.glossary, ...own.filter((e) => !seen.has(e.source.toLowerCase()))].slice(0, GLOSSARY_MAX);
   }
 
   /** A snapshot for a joining or resuming client, so they see the conversation so far. */

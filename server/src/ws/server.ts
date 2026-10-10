@@ -584,7 +584,7 @@ export class SignalingServer {
     log.info("room.created", { room: roomHash(room.code) });
 
     this.openCall(member.id, userId, room.code, null, now);
-    this.mergeStoredGlossary(room.code, userId);
+    this.holdSavedGlossary(room.code, userId, member.id);
   }
 
   private handleJoin(
@@ -660,7 +660,7 @@ export class SignalingServer {
     const other = peer && peer.userId !== userId ? peer : null;
     this.openCall(member.id, userId, room.code, other?.userId ?? null, now);
     if (other) this.peerCall(other.id, userId, room.code, now);
-    this.mergeStoredGlossary(room.code, userId);
+    this.holdSavedGlossary(room.code, userId, member.id);
   }
 
   private handleResume(
@@ -960,7 +960,7 @@ export class SignalingServer {
     }
 
     this.broadcastAll(roomCode, { t: "translation.pending", lineId: line.lineId });
-    await this.runTranslation(roomCode, line.lineId, text, speaker.dialect, targetDialect);
+    await this.runTranslation(roomCode, line.lineId, text, speaker.dialect, targetDialect, peer?.id);
   }
 
   private async runTranslation(
@@ -969,6 +969,8 @@ export class SignalingServer {
     text: string,
     sourceDialect: string,
     targetDialect: string,
+    /** The member who reads this translation, whose saved terms join its prompt. */
+    readerId: string | undefined,
   ): Promise<void> {
     const session = this.sessions.get(roomCode);
     if (!session) return;
@@ -979,7 +981,7 @@ export class SignalingServer {
       sourceDialect,
       targetDialect,
       context: session.contextFor(text),
-      glossary: session.glossaryEntries,
+      glossary: session.glossaryFor(readerId),
       roomHash: roomHash(roomCode),
       kind: "translation",
     });
@@ -1098,6 +1100,7 @@ export class SignalingServer {
       line.text,
       line.srcDialect,
       targetDialect,
+      peer?.id,
     );
   }
 
@@ -1159,8 +1162,8 @@ export class SignalingServer {
 
   /**
    * THE glossary import path: merge entries into a room's glossary by RoomSession's rules and
-   * tell everyone in the room. Shared by glossary.import and by a stored glossary joining a room,
-   * so the two cannot come to merge differently.
+   * tell everyone in the room. Used by glossary.import, which a client sends of its own accord.
+   * A stored glossary does NOT come this way: it is private to its owner (holdSavedGlossary).
    */
   private importGlossary(roomCode: string, entries: readonly GlossaryEntry[]): void {
     const session = this.sessions.get(roomCode);
@@ -1177,16 +1180,16 @@ export class SignalingServer {
   // -------------------------------------------------------------------------
 
   /**
-   * A signed in user's stored glossary joins the room they just created or joined. Sent AFTER
-   * room.created or room.joined, as a glossary.updated, exactly like a glossary.import, so a client
-   * needs nothing new to receive it. Nothing is sent for an empty glossary. This is how saved
-   * corrections reach the next call: closeCall saves them to the stored glossary, and this merges
-   * it in.
+   * A signed in user's stored glossary is held for them in the room they just created or joined.
+   * It is PRIVATE (owner decision, 2026-10-10): never merged into the room glossary, never
+   * broadcast, never in a snapshot, because a saved term's phrase comes from someone else's line,
+   * and broadcast it reached every later caller. It joins only the prompts of translations its
+   * owner reads. This is how saved corrections reach the next call: closeCall saves them to the
+   * stored glossary, and this holds it; closeCall also lets it go.
    */
-  private mergeStoredGlossary(roomCode: string, userId: string): void {
+  private holdSavedGlossary(roomCode: string, userId: string, memberId: string): void {
     const entries = this.userData?.glossaryFor(userId) ?? [];
-    if (entries.length === 0) return;
-    this.importGlossary(roomCode, entries);
+    this.sessionFor(roomCode).setSaved(memberId, entries);
   }
 
   private openCall(memberId: string, userId: string, roomCode: string, peerUserId: string | null, now: number): void {
@@ -1230,7 +1233,9 @@ export class SignalingServer {
     if (!open) return;
     this.calls.delete(memberId);
     this.userData?.callEnded(open.callId, now);
-    const made = this.sessions.get(open.roomCode)?.takeCorrections(memberId) ?? [];
+    const session = this.sessions.get(open.roomCode);
+    const made = session?.takeCorrections(memberId) ?? [];
+    session?.dropSaved(memberId);
     if (made.length > 0) this.userData?.saveCorrections(open.userId, made);
   }
 

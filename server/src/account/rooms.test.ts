@@ -1,6 +1,6 @@
 // Per user data meeting the rooms, over REAL sockets and REAL HTTP against a real in memory store:
-// a stored glossary joins the room glossary, call history rows open and close with the room's
-// own lifecycle, and deleting an account disconnects its live socket.
+// a stored glossary is held privately and never sent, call history rows open and close with the
+// room's own lifecycle, and deleting an account disconnects its live socket.
 //
 // ws/server.test.ts proves the room wiring with no database behind it. This suite is the one
 // place both halves run together, the way index.ts assembles them.
@@ -193,37 +193,40 @@ async function pair() {
   return { anaSession, benSession, ana, ben, code: created.code };
 }
 
+// A stored glossary is PRIVATE to its owner (owner decision, 2026-10-10): held for them in the
+// room and used only in the prompts of translations they read, never merged into the room
+// glossary or sent to anyone. savedTerms.test.ts proves the prompt side with a capturing stub.
 describe("a stored glossary in a room", () => {
-  it("is merged into the room glossary when its owner creates the room", async () => {
+  it("is not sent, even to its owner, when they create the room", async () => {
     const session = await signup("Ana");
     account.setGlossary(session.user.id, { entries: [pibe, chamba] });
     const ana = await Client.connect(session);
     ana.send({ t: "room.create", username: "Ana", dialect: "es-AR", wantsVideo: false });
     await ana.next("room.created");
-    const updated = await ana.next("glossary.updated");
-    expect(updated.entries).toEqual([pibe, chamba]);
+    ana.send({ t: "ping" });
+    await ana.next("pong");
+    expect(ana.received.some((m) => m.t === "glossary.updated")).toBe(false);
   });
 
-  it("is merged when its owner joins, reaching both people, by the glossary.import rules", async () => {
+  it("is not merged into the room when its owner joins, so neither person is sent either glossary", async () => {
     const anaSession = await signup("Ana");
     const benSession = await signup("Ben");
     account.setGlossary(anaSession.user.id, { entries: [pibe] });
-    // Same source phrase as Ana's: the import rule dedupes on it, most recent first.
-    const benPibe = { ...pibe, target: "lad" };
-    account.setGlossary(benSession.user.id, { entries: [benPibe, chamba] });
+    account.setGlossary(benSession.user.id, { entries: [{ ...pibe, target: "lad" }, chamba] });
 
     const ana = await Client.connect(anaSession);
     ana.send({ t: "room.create", username: "Ana", dialect: "es-AR", wantsVideo: false });
     const created = await ana.next("room.created");
-    await ana.next("glossary.updated");
-
     const ben = await Client.connect(benSession);
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "en-US" });
-    await ben.next("room.joined");
-    const forBen = await ben.next("glossary.updated");
-    const forAna = await ana.next("glossary.updated");
-    expect(forBen.entries).toEqual([benPibe, chamba]);
-    expect(forAna.entries).toEqual(forBen.entries);
+    const joined = await ben.next("room.joined");
+    await ana.next("peer.joined");
+    for (const client of [ana, ben]) {
+      client.send({ t: "ping" });
+      await client.next("pong");
+      expect(client.received.some((m) => m.t === "glossary.updated")).toBe(false);
+    }
+    expect(joined.snapshot.glossary).toEqual([]);
   });
 
   it("sends nothing extra for a user with no stored glossary", async () => {
@@ -415,16 +418,21 @@ describe("corrections saved after a call", () => {
     expect(account.glossaryFor(benSession.user.id)).toEqual([]);
   });
 
-  it("reaches the next call the account makes", async () => {
+  it("is saved for the next call, which holds it privately rather than sending it", async () => {
     const { benSession, ben } = await benCorrects("qué hacés, che", "che", "hey");
     ben.send({ t: "room.leave" });
     await ben.closed();
     await until(() => account.glossaryFor(benSession.user.id).length > 0);
+    expect(account.glossaryFor(benSession.user.id)).toEqual([saved("che", "hey")]);
 
+    // That it reaches the next call's PROMPT is proved in savedTerms.test.ts, with a stub
+    // provider; here, that the next call does not send it to anyone.
     const again = await Client.connect(benSession);
     again.send({ t: "room.create", username: "Ben", dialect: "en-US", wantsVideo: false });
     await again.next("room.created");
-    expect((await again.next("glossary.updated")).entries).toEqual([saved("che", "hey")]);
+    again.send({ t: "ping" });
+    await again.next("pong");
+    expect(again.received.some((m) => m.t === "glossary.updated")).toBe(false);
   });
 
   it("saves each correction once when a host's call closes and a new one opens in the same room", async () => {
