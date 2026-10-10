@@ -83,8 +83,9 @@ on `main` since f455585):
      steps. After a restart, Docker may need restarting:
      `setsid nohup dockerd >/tmp/dockerd.log 2>&1 </dev/null &`.
    - fetch refuses port 9 as a "bad port" before connecting. Use a real closed port.
-   - CI jobs set no `timeout-minutes`, so a mutant that hangs runs for GitHub's six hours. A
-     mutation harness must record a hang rather than die on it.
+   - A mutant that hangs holds its job until the job's `timeout-minutes` (10 or 15 minutes since
+     #6; GitHub's default was six hours). A mutation harness must still record a hang rather
+     than die on it. `script/ci_timeouts.test.mjs` fails any job without a limit of 1 to 60.
    - `pkill -f` can match your own shell. Use pid files.
 
 ## 3. #1: server milestones M1 to M5 (merged)
