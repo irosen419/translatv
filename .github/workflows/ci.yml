@@ -8,6 +8,9 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # A ceiling on what a hang can cost, not an estimate. GitHub's default is six hours.
+    # (slowest of the last 30 green runs: 56s.)
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +46,9 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    # A ceiling on what a hang can cost, not an estimate. GitHub's default is six hours.
+    # (slowest of the last 30 green runs: 118s; it also installs Chromium.)
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -57,6 +63,9 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    # A ceiling on what a hang can cost, not an estimate. GitHub's default is six hours.
+    # (slowest of the last 30 green runs: 67s.)
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       # The image is built but never pushed here. The point is to catch a broken Dockerfile on
