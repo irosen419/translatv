@@ -102,6 +102,6 @@ export async function expectContract(
     return route;
   }
   if (response.status < 400) throw new Error(`${where}: a success status the contract does not list`);
-  conforms(where, "apiError", JSON.parse(text) as unknown);
+  conforms(where, "apiError", JSON.parse(text) as unknown, true);
   return null;
 }

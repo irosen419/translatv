@@ -59,6 +59,12 @@ async function fetch(input: string, init?: RequestInit): Promise<Response> {
   if (route?.request && !parsed.includes(HTTP_SCHEMAS[route.request.schema])) {
     throw new Error(`${route.id}: the server did not parse its request with ${route.request.schema}, the schema the table names`);
   }
+  // The third direction: a route the table says takes no request must not have one the server
+  // reads. Without this, logout listed with `request: null` passed every gate, and a client built
+  // from the table would log out without its refresh token, which then is never revoked.
+  if (route && !route.request && parsed.length > 0) {
+    throw new Error(`${route.id}: the table lists no request, but the server parsed one`);
+  }
   if (route) answered.add(route.id);
   return response;
 }
