@@ -1215,6 +1215,9 @@ export class SignalingServer {
     }
     this.closeCall(memberId, now);
     this.openCall(memberId, open.userId, roomCode, peerUserId, now);
+    // Closing the call let the member's saved terms go (closeCall), but they are still in the
+    // room: hold them again, read fresh, so the corrections just saved apply from here on.
+    this.holdSavedGlossary(roomCode, open.userId, memberId);
   }
 
   /**

@@ -23,18 +23,24 @@ import type { Config } from "../config.js";
 import { createApp } from "../http.js";
 import { SpendGate } from "../spend/caps.js";
 import { openStore, type Store } from "../store/index.js";
-import { TranslationService, type LlmClient } from "../translate/TranslationService.js";
+import { LlmFailure, TranslationService, type LlmClient } from "../translate/TranslationService.js";
 import { SignalingServer } from "../ws/server.js";
 import { AccountService } from "./service.js";
 
 const ORIGIN = "http://localhost:5173";
 const PASSWORD = randomBytes(12).toString("hex");
 
-/** Every prompt the stub was asked, and the target dialect each asked for, in order. */
+/** Every prompt the stub was asked, in order. */
 const prompts: string[] = [];
+/** How many of the next requests the stub refuses, as a retriable provider error. */
+let failNext = 0;
 const stub: LlmClient = {
   async complete({ system, user }) {
     prompts.push(`${system}\n${user}`);
+    if (failNext > 0) {
+      failNext -= 1;
+      throw new LlmFailure("retriable", "stub", "stub refused");
+    }
     return { text: "translated", inputTokens: 10, outputTokens: 2 };
   },
 };
@@ -49,6 +55,7 @@ let port: number;
 
 beforeEach(async () => {
   prompts.length = 0;
+  failNext = 0;
   root = mkdtempSync(join(tmpdir(), "saved-terms-"));
   mkdirSync(join(root, "out", "translatv"), { recursive: true });
   writeFileSync(join(root, "out", "translatv", "spend_log.jsonl"), "", "utf8");
@@ -190,8 +197,13 @@ describe("a saved term", () => {
     expect(glossarySeen(ben).map((e) => e.source)).not.toContain(SAVED.source);
   });
 
-  it("shapes the translations its owner reads, and only those", async () => {
-    const { ben, carla } = await benAndCarla(true);
+  // Hosting or joining: review found every test had the owner hosting, so a guest's saved terms
+  // could stop applying with every test green.
+  it.each([
+    ["when its owner hosts", true],
+    ["when its owner joins", false],
+  ])("shapes the translations its owner reads, and only those (%s)", async (_label, benHosts) => {
+    const { ben, carla } = await benAndCarla(benHosts);
 
     // Carla speaks; Ben reads the translation into en-US. His saved term is in that prompt.
     carla.send({ t: "stt.final", text: "mi hermana viene mañana", seq: 1 });
@@ -237,6 +249,37 @@ describe("a saved term", () => {
     expect(prompts[1]).not.toContain("hey dude");
     await dan.settle();
     expect(glossarySeen(dan).map((e) => e.target)).not.toContain("hey dude");
+  });
+
+  // A host whose guest changes has their call closed and a new one opened (peerCall). Closing a
+  // call lets the saved terms go, so the new call must hold them again: review measured them lost
+  // for the rest of the room. Holding them again also picks up corrections saved at the change.
+  it("survives a change of guest, for the host", async () => {
+    const { ben, carla } = await benAndCarla(true);
+    carla.send({ t: "room.leave" });
+    await ben.next("peer.left");
+    const code = (ben.received.find((m) => m.t === "room.created") as Extract<ServerMessage, { t: "room.created" }>).code;
+    const dan = await Client.connect(await signup("Dan"));
+    dan.send({ t: "room.join", code, username: "Dan", dialect: "es-AR" });
+    await dan.next("room.joined");
+
+    dan.send({ t: "stt.final", text: "mi hermana viene mañana", seq: 1 });
+    await until(() => prompts.length === 1);
+    expect(prompts[0]).toContain(SAVED.target);
+  });
+
+  // A retry is aimed at the reader too, whoever clicks it.
+  it.each([
+    ["the reader", "ben"],
+    ["the speaker", "carla"],
+  ])("is in the prompt of a retried line, when %s retries it", async (_label, who) => {
+    const { ben, carla } = await benAndCarla(true);
+    failNext = 1;
+    carla.send({ t: "stt.final", text: "mi hermana viene mañana", seq: 1 });
+    const failed = await ben.next("translation.failed");
+    (who === "ben" ? ben : carla).send({ t: "translation.retry", lineId: failed.lineId });
+    await until(() => prompts.length === 2);
+    expect(prompts[1]).toContain(SAVED.target);
   });
 
   it("stops applying once its owner has left the room", async () => {

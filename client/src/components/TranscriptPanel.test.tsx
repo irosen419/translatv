@@ -79,12 +79,11 @@ function type(id: string, value: string): void {
   });
 }
 
+/** Presses Save, the button a person presses, so a Save that does not submit fails here. */
 function save(): void {
-  const form = host.querySelector("dialog form");
-  if (!form) throw new Error("no dialog form");
-  act(() => {
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-  });
+  const button = [...host.querySelectorAll("dialog button")].find((b) => b.textContent === copy.t("correct.save"));
+  if (!(button instanceof HTMLButtonElement)) throw new Error("no Save button");
+  act(() => button.click());
 }
 
 beforeEach(() => {

@@ -115,6 +115,11 @@ describe("glossary.correct", () => {
     expect(accepts({ t: "glossary.correct", lineId: "L1", correctedTranslation: " \u0007 " })).toBe(false);
   });
 
+  it("says why an empty fix is refused", () => {
+    const parsed = parseClientMessage(JSON.stringify({ t: "glossary.correct", lineId: "L1", correctedTranslation: "  " }));
+    expect(parsed.ok ? "" : parsed.reason).toContain("text must not be empty");
+  });
+
   it("refuses an empty phrase", () => {
     expect(accepts({ t: "glossary.correct", lineId: "L1", source: "  ", correctedTranslation: "hey" })).toBe(false);
   });
