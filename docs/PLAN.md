@@ -139,18 +139,20 @@ and coding runs in cloud sessions wherever possible. Those are not reopened here
 ### D7. Protocol in Swift: hand written `Codable`, verified by fixtures on every build
 
 - **Choice.** This repository gains a generated JSON Schema and a golden fixture file for every
-  wire message (M1), under `shared/wire/`. The iOS test target reads them IN PLACE from that
+  wire message (M1), under `shared/wire/`. The iOS contract pull request extended it to the HTTP
+  account API: `http.schema.json`, a fixture for every request and response under
+  `fixtures/http/`, and `constants.json` (both versions, the socket constants, the limits, the
+  dialect codes and the route table). Every schema compiles under Ajv's strict mode. The iOS test target reads them IN PLACE from that
   directory, so there is no copy to drift. The Swift `Codable` types must decode and re-encode every fixture byte for byte after
   normalization. A completeness test fails if any message `t` in the fixture index has no Swift
   case.
 - **Why.** Generating Swift from JSON Schema adds a tool (quicktype or similar) whose output
   still needs hand shaping into enums with associated values. A hand copy that nothing checks is
-  forbidden. A hand copy that 30 fixtures check on Linux in seconds is not a hand copy that
+  forbidden. A hand copy that 56 fixtures (35 WebSocket, 21 HTTP) check on Linux in seconds is not a hand copy that
   nothing checks.
-- **Prerequisite.** Today only the client to server messages are zod schemas. `ServerMessage`
-  (`shared/src/protocol.ts` L335 to L418) is a plain TypeScript union, which the schema
-  generator cannot see. M1 converts it to zod first and derives the type with `z.infer`, which
-  also brings it in line with this repository's own rule that the zod schemas are the single
+- **Prerequisite (done in M1).** `ServerMessage` was a plain TypeScript union, which the schema
+  generator could not see. M1 converted it to zod and derived the type with `z.infer`, which
+  also brought it in line with this repository's own rule that the zod schemas are the single
   source of truth.
 - **What would change it.** The protocol growing past roughly 50 message types, where generation
   would start paying for itself.
@@ -396,7 +398,7 @@ Branching:
 
 **M3. Accounts, tokens and the WebSocket gate** (C1)
 - **Goal.**
-  - Build signup (invite), login, refresh with rotation and reuse detection, logout and `whoami` under `/api/auth`.
+  - Build signup (invite), login, refresh with rotation and reuse detection, logout and `whoami` (shipped as `GET /api/auth/me`) under `/api/auth`.
   - Add per account lockout, `npm run invite` and `OWNER_EMAIL`.
   - `room.create` and `room.join` require a user (in place of `adminToken`).
   - Native upgrades authenticate with `Authorization: Bearer` (D9 Origin rule).

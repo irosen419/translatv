@@ -37,5 +37,28 @@
     "glossary.updated",
     "error",
     "pong"
+  ],
+  "http": [
+    "account.delete.request",
+    "auth.login.request",
+    "auth.login.response",
+    "auth.logout.request",
+    "auth.me.response",
+    "auth.refresh.request",
+    "auth.refresh.response",
+    "auth.signup.request",
+    "auth.signup.response",
+    "error",
+    "healthz.response",
+    "invites.create.response",
+    "me.calls.request",
+    "me.calls.response",
+    "me.contacts.response",
+    "me.glossary.get.response",
+    "me.glossary.put.request",
+    "me.glossary.put.response",
+    "me.preferences.get.response",
+    "me.preferences.put.request",
+    "me.preferences.put.response"
   ]
 }

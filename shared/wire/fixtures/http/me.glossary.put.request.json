@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "source": "laburo",
+      "target": "work (Argentine slang)",
+      "sourceDialect": "es-AR",
+      "targetDialect": "en-US"
+    },
+    {
+      "source": "a tope",
+      "target": "flat out",
+      "sourceDialect": "es-ES",
+      "targetDialect": "en-GB"
+    }
+  ]
+}

@@ -97,7 +97,14 @@ plan of record for the multi-user server and the iOS app.
 - `npm test` runs the TypeScript suites (vitest).
 - `python3 -m unittest discover -s . -p 'test_*.py'` runs the Python suites. Standard library only:
   no pytest, no third party imports, and no test touches the network.
-- `npm run check` runs the dash grep, typecheck, and both suites together.
+- `npm run check` runs the dash grep, the copy parity check, the wire check (`check:wire`), the
+  spend view check (`check:spend-view`), the typecheck, and both suites together.
+- `shared/wire/` is the contract the iOS app is checked against: generated schemas for the
+  WebSocket (`schema.json`) and the HTTP account API (`http.schema.json`), `constants.json`, and a
+  golden fixture for every message, request and response. `npm run gen:wire` regenerates; never
+  hand edit a generated file. A new HTTP route goes into `HTTP_ROUTES` in `shared/src/http.ts`.
+  `PROTOCOL_VERSION` (the socket) and `API_VERSION` (HTTP) share one bump rule, written beside
+  each, and `/healthz` serves both.
 
 ## Git
 
@@ -133,6 +140,6 @@ file. They ADD to the skill's own guardrails and override its defaults where the
   `out/translatv/spend_log.jsonl`. The ledger is append only, and a deletion is either a
   botched conflict resolution or lost spend. Both need a human.
 - Never merge on a red or still pending required check. `npm run check` (dash grep, copy parity,
-  typecheck, both suites) is the bar.
+  wire contract, spend view, typecheck, both suites) is the bar.
 - Merge with an ordinary merge commit, matching the owner's other repositories. Do not switch to
   squash or rebase without asking.

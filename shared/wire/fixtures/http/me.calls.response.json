@@ -1,0 +1,20 @@
+{
+  "calls": [
+    {
+      "id": "Ja3sD6fG9hJ2kL5zX8cV1b",
+      "peer": {
+        "contactId": "mN4bV7cX0zL3kJ6hG9fD2s",
+        "displayName": "Ben"
+      },
+      "startedAt": 1791403600000,
+      "endedAt": 1791405400000
+    },
+    {
+      "id": "Hn2qW7eR0tY4uI8oP1aS5d",
+      "peer": null,
+      "startedAt": 1791400000000,
+      "endedAt": null
+    }
+  ],
+  "nextCursor": "MTc5MTQwMDAwMDAwMC5IbjJxVzdlUjB0WTR1SThvUDFhUzVk"
+}

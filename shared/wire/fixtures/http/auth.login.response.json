@@ -1,0 +1,10 @@
+{
+  "accessToken": "eyJzdWIiOiJxM1Qwdlg4Ykx3Mm5SNXlLMWNacEFnIiwiZXhwIjoxNzkxNTAwOTAwMDAwfQ.fixture-signature-not-real-0000000000000",
+  "accessExpiresAt": 1791500900000,
+  "refreshToken": "fixture-refresh-token-not-real-00000000000000",
+  "user": {
+    "id": "q3T0vX8bLw2nR5yK1cZpAg",
+    "displayName": "Ana",
+    "isOwner": false
+  }
+}

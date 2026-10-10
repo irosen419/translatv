@@ -34,6 +34,7 @@
     "verify": "tsx script/verify_translation.mjs"
   },
   "devDependencies": {
+    "ajv": "8.20.0",
     "playwright": "^1.62.1",
     "typescript": "^5.6.3",
     "vitest": "^2.1.8",

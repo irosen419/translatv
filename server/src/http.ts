@@ -6,7 +6,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express } from "express";
-import { PROTOCOL_VERSION } from "@translatv/shared";
+import { API_VERSION, PROTOCOL_VERSION, type HealthResponse } from "@translatv/shared";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
 import { createAuthRouter } from "./auth/routes.js";
@@ -81,17 +81,23 @@ export function createApp(
     const configured = config.anthropicApiKey !== null;
     const brokenAtRuntime = configured && translation?.enabled === false;
 
-    res.json({
+    // Typed by the shared contract (healthResponse in shared/src/http.ts), which is what the
+    // exported schema says this body is.
+    const body: HealthResponse = {
       ok: true,
       // Which wire format this server speaks, so a separately shipped client (the iOS app) can
       // check it is compatible before it opens a socket rather than after its first bad frame.
       protocolVersion: PROTOCOL_VERSION,
+      // Which version of the HTTP account API it speaks, for the same reason. There is no version
+      // in the path; this is where a client learns it.
+      apiVersion: API_VERSION,
       // Whether signing up needs an invite, so a client shows the invite field only where it
       // means something. The mode, never anything about who has an account.
       signup: config.signupMode,
       translation: brokenAtRuntime ? "failed" : configured ? "enabled" : "not_configured",
       ...(brokenAtRuntime && translation?.disabled ? { reason: translation.disabled } : {}),
-    });
+    };
+    res.json(body);
   });
 
   if (existsSync(clientDist)) {
