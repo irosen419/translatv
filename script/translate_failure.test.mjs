@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { describeFailure } from "./translate_failure.mjs";
 
@@ -51,31 +52,80 @@ describe("describeFailure", () => {
 });
 
 describe("verify_translation.mjs", () => {
-  // A static guard rather than a run: the script spends real money, so no test executes it. Thrown
-  // errors (error?.message) are real Errors and stay; only translate RESULTS lost .message.
-  // Comments are stripped first: a comment recording the old bug ("this printed result.message")
-  // is history, not the bug, and a guard that fails on it would be deleted rather than understood.
-  const code = (source) =>
-    source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const SCRIPT = readFileSync(join(HERE, "verify_translation.mjs"), "utf8");
 
-  it("reads no .message off a translate result", () => {
-    const source = code(readFileSync(join(HERE, "verify_translation.mjs"), "utf8"));
-    expect(source).not.toMatch(/\b(smoke|result|refused|withGlossary|withoutGlossary)\.message\b/);
-  });
-
-  it("does not trip on a comment that names the old bug", () => {
-    expect(code("// This printed result.message once.\n/* and smoke.message */\nok();")).not.toMatch(
-      /\b(smoke|result)\.message\b/,
-    );
-    expect(code('const url = "https://example.com"; result.message;')).toMatch(/result\.message/);
+  it("reads .message only off a caught error", () => {
+    expect(messageReads(SCRIPT)).toEqual([]);
   });
 
   // The glossary check said only "call failed", with no reason, under a script whose job here is
   // to say why a translation failed.
-  it("says why the glossary call failed", () => {
-    const source = code(readFileSync(join(HERE, "verify_translation.mjs"), "utf8"));
-    expect(source).not.toMatch(/"call failed"/);
-    expect(source).toMatch(/describeFailure\(withGlossary\)/);
-    expect(source).toMatch(/describeFailure\(withoutGlossary\)/);
+  it("never says only that a call failed", () => {
+    expect(stringLiterals(SCRIPT)).not.toContain("call failed");
   });
 });
+
+describe("the .message guard itself", () => {
+  it.each([
+    ["a plain read", "smoke.message"],
+    ["an optional read", "smoke?.message"],
+    ["a bracket read", 'smoke["message"]'],
+    ["any variable name", "r.message"],
+    ["a read inside a template", "`Reason: ${result.message}`"],
+    ["a read after // inside a template", "`see // ${result.message}`"],
+    ["a read after a string holding /*", 'const a = "out/*.jsonl"; smoke.message; const b = "*/";'],
+    ["a caught error's name used outside its catch", "try {} catch (error) {} error.message;"],
+  ])("flags %s", (_label, source) => {
+    expect(messageReads(source)).toHaveLength(1);
+  });
+
+  it.each([
+    ["a caught error", "try { go(); } catch (error) { console.error(error?.message); }"],
+    ["a comment naming the old bug", "// This printed result.message once.\n/* and smoke.message */\nok();"],
+    ["a string naming it", 'const note = "result.message";'],
+  ])("allows %s", (_label, source) => {
+    expect(messageReads(source)).toEqual([]);
+  });
+});
+
+/**
+ * Every `.message` read in a script that is not on a caught error. A failed translation RESULT
+ * has no message (failures are codes, with the sentence in the client's copy), so a read there
+ * prints "undefined"; a thrown Error has one. Read from the syntax tree, so comments and strings
+ * are not code, a read inside a template is, and no list of variable names can go stale.
+ */
+function messageReads(source) {
+  const file = ts.createSourceFile("script.mjs", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const reads = [];
+  const visit = (node, caught) => {
+    if (ts.isCatchClause(node) && node.variableDeclaration && ts.isIdentifier(node.variableDeclaration.name)) {
+      const inner = new Set(caught).add(node.variableDeclaration.name.text);
+      ts.forEachChild(node, (child) => visit(child, inner));
+      return;
+    }
+    let target = null;
+    if (ts.isPropertyAccessExpression(node) && node.name.text === "message") target = node.expression;
+    if (
+      ts.isElementAccessExpression(node) &&
+      ts.isStringLiteralLike(node.argumentExpression) &&
+      node.argumentExpression.text === "message"
+    ) {
+      target = node.expression;
+    }
+    if (target && !(ts.isIdentifier(target) && caught.has(target.text))) reads.push(node.getText(file));
+    ts.forEachChild(node, (child) => visit(child, caught));
+  };
+  visit(file, new Set());
+  return reads;
+}
+
+function stringLiterals(source) {
+  const file = ts.createSourceFile("script.mjs", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const found = [];
+  const visit = (node) => {
+    if (ts.isStringLiteralLike(node)) found.push(node.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+}
