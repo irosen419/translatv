@@ -163,15 +163,15 @@ describe("text limits", () => {
     expect(node.description).toMatch(/whitespace collapsed/);
   });
 
-  it("publishes what the server really sends for a glossary entry's source: a whole line", () => {
+  it("publishes what the server really sends for a glossary entry's source: a term, since corrections are terms", () => {
     expect(field(ws, "serverMessage", "glossary.updated", "entries", "*items", "source").maxLength).toBe(
-      L().transcript,
+      L().glossaryTerm,
     );
     expect(field(ws, "serverMessage", "glossary.updated", "entries", "*items", "target").maxLength).toBe(
       L().glossaryTranslation,
     );
     expect(field(ws, "serverMessage", "room.joined", "snapshot", "glossary", "*items", "source").maxLength).toBe(
-      L().transcript,
+      L().glossaryTerm,
     );
   });
 

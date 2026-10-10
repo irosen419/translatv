@@ -213,6 +213,8 @@ interface OpenCall {
   callId: string;
   userId: string;
   peerUserId: string | null;
+  /** The room the call is in, so closing it can find the corrections made in it. */
+  roomCode: string;
 }
 
 export class SignalingServer {
@@ -473,7 +475,7 @@ export class SignalingServer {
         this.runDetached(message.t, this.handleRetry(connection, message.lineId, now));
         return;
       case "glossary.correct":
-        this.handleCorrect(connection, message.lineId, message.correctedTranslation);
+        this.handleCorrect(connection, message);
         return;
       case "glossary.import":
         this.handleImport(connection, message.entries);
@@ -582,7 +584,7 @@ export class SignalingServer {
     log.info("room.created", { room: roomHash(room.code) });
 
     this.openCall(member.id, userId, room.code, null, now);
-    this.mergeStoredGlossary(room.code, userId);
+    this.holdSavedGlossary(room.code, userId, member.id);
   }
 
   private handleJoin(
@@ -658,7 +660,7 @@ export class SignalingServer {
     const other = peer && peer.userId !== userId ? peer : null;
     this.openCall(member.id, userId, room.code, other?.userId ?? null, now);
     if (other) this.peerCall(other.id, userId, room.code, now);
-    this.mergeStoredGlossary(room.code, userId);
+    this.holdSavedGlossary(room.code, userId, member.id);
   }
 
   private handleResume(
@@ -777,8 +779,9 @@ export class SignalingServer {
     const endedRoom = this.rooms.end(roomCode, now);
     if (!endedRoom) return;
 
-    // Tell everyone BEFORE closing their sockets, so the client can freeze its transcript and
-    // offer a download rather than just seeing the connection vanish.
+    // Tell everyone BEFORE closing their sockets, so the client can say the call ended, and who
+    // ended it, rather than just seeing the connection vanish. Each call is closed while the
+    // session still exists, which is what lets closeCall save its corrections.
     for (const member of endedRoom.members) {
       this.closeCall(member.id, now);
       const socket = this.byMember.get(member.id);
@@ -957,7 +960,7 @@ export class SignalingServer {
     }
 
     this.broadcastAll(roomCode, { t: "translation.pending", lineId: line.lineId });
-    await this.runTranslation(roomCode, line.lineId, text, speaker.dialect, targetDialect);
+    await this.runTranslation(roomCode, line.lineId, text, speaker.dialect, targetDialect, peer?.id);
   }
 
   private async runTranslation(
@@ -966,6 +969,8 @@ export class SignalingServer {
     text: string,
     sourceDialect: string,
     targetDialect: string,
+    /** The member who reads this translation, whose saved terms join its prompt. */
+    readerId: string | undefined,
   ): Promise<void> {
     const session = this.sessions.get(roomCode);
     if (!session) return;
@@ -976,7 +981,7 @@ export class SignalingServer {
       sourceDialect,
       targetDialect,
       context: session.contextFor(text),
-      glossary: session.glossaryEntries,
+      glossary: session.glossaryFor(readerId),
       roomHash: roomHash(roomCode),
       kind: "translation",
     });
@@ -1095,30 +1100,51 @@ export class SignalingServer {
       line.text,
       line.srcDialect,
       targetDialect,
+      peer?.id,
     );
   }
 
-  private handleCorrect(connection: Connection, lineId: string, corrected: string): void {
+  private handleCorrect(
+    connection: Connection,
+    message: Extract<ClientMessage, { t: "glossary.correct" }>,
+  ): void {
     const { roomCode, memberId } = connection;
     if (!roomCode || !memberId) return;
     const room = this.rooms.peek(roomCode);
     const session = this.sessions.get(roomCode);
     if (!room || !session) return;
 
+    // Only the person who READ a line's translation corrects it (owner decision C2). Correcting
+    // your own line made an entry from your dialect into your own dialect, which no translation
+    // reads. The web client shows the fix button on the other person's lines only; this is the
+    // same rule for a client that does not.
+    const line = session.find(message.lineId);
     const corrector = room.members.find((m) => m.id === memberId);
-    const line = session.correct(lineId, corrected, corrector?.dialect ?? "en-US");
-    if (!line) return;
+    if (!line || !corrector || line.from === memberId) return;
 
-    // The correction applies immediately with NO second API call, and it also lands in the
-    // glossary so future translations of the same phrase honor it.
-    this.broadcastAll(roomCode, {
-      t: "translation.result",
-      lineId,
-      targetDialect: corrector?.dialect ?? "en-US",
-      text: corrected,
-      revision: line.revision,
-      origin: "correction",
+    // The author is the member, and through the member the account (closeCall), recorded HERE on
+    // the server: nothing the client says decides whose correction this is.
+    const result = session.correct({
+      lineId: message.lineId,
+      phrase: message.source,
+      fix: message.correctedTranslation,
+      targetDialect: corrector.dialect,
+      authorMemberId: memberId,
     });
+    if (!result) return;
+
+    // A whole line correction applies to the line at once, with NO second API call. Either way the
+    // term lands in the glossary, so later translations of the phrase honor it.
+    if (result.replacedTranslation) {
+      this.broadcastAll(roomCode, {
+        t: "translation.result",
+        lineId: message.lineId,
+        targetDialect: corrector.dialect,
+        text: message.correctedTranslation,
+        revision: result.line.revision,
+        origin: "correction",
+      });
+    }
     this.broadcastAll(roomCode, {
       t: "glossary.updated",
       entries: [...session.glossaryEntries],
@@ -1136,8 +1162,8 @@ export class SignalingServer {
 
   /**
    * THE glossary import path: merge entries into a room's glossary by RoomSession's rules and
-   * tell everyone in the room. Shared by glossary.import and by a stored glossary joining a room,
-   * so the two cannot come to merge differently.
+   * tell everyone in the room. Used by glossary.import, which a client sends of its own accord.
+   * A stored glossary does NOT come this way: it is private to its owner (holdSavedGlossary).
    */
   private importGlossary(roomCode: string, entries: readonly GlossaryEntry[]): void {
     const session = this.sessions.get(roomCode);
@@ -1154,20 +1180,22 @@ export class SignalingServer {
   // -------------------------------------------------------------------------
 
   /**
-   * A signed in user's stored glossary joins the room they just created or joined. Sent AFTER
-   * room.created or room.joined, as a glossary.updated, exactly like an import from the pre join
-   * screen, so a client needs nothing new to receive it. Nothing is sent for an empty glossary.
+   * A signed in user's stored glossary is held for them in the room they just created or joined.
+   * It is PRIVATE (owner decision, 2026-10-10): never merged into the room glossary, never
+   * broadcast, never in a snapshot, because a saved term's phrase comes from someone else's line,
+   * and broadcast it reached every later caller. It joins only the prompts of translations its
+   * owner reads. This is how saved corrections reach the next call: closeCall saves them to the
+   * stored glossary, and this holds it; closeCall also lets it go.
    */
-  private mergeStoredGlossary(roomCode: string, userId: string): void {
+  private holdSavedGlossary(roomCode: string, userId: string, memberId: string): void {
     const entries = this.userData?.glossaryFor(userId) ?? [];
-    if (entries.length === 0) return;
-    this.importGlossary(roomCode, entries);
+    this.sessionFor(roomCode).setSaved(memberId, entries);
   }
 
   private openCall(memberId: string, userId: string, roomCode: string, peerUserId: string | null, now: number): void {
     if (!this.userData) return;
     const callId = this.userData.callStarted({ userId, roomHash: roomHash(roomCode), peerUserId, now });
-    if (callId !== null) this.calls.set(memberId, { callId, userId, peerUserId });
+    if (callId !== null) this.calls.set(memberId, { callId, userId, peerUserId, roomCode });
   }
 
   /**
@@ -1187,13 +1215,31 @@ export class SignalingServer {
     }
     this.closeCall(memberId, now);
     this.openCall(memberId, open.userId, roomCode, peerUserId, now);
+    // Closing the call let the member's saved terms go (closeCall), but they are still in the
+    // room: hold them again, read fresh, so the corrections just saved apply from here on.
+    this.holdSavedGlossary(roomCode, open.userId, memberId);
   }
 
+  /**
+   * A member's call is over: close its history row, and save the corrections they made in it.
+   *
+   * THE after call hook (owner decision C4). Every way a call ends comes through here, and every
+   * caller runs it while the room's session still exists: ending (endRoom), leaving
+   * (handleLeave), a seat released after a drop (sweepAt), a room destroyed by the sweep, a host
+   * whose guest changed (peerCall), an account deleted mid call (disconnectUser, by way of
+   * handleLeave), and shutdown (close). The session is read for the corrections THIS member made
+   * and only those, and they go to THIS member's account (decision C2), so nothing the other
+   * person typed can reach it. Screening is the account's side of it (AccountService).
+   */
   private closeCall(memberId: string, now: number): void {
     const open = this.calls.get(memberId);
     if (!open) return;
     this.calls.delete(memberId);
     this.userData?.callEnded(open.callId, now);
+    const session = this.sessions.get(open.roomCode);
+    const made = session?.takeCorrections(memberId) ?? [];
+    session?.dropSaved(memberId);
+    if (made.length > 0) this.userData?.saveCorrections(open.userId, made);
   }
 
   /**

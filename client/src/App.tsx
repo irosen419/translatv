@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GlossaryEntry, ServerMessage } from "@translatv/shared";
+import type { ServerMessage } from "@translatv/shared";
 
 import { Landing } from "./components/Landing.jsx";
 import { PreJoin } from "./components/PreJoin.jsx";
@@ -13,6 +13,7 @@ import { useStore } from "./state/store.js";
 import { AuthScreen } from "./components/AuthScreen.jsx";
 import { browserLock, browserStore, SessionManager } from "./lib/session.js";
 import { PreferenceSync } from "./lib/preferences.js";
+import { savedCorrectionsRegistry } from "./lib/savedCorrections.js";
 import { useCopy } from "./i18n/useCopy.js";
 import type { CopyRef } from "./i18n/copy.js";
 import { WebSpeechAdapter } from "./stt/WebSpeechAdapter.js";
@@ -56,6 +57,9 @@ useStore.getState().setSession(session.state());
 
 /** The signed in account's stored dialect, loaded on sign in and saved when the picker moves. */
 const preferenceSync = new PreferenceSync((path, init) => session.authorizedFetch(path, init));
+
+/** An account's saved corrections, listed on the start page with a delete, each pinned to its account. */
+const savedCorrectionsFor = savedCorrectionsRegistry(session);
 
 /**
  * Mint an invite as the owner. The server checks ownership; this only asks.
@@ -133,7 +137,6 @@ export function App() {
   const preferOnDevice = useRef(loadPreferOnDevice());
   const meter = useRef<LevelMeter | null>(null);
   const seq = useRef(0);
-  const pendingGlossary = useRef<GlossaryEntry[]>([]);
   /**
    * The local stream, mirrored into a ref.
    *
@@ -233,12 +236,9 @@ export function App() {
           // timer open, so the top row stays empty until the peer happens to speak again.
           setInterimText("");
 
-          // Any glossary the user loaded at the prejoin screen goes up as soon as we have a
-          // room to put it in.
-          if (pendingGlossary.current.length > 0) {
-            socket.current?.send({ t: "glossary.import", entries: pendingGlossary.current });
-            pendingGlossary.current = [];
-          }
+          // Nothing to import any more: "Load corrections from a past chat" is gone with the
+          // transcript download, and the server merges the account's saved corrections into the
+          // room itself. glossary.import stays in the protocol (owner decision C6).
           // Tell the room what our mic and camera are actually doing. The server defaults a new
           // member to camera off, and only this side knows the truth, so the peer would otherwise
           // see a placeholder for someone who is on camera. Covers resume too, since a resume
@@ -402,7 +402,6 @@ export function App() {
       username: string;
       dialect: string;
       wantsVideo: boolean;
-      glossary: GlossaryEntry[];
     }) => {
       const media = await acquireMedia(input.wantsVideo);
       if ("kind" in media) {
@@ -417,7 +416,6 @@ export function App() {
         cameraEnabled: media.hasVideo,
         micEnabled: true,
       });
-      pendingGlossary.current = input.glossary;
 
       const audioTrack = media.stream.getAudioTracks()[0] ?? null;
 
@@ -663,9 +661,7 @@ export function App() {
           useStore.getState().setUiDialect(dialect);
           stt.current?.setLanguage(dialect);
         }}
-        onCorrect={(lineId, correctedTranslation) =>
-          socket.current?.send({ t: "glossary.correct", lineId, correctedTranslation })
-        }
+        onCorrect={(message) => socket.current?.send(message)}
         onRetry={(lineId) => socket.current?.send({ t: "translation.retry", lineId })}
         onSendChat={(text) => socket.current?.send({ t: "chat.send", text })}
         onToggleSttEngine={() => {
@@ -706,16 +702,10 @@ export function App() {
   if (phase === "prejoin") {
     return (
       <>
-        {error && (
-          <div style={{ padding: "16px 16px 0" }}>
-            <div className="notice bad" style={{ maxWidth: 440, margin: "0 auto" }}>
-              {copy.ref(error)}
-            </div>
-          </div>
-        )}
         <PreJoin
           mode={mode}
           code={pendingCode}
+          notice={error}
           onCancel={() => {
             useStore.getState().setError(null);
             useStore.getState().setPhase("landing");
@@ -734,6 +724,7 @@ export function App() {
       onSignOut={() => void session.signOut()}
       onCreateInvite={createInvite}
       onDeleteAccount={(password, userId) => session.deleteAccount(password, userId)}
+      savedCorrectionsFor={savedCorrectionsFor}
       onCreate={() => {
         setMode("create");
         useStore.getState().setError(null);

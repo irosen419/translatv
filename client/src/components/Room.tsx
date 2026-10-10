@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DIALECTS, translationNeed } from "@translatv/shared";
+import { DIALECTS, translationNeed, type ClientMessage } from "@translatv/shared";
 import { useStore } from "../state/store.js";
 import { SubtitleOverlay } from "./SubtitleOverlay.jsx";
 import { TranscriptPanel } from "./TranscriptPanel.jsx";
@@ -67,7 +67,8 @@ interface Props {
   onTurnOnCamera(): void;
   onToggleTranslation(enabled: boolean): void;
   onChangeDialect(dialect: string): void;
-  onCorrect(lineId: string, corrected: string): void;
+  /** A term level correction: a phrase from the line, and its fix. */
+  onCorrect(message: Extract<ClientMessage, { t: "glossary.correct" }>): void;
   onRetry(lineId: string): void;
   onSendChat(text: string): void;
   /** Switch between the on device and cloud recognizers, which trade privacy against accuracy. */
@@ -81,7 +82,6 @@ export function Room(props: Props) {
     me,
     peer,
     lines,
-    glossary,
     peerState,
     sttStatus,
     socketState,
@@ -91,11 +91,6 @@ export function Room(props: Props) {
     micLevel,
     translationUnavailable,
   } = useStore();
-
-  // Everyone in a room is a signed in account now, so the download is offered to both people.
-  // It was host only while guests were anonymous, and it was never access control even then: a
-  // guest's browser already holds every line, because it needs them to render the subtitles.
-  const canExport = true;
 
   const localVideo = useRef<HTMLVideoElement>(null);
   const remoteVideo = useRef<HTMLVideoElement>(null);
@@ -362,12 +357,9 @@ export function Room(props: Props) {
         {!narrow && code && (
           <TranscriptPanel
             lines={lines}
-            glossary={glossary}
             selfId={selfId}
             me={me}
             peer={peer}
-            roomCode={code}
-            canExport={canExport}
             onCorrect={props.onCorrect}
             onRetry={props.onRetry}
             onSendChat={props.onSendChat}

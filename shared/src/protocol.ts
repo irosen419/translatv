@@ -134,6 +134,9 @@ export const bodyText = (max: number, nonEmpty?: { message: string }) => {
     .describe(measured(max, nonEmpty ? 1 : 0, BODY_CLEANING));
 };
 
+/** The refusal of a text that is empty once cleaned. A `.min(1)` in the pipe, so the export says it. */
+const NOT_EMPTY = { message: "text must not be empty" };
+
 export const glossaryEntry = z.object({
   source: bodyText(LIMITS.glossaryTerm),
   target: bodyText(LIMITS.glossaryTranslation),
@@ -145,18 +148,17 @@ export type GlossaryEntry = z.infer<typeof glossaryEntry>;
 /**
  * A glossary entry as the SERVER sends it, on glossary.updated and in the room.joined snapshot.
  *
- * Separate from glossaryEntry (what a client may send) because the two limits differ today:
- * RoomSession.correct makes an entry whose source is the corrected line's whole text, so a source
- * can be as long as a line (LIMITS.transcript), past the LIMITS.glossaryTerm a client is held to.
- * This publishes what the server really sends rather than a limit it does not keep. The
- * corrections work (docs/HANDOFF-NEXT-PRS.md, Part B, decision C1) makes corrections term level,
- * and tightens this to the client's limits when it does.
+ * Until corrections became term level (decision C1), RoomSession.correct made an entry whose
+ * source was the corrected line's whole text, up to LIMITS.transcript, so this published that
+ * longer limit. Now every source the server keeps is a term: a correction's phrase is held to
+ * LIMITS.glossaryTerm (and a line too long to be one is refused), and every other path into a room
+ * glossary already was. So the server's limits are the client's again.
  *
  * Plain strings with no cleaning transform: the server's output is already clean, and a schema
  * for what is SENT has nothing to clean.
  */
 export const serverGlossaryEntry = z.object({
-  source: z.string().max(LIMITS.transcript),
+  source: z.string().max(LIMITS.glossaryTerm),
   target: z.string().max(LIMITS.glossaryTranslation),
   sourceDialect: dialectCode,
   targetDialect: dialectCode,
@@ -226,10 +228,19 @@ export const clientMessage = z.discriminatedUnion("t", [
   z.object({ t: z.literal("chat.send"), text: bodyText(LIMITS.chat) }),
 
   z.object({ t: z.literal("translation.retry"), lineId: z.string().min(1).max(64) }),
+  // A TERM level correction (owner decision C1, 2026-10-09): a phrase from the line, and its fix.
+  // It used to carry the fix alone, and the server made the whole line the glossary term, up to
+  // 2000 characters of somebody's words, past the 200 a term may have everywhere else.
+  //
+  // `source` is optional so a tab loaded before that change still corrects. Without it the whole
+  // line is the phrase, and the server refuses a line too long to be a term. Adding an optional
+  // field does not bump PROTOCOL_VERSION. Both texts must have something in them once cleaned: an
+  // empty fix used to pass here and blank the line it corrected.
   z.object({
     t: z.literal("glossary.correct"),
     lineId: z.string().min(1).max(64),
-    correctedTranslation: bodyText(LIMITS.glossaryTranslation),
+    source: bodyText(LIMITS.glossaryTerm, NOT_EMPTY).optional(),
+    correctedTranslation: bodyText(LIMITS.glossaryTranslation, NOT_EMPTY),
   }),
   z.object({
     t: z.literal("glossary.import"),

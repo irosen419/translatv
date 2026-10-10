@@ -509,6 +509,12 @@ try {
   );
   await ben.getByRole("button", { name: "Join chat" }).click();
   await ben.getByLabel("Your name, just for this chat").fill("Ben");
+  // "Load corrections from a past chat" read the transcript download, and both are gone: saved
+  // corrections come from the account now (owner decisions of 2026-09-28 and 2026-10-09).
+  check(
+    "the pre join screen offers no file to load corrections from",
+    (await ben.locator('input[type="file"]').count()) === 0,
+  );
   await ben.getByLabel("Your language and region").selectOption("es-AR");
   // Everything Ben sees is Spanish from here. The button he is about to press already says so.
   check(
@@ -688,10 +694,11 @@ try {
     "and the text is still on screen rather than removed with the duplicate",
     lastRow.split("the standup is at nine").length - 1 === 1,
   );
-  check("both export formats are offered", (await ben.locator(".panel-head button").count()) === 2);
+  // Nobody downloads the transcript any more (owner decision, 2026-09-28).
   check(
-    "no HTML export is offered",
-    !(await ben.locator(".panel-head").innerText()).toLowerCase().includes("html"),
+    "no transcript download is offered, in any format",
+    (await ben.locator(".panel-head button").count()) === 0 &&
+      !/\.txt|\.json/i.test(await ben.locator(".panel").innerText()),
   );
 
   // ---------------------------------------------------------------------
@@ -1063,6 +1070,147 @@ try {
   );
   await phone.getByRole("button", { name: "Cancel" }).click();
   await phoneContext.close();
+
+  // ---------------------------------------------------------------------
+  section("Saved corrections, on a phone, in Spanish");
+  // The backstop for what the after call screen cannot see (owner decision C5). The server tests
+  // carry saving them, since this run has no API key and so never reaches a correction; this is
+  // the list a person reads and deletes from, at 390 pixels, in the language that runs longest.
+  const fayContext = await signedInContext("Fay", { viewport: { width: 390, height: 844 } });
+  const fayToken = (await apiSignIn(BASE, "Fay")).accessToken;
+  const fayHeaders = { "content-type": "application/json", authorization: `Bearer ${fayToken}` };
+  const longFix =
+    "cuando termina la reunión de la mañana, la que todos llaman la daily, aunque nadie sepa bien por qué ".repeat(3).trim();
+  const fayEntries = [
+    { source: "the standup", target: longFix, sourceDialect: "en-US", targetDialect: "es-AR" },
+    { source: "deadline", target: "fecha límite", sourceDialect: "en-US", targetDialect: "es-AR" },
+  ];
+  await fetch(`${BASE}/api/me/preferences`, {
+    method: "PUT",
+    headers: fayHeaders,
+    body: JSON.stringify({ dialect: "es-AR", uiDialect: "es-AR" }),
+  });
+  await fetch(`${BASE}/api/me/glossary`, { method: "PUT", headers: fayHeaders, body: JSON.stringify({ entries: fayEntries }) });
+  const fay = await fayContext.newPage();
+  fay.on("pageerror", (e) => errors.push(`fay: ${e.message}`));
+  await fay.goto(BASE);
+  const savedOpen = fay.getByRole("button", { name: es("saved.open") });
+  await savedOpen.waitFor({ timeout: 10_000 });
+  await savedOpen.click();
+  check(
+    "the list opens with focus on its heading",
+    await waitFor(async () => ((await fay.evaluate(() => document.activeElement?.id)) === "saved-title" ? true : null), "focus on the heading")
+      .catch(() => false),
+  );
+  await fay.locator(".saved-item").first().waitFor();
+  check("every saved correction is listed", (await fay.locator(".saved-item").count()) === 2);
+  check(
+    "a long fix is shown in full, wrapped rather than cut",
+    (await fay.locator(".saved-target").first().innerText()).replace(/\s+/g, " ").trim() === longFix,
+  );
+  check(
+    "nothing on the page is wider than the phone",
+    await fay.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth),
+  );
+  check(
+    "no entry overflows its box",
+    await fay.evaluate(() =>
+      [...document.querySelectorAll(".saved-text, .saved-item > button")].every(
+        (node) => node.scrollWidth <= node.clientWidth + 1 && node.scrollHeight <= node.clientHeight + 1,
+      ),
+    ),
+  );
+  await fay
+    .getByRole("button", { name: es("saved.deleteLabel").replace("{source}", "deadline") })
+    .click();
+  await waitFor(async () => ((await fay.locator(".saved-item").count()) === 1 ? true : null), "the entry to go");
+  const fayStored = await fetch(`${BASE}/api/me/glossary`, { headers: fayHeaders }).then((r) => r.json());
+  check(
+    "deleting one removes it from the account and keeps the other",
+    JSON.stringify(fayStored.entries) === JSON.stringify([fayEntries[0]]),
+    JSON.stringify(fayStored).slice(0, 200),
+  );
+  check(
+    "after a delete, focus lands on the list's heading rather than on the page",
+    (await fay.evaluate(() => document.activeElement?.id)) === "saved-title",
+  );
+  await fay.getByRole("button", { name: es("saved.close"), exact: true }).click();
+  check(
+    "closing puts focus back on the link that opened it",
+    (await fay.evaluate(() => document.activeElement?.textContent)) === es("saved.open"),
+  );
+  // A full list, 40 entries (the cap), on a phone. The document never scrolls (styles.css), so the
+  // start page has to be a scroll region of its own. Review found it was not: only 3 of 40 entries
+  // could be seen, and a wheel moved nothing. Playwright's click scrolls an element into view by
+  // itself, which is how two entries hid that, so this scrolls with the wheel, as a person would.
+  // Fay's account again, since another signup here would run into the per address signup limit.
+  const fullList = Array.from({ length: 40 }, (_, i) => ({
+    source: `término ${i}`,
+    target: `the term numbered ${i}, with a fix long enough to wrap onto a second line`,
+    sourceDialect: "es-AR",
+    targetDialect: "en-US",
+  }));
+  await fetch(`${BASE}/api/me/glossary`, { method: "PUT", headers: fayHeaders, body: JSON.stringify({ entries: fullList }) });
+  await fay.reload();
+  await fay.getByRole("button", { name: es("saved.open") }).click();
+  await fay.locator(".saved-item").nth(39).waitFor({ state: "attached" });
+  const inView = (locator) =>
+    locator.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      return box.top >= 0 && box.bottom <= window.innerHeight;
+    });
+  check("the top of the start page is on screen before any scrolling", await inView(fay.locator(".card h1").first()));
+  await fay.mouse.move(195, 422);
+  for (let i = 0; i < 40; i += 1) await fay.mouse.wheel(0, 400);
+  await fay.waitForTimeout(200);
+  check("a full saved list scrolls with the wheel on a phone, to its last entry", await inView(fay.locator(".saved-item").nth(39)));
+  await fayContext.close();
+
+  // A pre join error, on a small phone, with the microphone refused (this context grants no
+  // permissions). App draws the notice above PreJoin's page, and that page is a fixed scroll
+  // region now, so a notice outside it is drawn underneath: review measured the card covering the
+  // last line of the microphone notice at 390x667. Fay again, by sign in: another signup here
+  // would run into the per address signup limit.
+  const fayAgain = await apiSignIn(BASE, "Fay");
+  const smallContext = await browser.newContext({
+    viewport: { width: 390, height: 667 },
+    storageState: {
+      cookies: [],
+      origins: [{ origin: BASE, localStorage: [{ name: "translatv.refresh", value: fayAgain.refreshToken }] }],
+    },
+  });
+  // The browser here is launched to accept every media prompt (chromium.mjs), so the refusal is
+  // played in the page, as the browser reports it: getUserMedia rejects with NotAllowedError.
+  await smallContext.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = () =>
+      Promise.reject(new DOMException("Permission denied", "NotAllowedError"));
+  });
+  const small = await smallContext.newPage();
+  small.on("pageerror", (e) => errors.push(`small: ${e.message}`));
+  await small.goto(BASE);
+  await small.getByRole("button", { name: es("landing.create") }).click();
+  await small.getByLabel(es("prejoin.name.label")).fill("Fay");
+  await small.getByRole("button", { name: es("prejoin.submit.create") }).click();
+  const deniedNotice = small.locator(".notice.bad", { hasText: es("media.denied.microphone").slice(0, 20) });
+  await deniedNotice.first().waitFor({ timeout: 10_000 }).catch(() => {});
+  check(
+    "a pre join error is drawn on top, readable to its last line, on a small phone",
+    await deniedNotice
+      .first()
+      .evaluate((notice) => {
+        const box = notice.getBoundingClientRect();
+        const points = [
+          [box.left + box.width / 2, box.top + 4],
+          [box.left + box.width / 2, box.bottom - 4],
+        ];
+        return points.every(([x, y]) => {
+          const hit = document.elementFromPoint(x, y);
+          return hit !== null && notice.contains(hit);
+        });
+      })
+      .catch(() => false),
+  );
+  await smallContext.close();
 
   // ---------------------------------------------------------------------
   section("Ending kills the room permanently");

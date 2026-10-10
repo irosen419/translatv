@@ -15,6 +15,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   callsQuery,
+  LIMITS,
   glossaryDocument,
   preferences as preferencesSchema,
   type CallsPage,
@@ -25,6 +26,7 @@ import {
 } from "@translatv/shared";
 
 import type { AuthResult } from "../auth/service.js";
+import { mergeNewestFirst, screenCorrection, type ScreenReason } from "./corrections.js";
 import { log } from "../log.js";
 import { endCall, insertCall, listCalls, listContacts, setCallPeer } from "../store/callHistory.js";
 import { findGlossary, replaceGlossary } from "../store/glossaries.js";
@@ -41,6 +43,12 @@ export interface RoomUserData {
   callPeered(callId: string, peerUserId: string): void;
   /** The user left, timed out, or the room ended. */
   callEnded(callId: string, now: number): void;
+  /**
+   * The corrections this user made in a call that just closed, oldest first. Screened, and the
+   * survivors saved to THIS user's stored glossary. The caller hands over only the corrections the
+   * user made themselves (owner decision C2), which is what keeps the other person out of it.
+   */
+  saveCorrections(userId: string, corrections: readonly GlossaryEntry[]): void;
 }
 
 const INVALID = { ok: false, error: "INVALID_INPUT" } as const;
@@ -174,6 +182,34 @@ export class AccountService implements RoomUserData {
       setCallPeer(this.store, callId, peerUserId);
     } catch (error) {
       log.warn("account.call_record_failed", { error: error instanceof Error ? error.message : "unknown" });
+    }
+  }
+
+  saveCorrections(userId: string, corrections: readonly GlossaryEntry[]): void {
+    if (corrections.length === 0) return;
+    const passed: GlossaryEntry[] = [];
+    const dropped: Partial<Record<ScreenReason, number>> = {};
+    for (const correction of corrections) {
+      const verdict = screenCorrection(correction);
+      if (verdict.ok) passed.push(verdict.entry);
+      else dropped[verdict.reason] = (dropped[verdict.reason] ?? 0) + 1;
+    }
+    // Counts and reasons only. What was said, and what it was corrected to, never reach the log.
+    log.info("account.corrections_screened", { user: userId, saved: passed.length, dropped });
+    if (passed.length === 0) return;
+    try {
+      // Read and write in one transaction, so a half written list never lands. node:sqlite is
+      // synchronous, so nothing else in this process runs between the two anyway. A PUT from the
+      // saved list is a separate read and write on the client, with no version check, so a save
+      // landing between that list's read and its write is lost (a small window, disclosed).
+      this.store.transaction(() => {
+        const merged = mergeNewestFirst(findGlossary(this.store, userId), passed, LIMITS.glossaryEntries);
+        replaceGlossary(this.store, userId, merged);
+      });
+    } catch (error) {
+      // Most likely the account was deleted during the call, and the foreign key refuses rows for
+      // it. The transaction rolled back, so nothing is half saved.
+      log.warn("account.corrections_save_failed", { error: error instanceof Error ? error.message : "unknown" });
     }
   }
 

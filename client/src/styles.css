@@ -113,7 +113,7 @@ button.toggle-on:hover:not(:disabled) { background: #1a2a19; }
 button.toggle-off { background: transparent; border-color: #4a2a28; }
 button.toggle-off:hover:not(:disabled) { background: #2a1a19; }
 
-input, select {
+input, select, textarea {
   font: inherit;
   background: var(--panel-2);
   color: var(--text);
@@ -122,9 +122,13 @@ input, select {
   padding: 9px 11px;
   width: 100%;
 }
-input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+/* A correction prefills a whole line, which wraps. Line height leaves room above an accented
+   capital (Á, É) and below a descender, so neither is clipped at the field's edge. */
+textarea { resize: vertical; line-height: 1.45; min-height: 3.2em; }
 
-label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+/* .label is a label's look on something that labels no control, such as a read only quote. */
+label, .label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
 .field { margin-bottom: 15px; }
 .hint { margin: 6px 0 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
 .hint.bad { color: var(--warn); }
@@ -174,11 +178,24 @@ label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px
 .linklike:hover { color: var(--text); }
 
 /* Centered card layouts for landing and prejoin. */
+/* The full screen pages (sign in, start, pre join). The document never scrolls (above), so each
+   is a scroll region of its own, pinned to the viewport, rather than a 100vh box: on iOS Safari
+   100vh is the large viewport, and anything taller than the screen was simply cut off. Review
+   measured 3 of 40 saved corrections reachable on a phone, and a wheel moving nothing. The card
+   is centered by its auto margins, so a short page sits in the middle and a tall one starts at
+   the top and scrolls; grid centering would push a tall card's top above the scroll origin,
+   where nothing can reach it. */
 .center {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
   padding: 24px;
+}
+.center > * {
+  margin: auto;
 }
 .card {
   width: 100%;
@@ -682,6 +699,20 @@ dialog {
 dialog::backdrop { background: rgba(0, 0, 0, 0.62); }
 dialog h2 { margin: 0 0 8px; font-size: 17px; }
 dialog p { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 14px; }
+dialog p.hint { margin: 6px 0 0; font-size: 12px; line-height: 1.4; }
+dialog p.hint.bad { color: var(--warn); margin-bottom: 12px; }
+/* The line being corrected, quoted as they said it. Wraps, never truncates: the person is looking
+   for words in it. */
+.correction-original {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  font-style: italic;
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
 
 @media (max-width: 860px) {
   .stage.with-panel { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
@@ -925,3 +956,24 @@ dialog p { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 1
 .delete-account { width: 100%; font-size: 13px; }
 .delete-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .delete-actions > button { flex: 1 1 auto; }
+
+/* Saved corrections on the start page: the backstop for what the after call screen cannot see,
+   so every entry is readable in full and has its own delete. Opens like the deletion form, full
+   width inside the account strip. Each entry wraps rather than truncates, because a phrase is up
+   to 200 characters and its fix up to 400, and Spanish runs longer than the English beside it. */
+.saved-corrections { width: 100%; font-size: 13px; }
+.saved-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.saved-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.saved-text { flex: 1 1 auto; min-width: 0; line-height: 1.45; overflow-wrap: anywhere; }
+.saved-source { color: var(--text); }
+.saved-target { color: var(--muted); margin-top: 2px; }
+.saved-item > button { flex: 0 0 auto; font-size: 12px; padding: 6px 10px; }
+.saved-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }

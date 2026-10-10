@@ -22,6 +22,11 @@ const FORBIDDEN_KEYS = new Set([
   "candidate",
   "note",
   "resumeToken",
+  // A saved correction is a phrase someone said and its fix: conversation content, even once it
+  // is a glossary term in an account. Log how many, never which.
+  "source",
+  "target",
+  "corrections",
   // Accounts (M3). Credentials, and the things that identify the person holding one. A user id
   // is the identifier to log instead: opaque and random, it names an account without naming
   // anyone once the account is gone.

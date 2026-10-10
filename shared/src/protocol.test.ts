@@ -98,6 +98,40 @@ describe("user facing codes", () => {
   });
 });
 
+// A correction is a TERM (owner decision C1, 2026-10-09): the phrase from the line and its fix.
+// The phrase is optional on the wire so a tab loaded before this change still corrects, as a whole
+// line; the server then refuses a line too long to be a term.
+describe("glossary.correct", () => {
+  it("accepts a phrase and its fix", () => {
+    expect(accepts({ t: "glossary.correct", lineId: "L1", source: "che", correctedTranslation: "hey" })).toBe(true);
+  });
+
+  it("still accepts the older form with no phrase", () => {
+    expect(accepts({ t: "glossary.correct", lineId: "L1", correctedTranslation: "hey" })).toBe(true);
+  });
+
+  it("refuses an empty fix, or one that is only whitespace or control characters", () => {
+    expect(accepts({ t: "glossary.correct", lineId: "L1", correctedTranslation: "" })).toBe(false);
+    expect(accepts({ t: "glossary.correct", lineId: "L1", correctedTranslation: " \u0007 " })).toBe(false);
+  });
+
+  it("says why an empty fix is refused", () => {
+    const parsed = parseClientMessage(JSON.stringify({ t: "glossary.correct", lineId: "L1", correctedTranslation: "  " }));
+    expect(parsed.ok ? "" : parsed.reason).toContain("text must not be empty");
+  });
+
+  it("refuses an empty phrase", () => {
+    expect(accepts({ t: "glossary.correct", lineId: "L1", source: "  ", correctedTranslation: "hey" })).toBe(false);
+  });
+
+  it("holds the phrase to a glossary term's length and the fix to a translation's", () => {
+    const base = { t: "glossary.correct", lineId: "L1" };
+    expect(accepts({ ...base, source: "a".repeat(200), correctedTranslation: "b".repeat(400) })).toBe(true);
+    expect(accepts({ ...base, source: "a".repeat(201), correctedTranslation: "b" })).toBe(false);
+    expect(accepts({ ...base, source: "a", correctedTranslation: "b".repeat(401) })).toBe(false);
+  });
+});
+
 // Dialects travel as an enum in the exported schema (so the Swift side can decode them into one),
 // and the switch from a refine to an enum must not change what the server accepts or what it says
 // when it refuses.
@@ -191,15 +225,15 @@ describe("text limits", () => {
   });
 });
 
-// The shared snag (docs/HANDOFF-NEXT-PRS.md): RoomSession.correct makes a glossary entry whose
-// source is the corrected line's whole text, up to LIMITS.transcript, so what the SERVER sends is
-// published separately from what a client may send, and publishes what is really sent.
+// The shared snag (docs/HANDOFF-NEXT-PRS.md): RoomSession.correct used to make a glossary entry
+// whose source was the corrected line's whole text, so the server's schema published the longer
+// limit. Corrections are terms now (decision C1), so the server keeps the client's 200 again.
 describe("serverGlossaryEntry", () => {
   const entry = { source: "a", target: "b", sourceDialect: "es-AR", targetDialect: "en-US" };
 
-  it("takes a source as long as a whole line, and no longer", () => {
-    expect(serverGlossaryEntry.safeParse({ ...entry, source: "a".repeat(LIMITS.transcript) }).success).toBe(true);
-    expect(serverGlossaryEntry.safeParse({ ...entry, source: "a".repeat(LIMITS.transcript + 1) }).success).toBe(false);
+  it("takes a source as long as a glossary term, and no longer", () => {
+    expect(serverGlossaryEntry.safeParse({ ...entry, source: "a".repeat(LIMITS.glossaryTerm) }).success).toBe(true);
+    expect(serverGlossaryEntry.safeParse({ ...entry, source: "a".repeat(LIMITS.glossaryTerm + 1) }).success).toBe(false);
   });
 
   it("keeps the translation limit and the dialect enum", () => {
@@ -209,12 +243,15 @@ describe("serverGlossaryEntry", () => {
     expect(serverGlossaryEntry.safeParse({ ...entry, targetDialect: "xx-YY" }).success).toBe(false);
   });
 
-  it("is what glossary.updated and the room.joined snapshot carry", () => {
+  it("is what glossary.updated and the room.joined snapshot carry, limit included", () => {
+    const term = { ...entry, source: "a".repeat(LIMITS.glossaryTerm) };
     const long = { ...entry, source: "a".repeat(LIMITS.glossaryTerm + 1) };
-    expect(serverMessage.safeParse({ t: "glossary.updated", entries: [long] }).success).toBe(true);
+    expect(serverMessage.safeParse({ t: "glossary.updated", entries: [term] }).success).toBe(true);
+    expect(serverMessage.safeParse({ t: "glossary.updated", entries: [long] }).success).toBe(false);
     const joined = serverMessage.options.find((o) => o.shape.t.value === "room.joined");
     const snapshot = (joined?.shape as { snapshot: z.AnyZodObject }).snapshot;
-    expect(snapshot.safeParse({ lines: [], glossary: [long] }).success).toBe(true);
+    expect(snapshot.safeParse({ lines: [], glossary: [term] }).success).toBe(true);
+    expect(snapshot.safeParse({ lines: [], glossary: [long] }).success).toBe(false);
   });
 });
 

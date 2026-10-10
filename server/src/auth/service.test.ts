@@ -749,6 +749,13 @@ describe("deleteAccount", () => {
         })),
       });
       expect(saved.ok).toBe(true);
+      // And a correction saved after a call, through the path a call takes (the corrections pull
+      // request). It lands in the same table, so the same erase has to reach it.
+      const corrections = new AccountService(onDisk);
+      corrections.saveCorrections(signup.value.user.id, [
+        { source: `fixed ${marker}`, target: `fix ${marker}`, sourceDialect: "es-AR", targetDialect: "en-US" },
+      ]);
+      expect(corrections.glossaryFor(signup.value.user.id)[0]?.source).toBe(`fixed ${marker}`);
       const readable = () =>
         [path, `${path}-wal`].filter((file) => existsSync(file) && readFileSync(file).includes(marker));
       // The control: before the delete the marker is there to be found, so "absent" below means

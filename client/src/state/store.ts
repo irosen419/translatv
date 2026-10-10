@@ -10,7 +10,6 @@
 
 import { create } from "zustand";
 import type {
-  GlossaryEntry,
   Member,
   RenderedLine,
   ServerMessage,
@@ -77,7 +76,6 @@ interface State {
   iceServers: RTCIceServer[];
 
   lines: RenderedLine[];
-  glossary: GlossaryEntry[];
 
   peerState: PeerState;
   sttStatus: SttStatus;
@@ -164,7 +162,6 @@ export const useStore = create<State>((set, get) => ({
   iceServers: [],
 
   lines: [],
-  glossary: [],
 
   peerState: "new",
   sttStatus: { kind: "idle" },
@@ -199,7 +196,6 @@ export const useStore = create<State>((set, get) => ({
       me: null,
       peer: null,
       lines: [],
-      glossary: [],
       peerState: "new",
       sttStatus: { kind: "idle" },
       ended: null,
@@ -241,7 +237,6 @@ export const useStore = create<State>((set, get) => ({
           polite: message.polite,
           iceServers: message.iceServers,
           lines: message.snapshot.lines,
-          glossary: message.snapshot.glossary,
           error: null,
         });
         return;
@@ -387,7 +382,9 @@ export const useStore = create<State>((set, get) => ({
         return;
 
       case "glossary.updated":
-        set({ glossary: message.entries });
+        // Nothing on screen shows the room's glossary. The client kept it only for the
+        // transcript download, which is gone (owner decision 2026-09-28): corrections now reach
+        // the next call through the account, saved by the server when the call ends.
         return;
 
       case "error":

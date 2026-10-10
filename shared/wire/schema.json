@@ -271,12 +271,19 @@
           "additionalProperties": true,
           "properties": {
             "correctedTranslation": {
-              "description": "At most 400 UTF-16 code units once cleaned (control characters, line breaks included, replaced by spaces, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 400 UTF-16 units is always accepted.",
+              "description": "At least 1 and at most 400 UTF-16 code units once cleaned (control characters, line breaks included, replaced by spaces, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 400 UTF-16 units is always accepted.",
               "maxLength": 400,
+              "minLength": 1,
               "type": "string"
             },
             "lineId": {
               "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "source": {
+              "description": "At least 1 and at most 200 UTF-16 code units once cleaned (control characters, line breaks included, replaced by spaces, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 200 UTF-16 units is always accepted.",
+              "maxLength": 200,
               "minLength": 1,
               "type": "string"
             },
@@ -542,7 +549,7 @@
       "additionalProperties": true,
       "properties": {
         "source": {
-          "maxLength": 2000,
+          "maxLength": 200,
           "type": "string"
         },
         "sourceDialect": {

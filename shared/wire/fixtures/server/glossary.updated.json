@@ -2,8 +2,8 @@
   "t": "glossary.updated",
   "entries": [
     {
-      "source": "Mirá, si el laburo de mañana sale bien, el viernes nos juntamos todos en lo de Martina a comer un asado, y de paso festejamos que por fin terminamos la mudanza, que fue un quilombo bárbaro desde el principio hasta el último día.",
-      "target": "Look, if tomorrow's job goes well, on Friday we're all getting together at Martina's for a barbecue, and we'll celebrate finally finishing the move, which was a total mess from start to finish.",
+      "source": "laburo",
+      "target": "job",
       "sourceDialect": "es-AR",
       "targetDialect": "en-US"
     },
