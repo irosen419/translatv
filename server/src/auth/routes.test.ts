@@ -7,9 +7,11 @@
 // route in HTTP_ROUTES was answered successfully at least once.
 
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { HTTP_ROUTES, LIMITS } from "@translatv/shared";
@@ -22,6 +24,7 @@ import { AUTH_LIMITS, createAuthRouter } from "./routes.js";
 import { AuthService } from "./service.js";
 
 const realFetch = globalThis.fetch;
+const HTTP_FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "shared", "wire", "fixtures", "http");
 /** The ids of the routes that have answered with their success status in this file. */
 const answered = new Set<string>();
 
@@ -32,7 +35,7 @@ const answered = new Set<string>();
  */
 async function fetch(input: string, init?: RequestInit): Promise<Response> {
   const response = await realFetch(input, init);
-  const route = await expectContract(init?.method ?? "GET", input, response.clone());
+  const route = await expectContract(init?.method ?? "GET", input, response.clone(), init?.body);
   if (route) answered.add(route.id);
   return response;
 }
@@ -418,6 +421,32 @@ describe("the exported contract", () => {
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "NOT_FOUND" });
   });
+
+  // The table's `bearer` flag is published to the iOS app, which decides from it whether to send
+  // Authorization. Review round 1 flipped a route to `bearer: false` with every gate green. So each
+  // route is called with no token and the request its fixture holds: a route the table marks as
+  // needing a bearer must refuse with UNAUTHENTICATED, and one it marks as open must not.
+  it.each(HTTP_ROUTES.filter((route) => route.path.startsWith("/api/")).map((route) => [route.id, route] as const))(
+    "answers %s without a token as its bearer flag says",
+    async (_id, route) => {
+      const fixture = route.request
+        ? (JSON.parse(readFileSync(join(HTTP_FIXTURES_DIR, `${route.id}.request.json`), "utf8")) as Record<string, unknown>)
+        : null;
+      const query = route.request?.in === "query" ? `?${new URLSearchParams(fixture as Record<string, string>)}` : "";
+      const response = await realFetch(`${base}${route.path}${query}`, {
+        method: route.method,
+        headers: { "content-type": "application/json" },
+        body: route.request?.in === "body" ? JSON.stringify(fixture) : undefined,
+      });
+      const text = await response.text();
+      const code = text === "" ? null : (JSON.parse(text) as { error?: string }).error;
+      if (route.bearer) {
+        expect({ status: response.status, code }).toEqual({ status: 401, code: "UNAUTHENTICATED" });
+      } else {
+        expect(code).not.toBe("UNAUTHENTICATED");
+      }
+    },
+  );
 
   it("lists exactly the routes the router mounts", () => {
     const router = createAuthRouter(config(), auth, account) as unknown as {

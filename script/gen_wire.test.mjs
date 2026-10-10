@@ -190,6 +190,12 @@ describe("text limits", () => {
     expect(at(http, "/definitions/signupRequest/properties/displayName").maxLength).toBe(L().username);
     expect(at(http, "/definitions/signupRequest/properties/password").maxLength).toBe(shared.MAX_PASSWORD_LENGTH);
     expect(at(http, "/definitions/signupRequest/properties/email").maxLength).toBe(shared.MAX_EMAIL_LENGTH);
+    // The pattern too: moved back into a refine, it drops out of the export with every other
+    // check green (review round 1). Its behavior is pinned rather than its text, so rewriting the
+    // regex the same way stays green.
+    const emailPattern = new RegExp(at(http, "/definitions/signupRequest/properties/email").pattern ?? "(?!)");
+    for (const good of ["ana@example.test", "a.b@c.example.co"]) expect(emailPattern.test(good), good).toBe(true);
+    for (const bad of ["ana", "ana@example", "ana @example.test", "@example.test"]) expect(emailPattern.test(bad), bad).toBe(false);
   });
 });
 

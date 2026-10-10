@@ -53,9 +53,23 @@ export function routeFor(method: string, pathname: string): HttpRoute | undefine
  * A route's success status must carry the route's response schema (or no body at all for 204).
  * Anything else from the account API must be the error body. Returns the route when the answer
  * was that route's success, so a caller can count which routes were really exercised.
+ *
+ * On a success, the REQUEST is checked too: the server accepted it, so the schema the table
+ * publishes for that route's request must accept it as well. Without this, the table could name
+ * the wrong request schema with every gate green, and a client built from it would send a body the
+ * server refuses (review round 1 pointed DELETE /api/account at loginRequest, and nothing failed).
+ * A JSON body is checked against both the zod schema and the exported one. A query string is
+ * checked against zod only: its values are strings on the wire, which zod coerces and the exported
+ * JSON Schema, describing the decoded values, does not.
  */
-export async function expectContract(method: string, url: string, response: Response): Promise<HttpRoute | null> {
-  const pathname = new URL(url).pathname;
+export async function expectContract(
+  method: string,
+  url: string,
+  response: Response,
+  body?: RequestInit["body"],
+): Promise<HttpRoute | null> {
+  const parsedUrl = new URL(url);
+  const pathname = parsedUrl.pathname;
   if (!pathname.startsWith("/api/") && pathname !== "/healthz") return null;
   const where = `${method} ${pathname} answered ${response.status}`;
   const route = routeFor(method, pathname);
@@ -66,6 +80,16 @@ export async function expectContract(method: string, url: string, response: Resp
       if (text !== "") throw new Error(`${where}: expected no body, got ${text.length} characters`);
     } else {
       conforms(where, route.response, JSON.parse(text) as unknown);
+    }
+    if (route.request?.in === "body") {
+      if (typeof body !== "string") throw new Error(`${where}: the route takes a JSON body, and the request sent none`);
+      conforms(`${where}, its request`, route.request.schema, JSON.parse(body) as unknown);
+    } else if (route.request?.in === "query") {
+      const query = Object.fromEntries(parsedUrl.searchParams);
+      const parsed = HTTP_SCHEMAS[route.request.schema].safeParse(query);
+      if (!parsed.success) {
+        throw new Error(`${where}: its query does not parse as ${route.request.schema}: ${JSON.stringify(parsed.error.issues)}`);
+      }
     }
     return route;
   }

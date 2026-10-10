@@ -98,14 +98,6 @@ describe("check_wire.mjs", () => {
     expect(result.stderr).toMatch(/index\.json/);
   });
 
-  it("fails when the committed schema.json is stale", () => {
-    const path = join(wire, "schema.json");
-    writeFileSync(path, readFileSync(path, "utf8").replace("\n", '\n  "stale": true,\n'));
-    const result = run(wire);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toMatch(/schema\.json/);
-  });
-
   it("fails when a fixture carries a dialect outside the enum", () => {
     const path = join(wire, "fixtures", "server", "peer.updated.json");
     const fixture = JSON.parse(readFileSync(path, "utf8"));
@@ -198,12 +190,14 @@ describe("check_wire.mjs", () => {
     expect(result.stderr).toMatch(/index\.json/);
   });
 
-  it.each(["http.schema.json", "constants.json"])("fails when the committed %s is stale", (name) => {
+  it.each(["schema.json", "http.schema.json", "constants.json"])("fails when the committed %s is stale", (name) => {
     // A change every reader still accepts (a reworded description or comment), so freshness is
     // the only check that can object: an unknown keyword would fail Ajv strict mode instead.
+    // schema.json used to be tested by inserting an unknown keyword, which strict mode refused
+    // first, so skipping its freshness check left every test green (review round 1).
     const path = join(wire, name);
     const before = readFileSync(path, "utf8");
-    const after = before.replace(/"(\$comment|description)": "GENERATED/, '"$1": "Hand edited. GENERATED');
+    const after = before.replace(/"(\$comment|description)": "/, '"$1": "Hand edited. ');
     expect(after).not.toBe(before);
     writeFileSync(path, after);
     const result = run(wire);
