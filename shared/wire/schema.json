@@ -119,7 +119,8 @@
               "type": "string"
             },
             "username": {
-              "$ref": "#/definitions/username"
+              "$ref": "#/definitions/username",
+              "description": "At least 1 and at most 24 UTF-16 code units once cleaned (control and format characters removed, whitespace collapsed, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 24 UTF-16 units is always accepted."
             },
             "wantsTranslation": {
               "type": "boolean"
@@ -192,6 +193,8 @@
               "type": "string"
             },
             "text": {
+              "description": "At most 2000 UTF-16 code units once cleaned (control characters, line breaks included, replaced by spaces, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 2000 UTF-16 units is always accepted.",
+              "maxLength": 2000,
               "type": "string"
             }
           },
@@ -214,6 +217,8 @@
               "type": "string"
             },
             "text": {
+              "description": "At most 2000 UTF-16 code units once cleaned (control characters, line breaks included, replaced by spaces, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 2000 UTF-16 units is always accepted.",
+              "maxLength": 2000,
               "type": "string"
             }
           },
@@ -232,6 +237,8 @@
               "type": "string"
             },
             "text": {
+              "description": "At most 2000 UTF-16 code units once cleaned (control characters, line breaks included, replaced by spaces, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 2000 UTF-16 units is always accepted.",
+              "maxLength": 2000,
               "type": "string"
             }
           },
@@ -264,6 +271,9 @@
           "additionalProperties": true,
           "properties": {
             "correctedTranslation": {
+              "description": "At least 1 and at most 400 UTF-16 code units once cleaned (control characters, line breaks included, replaced by spaces, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 400 UTF-16 units is always accepted.",
+              "maxLength": 400,
+              "minLength": 1,
               "type": "string"
             },
             "lineId": {
@@ -272,6 +282,9 @@
               "type": "string"
             },
             "source": {
+              "description": "At least 1 and at most 200 UTF-16 code units once cleaned (control characters, line breaks included, replaced by spaces, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 200 UTF-16 units is always accepted.",
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             },
             "t": {
@@ -323,6 +336,14 @@
       ]
     },
     "dialectCode": {
+      "enum": [
+        "en-US",
+        "en-GB",
+        "es-AR",
+        "es-MX",
+        "es-ES",
+        "es-CO"
+      ],
       "type": "string"
     },
     "errorCode": {
@@ -346,12 +367,16 @@
       "additionalProperties": true,
       "properties": {
         "source": {
+          "description": "At most 200 UTF-16 code units once cleaned (control characters, line breaks included, replaced by spaces, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 200 UTF-16 units is always accepted.",
+          "maxLength": 200,
           "type": "string"
         },
         "sourceDialect": {
           "$ref": "#/definitions/dialectCode"
         },
         "target": {
+          "description": "At most 400 UTF-16 code units once cleaned (control characters, line breaks included, replaced by spaces, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 400 UTF-16 units is always accepted.",
+          "maxLength": 400,
           "type": "string"
         },
         "targetDialect": {
@@ -380,7 +405,7 @@
           "type": "string"
         },
         "dialect": {
-          "type": "string"
+          "$ref": "#/definitions/dialectCode"
         },
         "id": {
           "type": "string"
@@ -409,6 +434,11 @@
         "isHost"
       ],
       "type": "object"
+    },
+    "protocolVersion": {
+      "const": 2,
+      "description": "PROTOCOL_VERSION: the wire format this schema describes. /healthz serves the server's as protocolVersion.",
+      "type": "integer"
     },
     "renderedLine": {
       "additionalProperties": true,
@@ -443,7 +473,7 @@
           "type": "string"
         },
         "srcDialect": {
-          "type": "string"
+          "$ref": "#/definitions/dialectCode"
         },
         "text": {
           "type": "string"
@@ -512,6 +542,32 @@
       },
       "required": [
         "urls"
+      ],
+      "type": "object"
+    },
+    "serverGlossaryEntry": {
+      "additionalProperties": true,
+      "properties": {
+        "source": {
+          "maxLength": 200,
+          "type": "string"
+        },
+        "sourceDialect": {
+          "$ref": "#/definitions/dialectCode"
+        },
+        "target": {
+          "maxLength": 400,
+          "type": "string"
+        },
+        "targetDialect": {
+          "$ref": "#/definitions/dialectCode"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "sourceDialect",
+        "targetDialect"
       ],
       "type": "object"
     },
@@ -613,7 +669,7 @@
               "properties": {
                 "glossary": {
                   "items": {
-                    "$ref": "#/definitions/glossaryEntry"
+                    "$ref": "#/definitions/serverGlossaryEntry"
                   },
                   "type": "array"
                 },
@@ -702,7 +758,7 @@
               "type": "boolean"
             },
             "dialect": {
-              "type": "string"
+              "$ref": "#/definitions/dialectCode"
             },
             "micEnabled": {
               "type": "boolean"
@@ -935,7 +991,7 @@
               "type": "string"
             },
             "targetDialect": {
-              "type": "string"
+              "$ref": "#/definitions/dialectCode"
             },
             "text": {
               "type": "string"
@@ -990,7 +1046,7 @@
           "properties": {
             "entries": {
               "items": {
-                "$ref": "#/definitions/glossaryEntry"
+                "$ref": "#/definitions/serverGlossaryEntry"
               },
               "type": "array"
             },
@@ -1081,10 +1137,12 @@
       "type": "string"
     },
     "username": {
+      "description": "At least 1 and at most 24 UTF-16 code units once cleaned (control and format characters removed, whitespace collapsed, ends trimmed). minLength and maxLength count code points of the raw string, so they are a guide, not the rule: a client that keeps the cleaned text within 1 to 24 UTF-16 units is always accepted.",
+      "maxLength": 24,
+      "minLength": 1,
       "type": "string"
     }
   },
-  "description": "GENERATED by script/gen_wire.mjs from shared/src/protocol.ts. Do not edit by hand. Every frame is a JSON object discriminated on `t`: clientMessage is what a client sends, serverMessage is what the server sends.",
-  "protocolVersion": 2,
+  "description": "GENERATED by script/gen_wire.mjs from shared/src/protocol.ts. Do not edit by hand. Every frame is a JSON object discriminated on `t`: clientMessage is what a client sends, serverMessage is what the server sends. The version is definitions.protocolVersion.",
   "title": "Translatv WebSocket wire protocol"
 }

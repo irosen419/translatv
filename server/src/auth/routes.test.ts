@@ -1,19 +1,73 @@
 // /api/auth and /api/invites over real HTTP: status codes, error codes, body limits, and the per
 // IP limits. The rules themselves are proved in service.test.ts; this proves the mapping.
+//
+// Every request in this file goes through the `fetch` declared below, which checks each answer
+// against the exported contract (shared/wire/http.schema.json, through contract.testkit.ts). So
+// every response any test here provokes is also a contract test, and the last test proves every
+// route in HTTP_ROUTES was answered successfully at least once.
 
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { LIMITS } from "@translatv/shared";
+import { HTTP_ROUTES, HTTP_SCHEMAS, LIMITS } from "@translatv/shared";
 import type { Config } from "../config.js";
+import { expectContract } from "../contract.testkit.js";
 import { createApp } from "../http.js";
 import { AccountService } from "../account/service.js";
 import { openStore, type Store } from "../store/index.js";
-import { AUTH_LIMITS } from "./routes.js";
+import { AUTH_LIMITS, createAuthRouter } from "./routes.js";
 import { AuthService } from "./service.js";
+
+const realFetch = globalThis.fetch;
+const HTTP_FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "shared", "wire", "fixtures", "http");
+/** The ids of the routes that have answered with their success status in this file. */
+const answered = new Set<string>();
+
+/**
+ * Which of the contract's schemas the server parsed a request with. The services validate every
+ * body and query with a schema from @translatv/shared, the same objects HTTP_SCHEMAS names, so each
+ * one's safeParse is wrapped here to record it. A route table entry naming a different request
+ * schema than the one the server parses with is then caught in both directions: stricter, or
+ * laxer (review round 2 named loginRequest for signup, which has no displayName, with every gate
+ * green). Recorded by object, because one schema can carry two names (logoutRequest is
+ * refreshRequest).
+ */
+const parsedBy: object[] = [];
+for (const schema of new Set(Object.values(HTTP_SCHEMAS))) {
+  const original = schema.safeParse.bind(schema);
+  (schema as { safeParse: (value: unknown) => unknown }).safeParse = (value: unknown) => {
+    parsedBy.push(schema);
+    return original(value);
+  };
+}
+
+/**
+ * Shadows the global for this module: the real request, then the answer checked against the
+ * exported contract before any test sees it. A clone is checked, so the test reads the body as it
+ * always did.
+ */
+async function fetch(input: string, init?: RequestInit): Promise<Response> {
+  parsedBy.length = 0;
+  const response = await realFetch(input, init);
+  const parsed = [...parsedBy];
+  const route = await expectContract(init?.method ?? "GET", input, response.clone(), init?.body);
+  if (route?.request && !parsed.includes(HTTP_SCHEMAS[route.request.schema])) {
+    throw new Error(`${route.id}: the server did not parse its request with ${route.request.schema}, the schema the table names`);
+  }
+  // The third direction: a route the table says takes no request must not have one the server
+  // reads. Without this, logout listed with `request: null` passed every gate, and a client built
+  // from the table would log out without its refresh token, which then is never revoked.
+  if (route && !route.request && parsed.length > 0) {
+    throw new Error(`${route.id}: the table lists no request, but the server parsed one`);
+  }
+  if (route) answered.add(route.id);
+  return response;
+}
 
 const PASSWORD = randomBytes(12).toString("hex");
 
@@ -389,3 +443,64 @@ describe("DELETE /api/account", () => {
     expect((await send("GET", "/api/auth/me", ana.body.accessToken)).status).toBe(200);
   });
 });
+
+describe("the exported contract", () => {
+  it("answers an unknown path under /api with the NOT_FOUND error body", async () => {
+    const response = await fetch(`${base}/api/no/such/route`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "NOT_FOUND" });
+  });
+
+  // The table's `bearer` flag is published to the iOS app, which decides from it whether to send
+  // Authorization. Review round 1 flipped a route to `bearer: false` with every gate green. So each
+  // route is called with no token and the request its fixture holds: a route the table marks as
+  // needing a bearer must refuse with UNAUTHENTICATED, and one it marks as open must not.
+  it.each(HTTP_ROUTES.filter((route) => route.path.startsWith("/api/")).map((route) => [route.id, route] as const))(
+    "answers %s without a token as its bearer flag says",
+    async (_id, route) => {
+      const fixture = route.request
+        ? (JSON.parse(readFileSync(join(HTTP_FIXTURES_DIR, `${route.id}.request.json`), "utf8")) as Record<string, unknown>)
+        : null;
+      const query = route.request?.in === "query" ? `?${new URLSearchParams(fixture as Record<string, string>)}` : "";
+      const response = await realFetch(`${base}${route.path}${query}`, {
+        method: route.method,
+        headers: { "content-type": "application/json" },
+        body: route.request?.in === "body" ? JSON.stringify(fixture) : undefined,
+      });
+      const text = await response.text();
+      const code = text === "" ? null : (JSON.parse(text) as { error?: string }).error;
+      if (route.bearer) {
+        expect({ status: response.status, code }).toEqual({ status: 401, code: "UNAUTHENTICATED" });
+      } else {
+        expect(code).not.toBe("UNAUTHENTICATED");
+      }
+    },
+  );
+
+  it("lists exactly the routes the router mounts", () => {
+    const router = createAuthRouter(config(), auth, account) as unknown as {
+      stack: Array<{ route?: { path: string; methods: Record<string, boolean> } }>;
+    };
+    const mounted = router.stack
+      .flatMap((layer) =>
+        layer.route
+          ? Object.keys(layer.route.methods).map((method) => `${method.toUpperCase()} /api${layer.route?.path ?? ""}`)
+          : [],
+      )
+      .sort();
+    const listed = HTTP_ROUTES.filter((route) => route.path.startsWith("/api/"))
+      .map((route) => `${route.method} ${route.path}`)
+      .sort();
+    expect(mounted).toEqual(listed);
+  });
+});
+
+// Runs after every test above. A route listed in the contract that no test here ever got a
+// success from is a route whose real answer nothing has compared with the exported schema.
+afterAll(() => {
+  const missing = HTTP_ROUTES.filter((route) => route.path.startsWith("/api/") && !answered.has(route.id)).map(
+    (route) => route.id,
+  );
+  expect(missing).toEqual([]);
+});
+

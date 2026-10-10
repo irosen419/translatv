@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "custom-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "irosen419/claude-plugins"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "ian@custom-plugins": true
+  }
+}

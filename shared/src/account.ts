@@ -7,13 +7,13 @@
 // types, so the two sides cannot drift. Refusals reuse AuthErrorCode, since every one of them is
 // a session or input refusal that code set already names.
 //
-// No golden fixtures: script/check_wire.mjs covers the WebSocket unions only, not HTTP bodies
-// (auth.ts has none either). If the iOS app wants fixtures for the account API, that gate needs
-// an HTTP section first, and these schemas are what it would check against.
+// Exported with golden fixtures like the WebSocket's: http.ts says which schema goes with which
+// route, script/gen_wire.mjs writes shared/wire/http.schema.json, and script/check_wire.mjs
+// demands a fixture under shared/wire/fixtures/http/ for every request and response.
 
 import { z } from "zod";
 import { MAX_PASSWORD_LENGTH } from "./auth.js";
-import { dialectCode, glossaryEntry, LIMITS } from "./protocol.js";
+import { bodyText, dialectCode, glossaryEntry, LIMITS } from "./protocol.js";
 
 // ---------------------------------------------------------------------------
 // Preferences
@@ -48,10 +48,12 @@ export type Preferences = z.infer<typeof preferences>;
  * empty term because a room glossary is transient; a stored one would be merged into every room
  * this person ever opens, so a blank entry is refused at the door instead.
  */
-export const storedGlossaryEntry = glossaryEntry.refine(
-  (entry) => entry.source.length > 0 && entry.target.length > 0,
-  { message: "a glossary term and its translation must both have text" },
-);
+const MUST_HAVE_TEXT = { message: "a glossary term and its translation must both have text" };
+export const storedGlossaryEntry = glossaryEntry.extend({
+  // Fields rather than a refine over the entry, so the exported schema says minLength 1.
+  source: bodyText(LIMITS.glossaryTerm, MUST_HAVE_TEXT),
+  target: bodyText(LIMITS.glossaryTranslation, MUST_HAVE_TEXT),
+});
 
 /** The whole stored glossary. PUT replaces it; an empty list clears it. */
 export const glossaryDocument = z.object({

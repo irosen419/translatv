@@ -22,8 +22,8 @@ npm install
 npm run check
 ```
 
-`npm run check` runs the dash check, the copy parity check, the typecheck, and every
-test. It spends nothing and touches no network. **If it passes, the machine is set up
+`npm run check` runs the dash check, the copy parity check, the wire contract check, the spend
+view check, the typecheck, and every test. It spends nothing and touches no network. **If it passes, the machine is set up
 correctly** and anything that goes wrong after this is the app, not the install.
 
 ## Running it

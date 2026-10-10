@@ -535,8 +535,8 @@ this file, and it is about an hour of work. It has not been built; the owner can
 - [ ] **Corrections.** Save them to the account and screen them after each call. Remove
       transcript downloads and "Load corrections from a past chat". The brief is part B of
       [`HANDOFF-NEXT-PRS.md`](HANDOFF-NEXT-PRS.md); its decisions were made 2026-10-09.
-- [ ] **Fix `npm run verify`'s "Reason: undefined"** when its first call fails. It is one line
-      (`smoke.reason`), found in #3's review.
+- [x] **Fix `npm run verify`'s "Reason: undefined"** (#5). Every failure it prints now names its
+      code, its status, and whether a retry can help.
 - [x] **Put the `/review-loop` skill on main** (done 2026-09-30). A session started from main
       can run it.
 - [ ] **Pick a translation model before Haiku 4.5 can retire** (not before October 15, 2026). The

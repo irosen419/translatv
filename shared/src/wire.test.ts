@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 
+import { HTTP_FIXTURES, HTTP_SCHEMAS } from "./http.js";
 import { clientMessage, PROTOCOL_VERSION, serverMessage } from "./protocol.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "wire", "fixtures");
@@ -62,4 +63,33 @@ describe.each(SIDES)("%s fixtures", (side, union) => {
     // an unknown key in it is almost always a typo that the schema silently dropped.
     expect(parsed.success && parsed.data).toEqual(fixture);
   });
+});
+
+// The account API's fixtures: one per request body or query and one per response body, named
+// <route id>.<request|response>.json, plus the error body. HTTP_FIXTURES derives the list from
+// HTTP_ROUTES, so a route added without fixtures fails here.
+describe("http fixtures", () => {
+  const onDisk = readdirSync(join(FIXTURES, "http"))
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => name.slice(0, -".json".length))
+    .sort();
+
+  it("exist for every route's request and response, and for nothing else", () => {
+    expect(onDisk).toEqual(HTTP_FIXTURES.map((fixture) => fixture.name).sort());
+  });
+
+  it("are listed in index.json exactly as they are on disk", () => {
+    const index = JSON.parse(readFileSync(join(FIXTURES, "index.json"), "utf8")) as Record<string, string[]>;
+    expect([...(index["http"] ?? [])].sort()).toEqual(onDisk);
+  });
+
+  it.each(HTTP_FIXTURES.map((fixture) => [fixture.name, fixture.schema] as const))(
+    "%s parses with %s, and is already canonical",
+    (name, schema) => {
+      const fixture = JSON.parse(readFileSync(join(FIXTURES, "http", `${name}.json`), "utf8")) as unknown;
+      const parsed = HTTP_SCHEMAS[schema].safeParse(fixture);
+      expect(parsed.success, parsed.success ? "" : JSON.stringify(parsed.error.issues)).toBe(true);
+      expect(parsed.success && parsed.data).toEqual(fixture);
+    },
+  );
 });

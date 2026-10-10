@@ -1,15 +1,8 @@
 {
-  "t": "glossary.updated",
   "entries": [
     {
       "source": "laburo",
-      "target": "job",
-      "sourceDialect": "es-AR",
-      "targetDialect": "en-US"
-    },
-    {
-      "source": "mate",
-      "target": "mate (the Argentine herbal tea)",
+      "target": "work (Argentine slang)",
       "sourceDialect": "es-AR",
       "targetDialect": "en-US"
     },

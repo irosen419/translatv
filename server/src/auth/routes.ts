@@ -9,7 +9,7 @@
 // token key by contract (log.ts), but the stronger rule is that nothing here hands it one.
 
 import express, { type NextFunction, type Request, type Response, type Router } from "express";
-import type { AuthErrorCode } from "@translatv/shared";
+import type { ApiError, AuthErrorCode } from "@translatv/shared";
 
 import type { AccountService } from "../account/service.js";
 import type { Config } from "../config.js";
@@ -223,7 +223,7 @@ export function createAuthRouter(config: Config, auth: AuthService, account?: Ac
   // Unknown paths under /api answer a code rather than falling through to the SPA's index.html,
   // which would hand a JSON client an HTML page with a 200.
   router.use((_req, res) => {
-    res.status(404).json({ error: "NOT_FOUND" });
+    res.status(404).json({ error: "NOT_FOUND" } satisfies ApiError);
   });
 
   // Body parse failures (malformed JSON, too large) arrive here from express.json. Answered as a
@@ -231,7 +231,7 @@ export function createAuthRouter(config: Config, auth: AuthService, account?: Ac
   router.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     const status = (error as { status?: unknown }).status;
     if (status === 413) {
-      res.status(413).json({ error: "INVALID_INPUT" });
+      res.status(413).json({ error: "INVALID_INPUT" } satisfies ApiError);
       return;
     }
     if (status === 400) {
@@ -239,7 +239,7 @@ export function createAuthRouter(config: Config, auth: AuthService, account?: Ac
       return;
     }
     log.error("auth.handler_failed", { error: error instanceof Error ? error.message : "unknown" });
-    res.status(500).json({ error: "INTERNAL" });
+    res.status(500).json({ error: "INTERNAL" } satisfies ApiError);
   });
 
   return router;

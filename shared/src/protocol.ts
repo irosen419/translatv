@@ -66,11 +66,38 @@ export const LIMITS = {
   maxPayloadBytes: 8192,
 } as const;
 
-export const dialectCode = z.string().refine((v) => DIALECT_CODES.includes(v), {
-  message: "unknown dialect",
+/**
+ * A dialect code, as an enum so the exported schema lists the codes (shared/wire/schema.json), which
+ * a refine over a string could not say. The inferred type stays `string`, because DIALECT_CODES is
+ * derived from the catalog at runtime, and the refusal keeps the message it always had.
+ */
+export const dialectCode = z.enum(DIALECT_CODES as [string, ...string[]], {
+  // Only the enum refusal is renamed; a missing or non string value keeps zod's own message.
+  errorMap: (issue, ctx) => ({
+    message: issue.code === "invalid_enum_value" ? "unknown dialect" : ctx.defaultError,
+  }),
 });
 
 export const roomCode = z.string().regex(ROOM_CODE_PATTERN, "malformed room code");
+
+/**
+ * How every limited text field is measured, for whoever reads the exported schema.
+ *
+ * The limit is checked AFTER cleaning, in UTF-16 code units (JavaScript's `.length`). The limit
+ * is written as a pipe into `.max` rather than a refine so the generator can see it and export
+ * `maxLength`, but JSON Schema's maxLength counts code points of the raw value, which differs at
+ * the edges in both directions: an emoji counts once there and twice here, and whitespace the
+ * cleaning trims counts there and not here.
+ */
+const measured = (max: number, min: number, cleaning: string) =>
+  `${min > 0 ? `At least ${min} and at` : "At"} most ${max} UTF-16 code units once cleaned ` +
+  `(${cleaning}). ${min > 0 ? "minLength and maxLength count" : "maxLength counts"} code points of ` +
+  `the raw string, so ${min > 0 ? "they are" : "it is"} a guide, not the rule: a client that keeps ` +
+  "the cleaned text within " +
+  `${min > 0 ? `${min} to ` : ""}${max} UTF-16 units is always accepted.`;
+
+const USERNAME_CLEANING = "control and format characters removed, whitespace collapsed, ends trimmed";
+const BODY_CLEANING = "control characters, line breaks included, replaced by spaces, ends trimmed";
 
 /**
  * Usernames: trimmed, length capped, and stripped of control and format characters.
@@ -83,19 +110,32 @@ export const roomCode = z.string().regex(ROOM_CODE_PATTERN, "malformed room code
 export const username = z
   .string()
   .transform((v) => v.replace(/[\p{Cc}\p{Cf}]/gu, "").replace(/\s+/g, " ").trim())
-  .refine((v) => v.length >= 1 && v.length <= LIMITS.username, {
-    message: `username must be 1 to ${LIMITS.username} characters`,
-  });
+  .pipe(
+    z
+      .string()
+      .min(1, { message: `username must be 1 to ${LIMITS.username} characters` })
+      .max(LIMITS.username, { message: `username must be 1 to ${LIMITS.username} characters` }),
+  )
+  .describe(measured(LIMITS.username, 1, USERNAME_CLEANING));
 
-const bodyText = (max: number) =>
-  z
+/**
+ * Body text: control characters become spaces, the ends are trimmed, and THEN the limit applies.
+ * Line breaks are control characters, so each \r and \n becomes a space (a CRLF becomes two), and
+ * the CRLF replace below never matches; it is kept as it was on main, since this text is only
+ * DESCRIBED by the contract export, not changed by it. `nonEmpty` adds a refusal of text that is
+ * empty once cleaned, with its own message.
+ */
+export const bodyText = (max: number, nonEmpty?: { message: string }) => {
+  const limited = z.string().max(max, { message: `text must be at most ${max} characters` });
+  return z
     .string()
     .transform((v) => v.replace(/[\p{Cc}]/gu, " ").replace(/\r\n/g, "\n").trim())
-    .refine((v) => v.length <= max, { message: `text must be at most ${max} characters` });
+    .pipe(nonEmpty ? limited.min(1, nonEmpty) : limited)
+    .describe(measured(max, nonEmpty ? 1 : 0, BODY_CLEANING));
+};
 
-/** bodyText that must still have text in it once cleaned. */
-const nonEmpty = (text: ReturnType<typeof bodyText>) =>
-  text.refine((v) => v.length > 0, { message: "text must not be empty" });
+/** The refusal of a text that is empty once cleaned. A `.min(1)` in the pipe, so the export says it. */
+const NOT_EMPTY = { message: "text must not be empty" };
 
 export const glossaryEntry = z.object({
   source: bodyText(LIMITS.glossaryTerm),
@@ -104,6 +144,25 @@ export const glossaryEntry = z.object({
   targetDialect: dialectCode,
 });
 export type GlossaryEntry = z.infer<typeof glossaryEntry>;
+
+/**
+ * A glossary entry as the SERVER sends it, on glossary.updated and in the room.joined snapshot.
+ *
+ * Until corrections became term level (decision C1), RoomSession.correct made an entry whose
+ * source was the corrected line's whole text, up to LIMITS.transcript, so this published that
+ * longer limit. Now every source the server keeps is a term: a correction's phrase is held to
+ * LIMITS.glossaryTerm (and a line too long to be one is refused), and every other path into a room
+ * glossary already was. So the server's limits are the client's again.
+ *
+ * Plain strings with no cleaning transform: the server's output is already clean, and a schema
+ * for what is SENT has nothing to clean.
+ */
+export const serverGlossaryEntry = z.object({
+  source: z.string().max(LIMITS.glossaryTerm),
+  target: z.string().max(LIMITS.glossaryTranslation),
+  sourceDialect: dialectCode,
+  targetDialect: dialectCode,
+});
 
 // ---------------------------------------------------------------------------
 // Client to server
@@ -180,8 +239,8 @@ export const clientMessage = z.discriminatedUnion("t", [
   z.object({
     t: z.literal("glossary.correct"),
     lineId: z.string().min(1).max(64),
-    source: nonEmpty(bodyText(LIMITS.glossaryTerm)).optional(),
-    correctedTranslation: nonEmpty(bodyText(LIMITS.glossaryTranslation)),
+    source: bodyText(LIMITS.glossaryTerm, NOT_EMPTY).optional(),
+    correctedTranslation: bodyText(LIMITS.glossaryTranslation, NOT_EMPTY),
   }),
   z.object({
     t: z.literal("glossary.import"),
@@ -318,7 +377,7 @@ const connectionState = z.enum(["connected", "reconnecting"]);
 export const member = z.object({
   id: z.string(),
   username: z.string(),
-  dialect: z.string(),
+  dialect: dialectCode,
   connection: connectionState,
   /** Their microphone is live. A muted person is not transcribed either. */
   micEnabled: z.boolean(),
@@ -344,7 +403,7 @@ export type Member = z.infer<typeof member>;
 export const transcriptLine = z.object({
   lineId: z.string(),
   from: z.string(),
-  srcDialect: z.string(),
+  srcDialect: dialectCode,
   text: z.string(),
   source: z.enum(["speech", "chat"]),
   ts: z.string(),
@@ -451,7 +510,7 @@ export const serverMessage = z.discriminatedUnion("t", [
     polite: z.boolean(),
     config: roomConfig,
     iceServers: z.array(rtcIceServerConfig),
-    snapshot: z.object({ lines: z.array(renderedLine), glossary: z.array(glossaryEntry) }),
+    snapshot: z.object({ lines: z.array(renderedLine), glossary: z.array(serverGlossaryEntry) }),
   }),
   z.object({ t: z.literal("peer.joined"), peer: member }),
   z.object({
@@ -463,7 +522,7 @@ export const serverMessage = z.discriminatedUnion("t", [
     t: z.literal("peer.updated"),
     peerId: z.string(),
     username: z.string().optional(),
-    dialect: z.string().optional(),
+    dialect: dialectCode.optional(),
     micEnabled: z.boolean().optional(),
     cameraEnabled: z.boolean().optional(),
     wantsTranslation: z.boolean().optional(),
@@ -497,7 +556,7 @@ export const serverMessage = z.discriminatedUnion("t", [
   z.object({
     t: z.literal("translation.result"),
     lineId: z.string(),
-    targetDialect: z.string(),
+    targetDialect: dialectCode,
     text: z.string(),
     /** Bumped when a glossary correction supersedes an earlier translation of the same line. */
     revision: z.number(),
@@ -511,7 +570,7 @@ export const serverMessage = z.discriminatedUnion("t", [
     /** The code the reader's own copy is looked up by. Never prose. */
     reason: translationFailureCode,
   }),
-  z.object({ t: z.literal("glossary.updated"), entries: z.array(glossaryEntry) }),
+  z.object({ t: z.literal("glossary.updated"), entries: z.array(serverGlossaryEntry) }),
   // `detail` is DIAGNOSTIC, for a developer reading a console or a log, and is never rendered:
   // the sentence a user reads comes from `code`. It is named detail rather than message so that
   // putting it on screen out of habit reads as the mistake it is. MALFORMED is why it survives
