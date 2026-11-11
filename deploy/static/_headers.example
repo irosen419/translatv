@@ -1,0 +1,25 @@
+# Response headers for the web client as a static site (Cloudflare Pages `_headers` format; Netlify
+# reads the same format). An EXAMPLE, named so that no host picks it up by itself: copy it to
+# client/dist/_headers after `npm run build:static` (DEPLOY.md, "Two services"), and replace every
+# api.example.com below with your API's hostname. Nothing else needs to change.
+#
+# The Content-Security-Policy is the one the server sends when it serves the client itself
+# (server/src/http.ts), with connect-src narrowed from any ws: or wss: to the API origin: the page
+# may only talk to itself and to that one server, over https for the account API and wss for the
+# socket. script-src stays 'self' with no 'unsafe-inline', which is what stands between an XSS bug
+# and the refresh token in localStorage (client/src/lib/session.ts).
+#
+# script/e2e_split.mjs serves the split build with THESE headers, the API hostname swapped for the
+# test server's, so a CSP that blocked the app would fail the end to end run.
+
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.example.com wss://api.example.com; media-src 'self' blob:; img-src 'self' blob: data:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: microphone=(self), camera=(self), geolocation=(), payment=(), usb=()
+
+/index.html
+  Cache-Control: no-cache
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

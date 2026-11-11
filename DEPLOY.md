@@ -1,7 +1,11 @@
 # Deploying
 
 One image, one process. The server serves the built client and handles the WebSocket, so there is
-no second service to wire up.
+no second service to wire up. This is the default, and everything in sections 1 to 7 assumes it.
+
+Section 8 describes the other shape: the web client as a static site on its own hostname, and this
+server as the API only. Nothing about the default changes unless you set the two variables it
+names.
 
 ```bash
 docker compose up --build
@@ -104,6 +108,11 @@ ORIGIN=https://chat.example.com
 ```
 
 Getting this wrong produces a 403 on the upgrade and a client that never connects.
+
+The same list decides CORS for `/api` and `/healthz`: a page on a listed origin may read the
+account API's answers, and a page on any other origin may not. That only matters when the client
+is served from somewhere else (section 8); served by this server, the page is same origin and
+CORS never comes up.
 
 ## 4. Without TURN, roughly 10 to 15 percent of calls have no media
 
@@ -411,6 +420,112 @@ curl https://chat.example.com/healthz
 Then open the page in a browser. `getUserMedia` requires HTTPS, which the tunnel provides, so a
 camera prompt appearing at all confirms the TLS path end to end.
 
+## 8. Two services: a static site and the API
+
+The web client can be built once as plain files and served by any static host (Cloudflare Pages,
+nginx, a Render static site), on its own hostname, talking to this server on another. The server
+then serves only the account API, `/healthz` and the WebSocket. The example host configs are in
+`deploy/static/`; nothing there is picked up by any host on its own, and this repository has no
+`render.yaml` or other auto deploy file.
+
+**This repository deploys nothing.** The steps below are for the owner to run, by hand, when
+ready.
+
+### The build
+
+```bash
+npm ci
+VITE_API_ORIGIN=https://api.example.com npm run build:static
+cp deploy/static/_headers.example client/dist/_headers      # then edit the hostname in it
+cp deploy/static/_redirects.example client/dist/_redirects
+```
+
+`VITE_API_ORIGIN` is the API's origin: scheme and host, a port if it is not the default, and
+nothing else. It is public (every visitor's browser connects to it) and Vite inlines it into the
+bundle; it is never a secret, and no secret ever goes behind a `VITE_` prefix. A value with a path,
+query, fragment or credentials stops the build, and the browser refuses it again at load.
+`build:static` refuses an empty value (that is the one image build, `npm run build`), and runs
+`check:secrets` on what it built. Upload `client/dist`.
+
+One build serves every hostname that points at the same API, so the build you test on a preview
+hostname is the build you promote.
+
+### The static side
+
+| Setting | Value |
+|---|---|
+| Build | `VITE_API_ORIGIN=https://api.example.com npm run build:static` (Node 22.16 or newer) |
+| Publish directory | `client/dist` |
+| SPA fallback | Every path that is not a file answers `/index.html` with a 200, or a room link (`/r/<code>`) opened as a first navigation is a 404. `_redirects.example`, or `try_files $uri /index.html` in `nginx.conf.example`. A missing `/assets/*` file should stay a 404. |
+| Headers | `_headers.example` (or the nginx example). The CSP below, nosniff, `Referrer-Policy: no-referrer`, the camera and microphone `Permissions-Policy`, `no-cache` on `index.html`, a year on `/assets/*`. |
+
+The Content-Security-Policy, with `api.example.com` replaced:
+
+```
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.example.com wss://api.example.com; media-src 'self' blob:; img-src 'self' blob: data:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'none'
+```
+
+It is the one the server sends when it serves the client itself, with `connect-src` narrowed to the
+one API: `https://` for the account API and `wss://` for the socket, both required. There is no
+`'unsafe-inline'` for scripts, which is what stands between an XSS bug and the refresh token in
+`localStorage`. The end to end run serves its split build behind exactly this file.
+
+The static host needs HTTPS for the same reason as section 1.
+
+### The API side
+
+The same image as always, with:
+
+| Variable | Value |
+|---|---|
+| `SERVE_CLIENT` | `0`. API only: every path that is not `/api`, `/healthz` or the socket answers 404 JSON. |
+| `ORIGIN` | The static site's origin, for example `https://chat.example.com`. Add a preview origin while testing; list every origin a browser loads the client from. |
+| `NODE_ENV` | `production` (the image sets it), so only `ORIGIN` counts. |
+| `AUTH_SECRET`, `DATA_DIR` on a mounted volume, the ledger on a mounted volume | Exactly as sections 5 and 6. |
+| `TRUST_PROXY`, TURN, the spend caps | Exactly as before. |
+
+Sections 2 and 7 now apply to the API hostname: its proxy or tunnel must forward the WebSocket
+upgrade on `/ws`. CORS is answered by the server itself (no proxy configuration): exactly the
+origins in `ORIGIN`, never a wildcard, no credentials, preflights cached for ten minutes and never
+counted against the sign in rate limit.
+
+Nothing about credentials depends on being same origin. The access token is an `Authorization`
+header on requests and the `bearer.` subprotocol on the socket, never a URL; the refresh token is a
+JSON body field kept in the static site's `localStorage`. There are no cookies to configure.
+
+Check it from a shell:
+
+```bash
+curl -s https://api.example.com/healthz
+curl -si -X OPTIONS https://api.example.com/api/auth/login \
+  -H 'Origin: https://chat.example.com' -H 'Access-Control-Request-Method: POST' | grep -i '^access-control'
+curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/   # 404: the API serves no page
+```
+
+### Cutover from the existing hosted site
+
+The hosted site today is the old video-translation deployment: one server serving its page and
+its own backend on the public hostname. The plan replaces its backend with this server and makes
+the public hostname a static site. Hostnames below are placeholders.
+
+1. **Stand the API up on its own hostname.** Deploy this image at `api.example.com` with
+   `SERVE_CLIENT=0`, `NODE_ENV=production`, a generated `AUTH_SECRET`, `DATA_DIR` and `out/` on
+   mounted volumes, `OWNER_EMAIL`, and `ORIGIN=https://preview.example.com`. Mint the first invite
+   with `node server/dist/cli/invite.js` and create the owner account. The old site is untouched.
+2. **Point a build at it on a preview hostname.** `VITE_API_ORIGIN=https://api.example.com npm run
+   build:static`, the two example files copied in with the hostname filled in, published at
+   `preview.example.com`.
+3. **Test there.** Sign up and sign in, a call between two devices on different networks (a phone
+   on cellular), a room link opened cold, captions both ways, sign out. Watch the API's log for
+   `ws.origin_refused` and the browser console for CSP reports; there should be none.
+4. **Switch the public hostname.** Add `https://chat.example.com` to `ORIGIN` on the API and
+   restart it, then point `chat.example.com` at the static host with the SAME build. Rooms live in
+   memory, so switch when nobody is in a call. Accounts do not carry over from the old server:
+   everyone signs up again, with an invite, on the new one.
+5. **Retire the old server.** Keep it stopped but recoverable for a while, since pointing the
+   hostname back at it is the rollback. Once nothing needs it, delete it, and remove the preview
+   origin from `ORIGIN`.
+
 ## Environment variables
 
 | Variable | Required | Default | Notes |
@@ -429,6 +544,8 @@ camera prompt appearing at all confirms the TLS path end to end.
 | `ALLOW_EPHEMERAL_LEDGER` | no | off | `1` permits the spend ledger to live on the image layer instead of a mounted volume. See section 5. |
 | `DATA_DIR` | no | `data/` under the repo root | Directory holding the SQLite database `translatv.db`. Relative paths resolve against the repo root. Mount a volume here in production. See section 5. |
 | `ALLOW_EPHEMERAL_DATA` | no | off | `1` permits the database to live on the image layer instead of a mounted volume. See section 5. |
+| `SERVE_CLIENT` | no | on | `0`, `false` or `off` makes the server API only, for a static site on another origin. Anything unknown is refused at boot. See section 8. |
+| `VITE_API_ORIGIN` | **build time**, split deploy only | empty (same origin) | Read by `npm run build:static`, not by the server. The API's public origin, inlined into the client bundle. Never a secret. See section 8. |
 
 ## What running costs
 
