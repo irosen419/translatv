@@ -450,6 +450,23 @@ describe("pricing", () => {
     expect(price?.source).toBeTruthy();
   });
 
+  it("stamps a long prompt row with the rates it was billed at, so its arithmetic checks out", () => {
+    // A Haiku 5.5 call over 100,000 input tokens is billed at the long rate on everything. The row
+    // has to say so: written with the short unit prices, its own arithmetic would contradict its
+    // cost, and both readers would show a unit price nobody was charged.
+    const long = entry({ program: "p", kind: "eval", model: "claude-haiku-5-5", inputTokens: 100_001, outputTokens: 1000 });
+    expect(long).toMatchObject({ unit_cost_in_usd_per_mtok: 0.5, unit_cost_out_usd_per_mtok: 2.5, cost_usd: 0.052501 });
+    const short = entry({ program: "p", kind: "eval", model: "claude-haiku-5-5", inputTokens: 100_000, outputTokens: 1000 });
+    expect(short).toMatchObject({ unit_cost_in_usd_per_mtok: 0.1, unit_cost_out_usd_per_mtok: 0.5, cost_usd: 0.0105 });
+  });
+
+  it("refuses a long prompt cost stated at the short rate", () => {
+    // The under-logging this tier exists to prevent, arriving as an override.
+    expect(() =>
+      entry({ program: "p", kind: "eval", model: "claude-haiku-5-5", inputTokens: 100_001, outputTokens: 1000, costUsdOverride: 0.010501 }),
+    ).toThrow(RangeError);
+  });
+
   it("rounds to six decimals, matching spend_log.py and the dashboard's Ruby reader", () => {
     expect(roundMoney(0.15119999999999997)).toBe(0.1512);
   });

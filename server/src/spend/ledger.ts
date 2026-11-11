@@ -42,7 +42,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { costUsd, MONEY_PRECISION, priceFor, roundMoney } from "./pricing.js";
+import { costUsd, MONEY_PRECISION, ratesFor, roundMoney } from "./pricing.js";
 
 export const LEDGER_FILE = "spend_log.jsonl";
 export const MARKDOWN_FILE = "spend_log.md";
@@ -335,7 +335,9 @@ export function entry(options: EntryOptions): SpendRecord {
     billable = true,
   } = options;
 
-  const price = priceFor(model);
+  // The rates THIS call was billed at: a long prompt is billed at its model's long rate (see
+  // ModelPrice.longPrompt), and a row stamped with the base rate would contradict its own cost.
+  const price = ratesFor(model, inputTokens ?? 0);
   const inRate = price?.inputUsdPerMTok ?? null;
   const outRate = price?.outputUsdPerMTok ?? null;
 
