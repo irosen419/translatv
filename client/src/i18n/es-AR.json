@@ -70,5 +70,6 @@
   "account.invite.lead": "Enviá este código a la persona que invitás. Sirve una sola vez, durante 7 días.",
   "account.invite.failed": "No se pudo crear la invitación. Volvé a intentarlo.",
   "account.delete.password": "Escribí tu contraseña para confirmar",
-  "account.delete.expired": "Tu sesión había expirado. Volvé a intentarlo."
+  "account.delete.expired": "Tu sesión había expirado. Volvé a intentarlo.",
+  "alert.noSubtitles.body": "La otra persona no puede ver tus palabras. Todavía te escucha, y vos seguís leyendo las suyas."
 }

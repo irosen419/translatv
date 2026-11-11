@@ -933,16 +933,76 @@ dialog p.hint.bad { color: var(--warn); margin-bottom: 12px; }
      wrong direction. */
 }
 
-/* Warnings over the video, top left so they clear the self view stack on the right. */
-.alerts {
+/*
+ * The speech failure notice, over the video.
+ *
+ * It sits INSIDE the well, so it takes the well's dark half like everything else drawn there,
+ * and the .notice colours resolve from those rather than from the page. That is why it stays
+ * readable with a light theme selected, where page ink would vanish into the video.
+ *
+ * Sized in ch and capped, not in a fixed px width. The Spanish body runs about a quarter longer
+ * than the English and the Colombian override longer still, and a width tuned to the English
+ * would have wrapped one of them into a wall. max-width keeps it off the self view stack on a
+ * wide screen; the narrow rule below hands it the full width, where there is no room to be
+ * clever.
+ */
+.well-alerts {
   position: absolute;
   top: 12px;
   left: 12px;
   right: 130px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.stt-alert {
+  max-width: 52ch;
+  margin-bottom: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  backdrop-filter: blur(6px);
+}
+/* Capped and scrollable rather than allowed to grow without limit. The permission instructions
+   are a full paragraph, and on a 320 wide phone the untruncated notice measured 341px of a
+   640px screen: more than half the call, to say the subtitles are off. The cap keeps the
+   headline and the consequence always visible and lets the fix scroll. */
+.stt-alert-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  max-height: 34vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* The headline carries the weight; the body is the same size because it is the part that
+   actually has to be read, and shrinking it is how a consequence turns into fine print. */
+.stt-alert strong { font-size: 14px; }
+/* The adapter's instructions, quieter than the consequence above them: they matter once you
+   have decided to fix it, not while you are working out whether you care. */
+.stt-alert-fix { opacity: 0.82; }
+.stt-alert .icon-button {
+  flex: 0 0 auto;
+  color: inherit;
+  font-size: 17px;
+  line-height: 1;
+  padding: 2px 7px;
+}
+
+@media (max-width: 860px) {
+  /* No self view stack to dodge at this width, and nothing to gain from a narrower column. */
+  .well-alerts { right: 12px; }
+  .stt-alert { max-width: none; align-self: stretch; }
+}
+
+/* The chip strip, inside the stack above, which is what clears the self view on the right. */
+.alerts {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  z-index: 3;
 }
 
 /* The invitation, shown only while you are alone and the video area has nothing else to do. */

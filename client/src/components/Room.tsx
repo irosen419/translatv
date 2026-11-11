@@ -10,7 +10,7 @@ import { SelectShell } from "./SelectShell.jsx";
 import { ThemePickerView } from "./ThemePicker.jsx";
 import { roomLink } from "../lib/code.js";
 import { NARROW_QUERY, useMediaQuery } from "../lib/useMediaQuery.js";
-import { buildChips, isProblem, type Chip } from "../lib/chips.js";
+import { buildChips, isProblem, sttAlert, type Chip, type SttAlert } from "../lib/chips.js";
 import { useCopy } from "../i18n/useCopy.js";
 import { useTheme, useVideoWellStyle } from "../theme/useTheme.js";
 import type { ThemeChoice } from "../theme/theme.js";
@@ -141,6 +141,44 @@ const SELF_CONTROL_ICONS: Record<
   mic: { live: "mic", stopped: "mic-off" },
   camera: { live: "camera", stopped: "camera-off" },
 };
+
+/**
+ * The speech failure notice, as a plain function so the node suite can call it.
+ *
+ * Hook free on purpose, the same way SelfControlButton is: the decision of WHETHER to show this
+ * lives in lib/chips.ts and is tested there, and what it renders is tested by calling this.
+ * What neither can see is a browser painting it, which is why the sizing was measured rather
+ * than reasoned about.
+ */
+export interface SttAlertNoticeProps {
+  alert: SttAlert;
+  copy: Copy;
+  onDismiss(): void;
+}
+
+export function SttAlertNotice({ alert, copy, onDismiss }: SttAlertNoticeProps): ReactElement {
+  return (
+    <div className="notice bad stt-alert" role="alert">
+      <div className="stt-alert-text">
+        <strong>{copy.t(alert.title)}</strong>
+        <span>{copy.t(alert.body)}</span>
+        {/* The adapter's own instructions. Rendered as a copy REF, so the fix for a denied
+            permission arrives in the reader's language without this component knowing which
+            failure it is looking at. */}
+        <span className="stt-alert-fix">{copy.ref(alert.notice)}</span>
+      </div>
+      <button
+        type="button"
+        className="icon-button"
+        onClick={onDismiss}
+        aria-label={copy.t("alert.dismiss")}
+        title={copy.t("alert.dismiss")}
+      >
+        &times;
+      </button>
+    </div>
+  );
+}
 
 export interface SelfControlButtonProps {
   device: SelfControlDevice;
@@ -380,6 +418,7 @@ export function Room(props: Props) {
   // would light both up at once and leave you unsure which thing is on the clipboard.
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const [dismissedAlert, setDismissedAlert] = useState<string | null>(null);
   const copy = useCopy();
   const wellStyle = useVideoWellStyle();
   // Read here rather than inside the picker, so the whole drawer stays a hook free view that
@@ -454,6 +493,17 @@ export function Room(props: Props) {
   // the drawer with the rest of the header. A wide screen has a top bar and shows the lot.
   const floatingChips = narrow ? chips.filter(isProblem) : [];
   const drawerChips = narrow ? chips.filter((chip) => !isProblem(chip)) : [];
+
+  /**
+   * The one failure that needs a sentence rather than a chip.
+   *
+   * Dismissible, and dismissed per FAILURE rather than once for the session: the key is the
+   * status kind, so a later, different failure speaks up again instead of inheriting a dismissal
+   * of the first. Closing it is meant to say "I have read this", not "never tell me again".
+   */
+  const alert = sttAlert({ sttStatus });
+  const alertKey = alert ? sttStatus.kind : null;
+  const showAlert = alert !== null && dismissedAlert !== alertKey;
 
   // Clipboard can be blocked. The code is on screen either way, so these are conveniences and
   // never the only path to sharing a room.
@@ -573,12 +623,30 @@ export function Room(props: Props) {
             </div>
           )}
 
+          {/* The speech failure, spelled out, over the video where the call is.
+              
+              Not a tooltip. The previous version of this put the whole explanation in a `title`
+              on a two word pill, which a phone never shows, so somebody spoke an entire call
+              believing they were being subtitled. role="alert" so a screen reader is told too,
+              rather than this being one more thing only a sighted user learns. */}
+          {/* One stack, because both of these are pinned to the top left of the well and two
+              absolutely positioned boxes at the same coordinates sit ON each other. The alert's
+              height depends on how long the translation runs, so no fixed offset on the chips
+              could have been right; a flex column just asks the layout. */}
+          {(showAlert || floatingChips.length > 0) && (
+          <div className="well-alerts">
+          {showAlert && alert && (
+            <SttAlertNotice alert={alert} copy={copy} onDismiss={() => setDismissedAlert(alertKey)} />
+          )}
+
           {/* Problems only, and only on a narrow screen. A warning you cannot see until you open
               settings is a warning that arrives after you have already given up on the call. */}
           {floatingChips.length > 0 && (
             <div className="alerts">
               <Chips chips={floatingChips} />
             </div>
+          )}
+          </div>
           )}
 
           <div className="self-stack">

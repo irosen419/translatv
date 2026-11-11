@@ -84,5 +84,7 @@
   "account.delete.title": "Eliminar su cuenta",
   "account.delete.lead": "Esto elimina su cuenta, su idioma guardado, sus correcciones guardadas y su historial de llamadas. No se puede deshacer. Las personas con quienes habló conservan su propio registro de cada llamada, sin su nombre.",
   "account.delete.password": "Escriba su contraseña para confirmar",
-  "account.delete.expired": "Su sesión había expirado. Vuelva a intentarlo."
+  "account.delete.expired": "Su sesión había expirado. Vuelva a intentarlo.",
+  "alert.noSubtitles.title": "Su dispositivo no está transcribiendo",
+  "alert.noSubtitles.body": "La otra persona no puede ver sus palabras. Todavía lo escucha, y usted sigue leyendo las suyas."
 }

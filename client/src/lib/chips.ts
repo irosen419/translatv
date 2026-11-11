@@ -48,6 +48,38 @@ export interface ChipState {
   onToggleSttEngine(): void;
 }
 
+/**
+ * The full sentence version of a speech failure, or null when there is nothing to say.
+ *
+ * Separate from the chips because it answers a different question. A chip says WHAT state the
+ * call is in, in two words, in a strip people scan. This says what it MEANS, and it exists
+ * because two words were not enough: a real call ran with the speaker believing they were being
+ * subtitled, while "no subtitles" sat in a pill and the explanation sat in a `title` tooltip
+ * that a phone never shows.
+ *
+ * Only the terminal states. `reconnecting` and `downloading` both resolve on their own, and a
+ * banner that appears on every wobble is one people learn to dismiss without reading, which
+ * costs the real one its audience.
+ */
+export interface SttAlert {
+  /** That it is YOUR device, so it reads as yours to fix rather than as the app being broken. */
+  title: CopyKey;
+  /** What the other person loses, which is the part nobody works out for themselves. */
+  body: CopyKey;
+  /** The adapter's own device specific instructions, passed through rather than restated. */
+  notice: CopyRef;
+}
+
+export function sttAlert(state: Pick<ChipState, "sttStatus">): SttAlert | null {
+  const { sttStatus } = state;
+  if (sttStatus.kind !== "blocked" && sttStatus.kind !== "failed") return null;
+  return {
+    title: "alert.noSubtitles.title",
+    body: "alert.noSubtitles.body",
+    notice: sttStatus.notice,
+  };
+}
+
 /** Is this chip telling the user something is wrong right now? */
 export function isProblem(chip: Chip): boolean {
   return chip.tone === "warn" || chip.tone === "bad";

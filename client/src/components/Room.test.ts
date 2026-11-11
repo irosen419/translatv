@@ -20,6 +20,7 @@ import { THEME_MODES, type ThemeChoice } from "../theme/theme.js";
 import {
   DrawerContents,
   SelfControlButton,
+  SttAlertNotice,
   type DrawerContentsProps,
   type SelfControlButtonProps,
 } from "./Room.js";
@@ -453,5 +454,67 @@ describe("the narrow screen header keeps a row of its own above the bar", () => 
       rowOf(drawer(), "drawer-header"),
       "an empty row still takes a gap and a line of the drawer",
     ).toBeUndefined();
+  });
+});
+
+/**
+ * The speech failure notice.
+ *
+ * Whether it appears is lib/chips.ts's decision and is tested there. This is what it says, and
+ * it exists because the previous version of this was two words in a pill with the explanation
+ * in a `title` tooltip: a real call ran with the speaker believing they were being subtitled,
+ * and a phone never shows a tooltip. So the assertions below are mostly about text being
+ * PRESENT as text rather than hidden in an attribute.
+ */
+describe("SttAlertNotice", () => {
+  const alert = {
+    title: "alert.noSubtitles.title",
+    body: "alert.noSubtitles.body",
+    notice: { key: "stt.permission" },
+  } as const;
+
+  const render = (onDismiss = () => undefined) =>
+    SttAlertNotice({ alert, copy: COPY, onDismiss });
+
+  /** Every string this element renders as visible text, flattened out of the React tree. */
+  function textOf(node: unknown): string {
+    if (node === null || node === undefined || typeof node === "boolean") return "";
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    if (Array.isArray(node)) return node.map(textOf).join(" ");
+    const element = node as ReactElement;
+    return textOf((element.props as { children?: unknown })?.children);
+  }
+
+  it("announces itself, so it is not only a sighted person who is told", () => {
+    expect((render().props as { role?: string }).role).toBe("alert");
+  });
+
+  it("says it is your device and what the other person loses, both as text", () => {
+    const text = textOf(render());
+    expect(text).toContain(COPY.t("alert.noSubtitles.title"));
+    expect(
+      text,
+      "the consequence is the part nobody works out for themselves, so it cannot live in a tooltip",
+    ).toContain(COPY.t("alert.noSubtitles.body"));
+  });
+
+  it("carries the adapter's fix as visible text rather than as a title attribute", () => {
+    // The whole failure this replaces: the instructions existed, in `title`, where a phone
+    // could never show them.
+    expect(textOf(render())).toContain(COPY.ref(alert.notice));
+  });
+
+  it("can be dismissed, and says so to a screen reader as well as to a pointer", () => {
+    let dismissed = 0;
+    const rendered = render(() => {
+      dismissed += 1;
+    });
+    const children = (rendered.props as { children: ReactElement[] }).children;
+    const button = children.find((child) => child?.props?.className === "icon-button");
+    expect(button, "there is no dismiss control").toBeDefined();
+    const props = button?.props as { onClick(): void; "aria-label": string };
+    expect(props["aria-label"]).toBe(COPY.t("alert.dismiss"));
+    props.onClick();
+    expect(dismissed).toBe(1);
   });
 });
