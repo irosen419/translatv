@@ -9,17 +9,42 @@
 // says which failed requests may have been billed (onLost), and the service stays free of any SDK
 // import.
 //
-// Model choices worth stating, because getting them wrong is silent rather than loud:
-//   claude-haiku-4-5   the current alias. Aliases are the recommended form over dated ids.
-//   temperature 0.2    ACCEPTED on Haiku 4.5. Sampling parameters were removed on Opus 4.7 and
-//                      later, and on Sonnet 5 and Fable 5, but not here. Consistency matters
-//                      more than variety for subtitles: the same sentence should not translate
-//                      three different ways.
-//   no effort          output_config.effort ERRORS on Haiku 4.5. Passing it would 400 every
+// Model choices worth stating, because getting them wrong is silent rather than loud. The request
+// is a function of the model (REQUEST_PROFILES), because the models in use disagree about which
+// fields they accept, and a field one accepts is a 400 on another:
+//
+//   claude-haiku-4-5   production's model (DEFAULT_MODEL). Its request is exactly what it always
+//                      was, pinned byte for byte by a test.
+//     temperature 0.2  ACCEPTED on Haiku 4.5. Consistency matters more than variety for
+//                      subtitles: the same sentence should not translate three different ways.
+//     no effort        output_config.effort ERRORS on Haiku 4.5. Passing it would 400 every
 //                      request. Verified against the API reference, not assumed.
-//   no thinking        latency this app cannot afford.
-//   not streaming      output is about 30 tokens and only fires on finalization, so there is
-//                      nothing meaningful to stream.
+//     no thinking      latency this app cannot afford, and off unless asked for on this model.
+//   claude-haiku-5-5   the candidate the blind test (src/eval/blind) measures. Not the default:
+//                      switching is the owner's decision after that test.
+//     no temperature   a non default temperature, top_p or top_k is a 400 on Haiku 5.5, so none
+//                      is sent at all.
+//     thinking off     Haiku 5.5 thinks by default (adaptive, effort medium). Off by default here
+//                      for the same latency reason, as thinking {type: "disabled"}, which it
+//                      accepts at effort low, medium and high. budget_tokens is a 400.
+//     refusals         it can stop with stop_reason "refusal" and has no server side fallback.
+//                      A refusal comes back as no text (with its usage, so it is logged), which
+//                      every caller already treats as a failure, never as a translation.
+//   claude-sonnet-5-5  the blind test's judge only, with a profile its caller passes: no
+//                      temperature, thinking left at its default (disabled is a 400 there),
+//                      effort low, structured output through output_config.format, since forced
+//                      tool_choice is a 400 on it too.
+//
+// Text is read by block type on every model, never as content[0]: a thinking model's answer
+// starts with thinking blocks.
+//
+// The SDK is 0.65.0, whose types predate output_config and adaptive thinking. It is NOT upgraded
+// for them: SDK 1.0.0 and later send anthropic-version 2026-10-21, on which a temperature is a
+// 400 on every model, so the upgrade would break Haiku 4.5's production request. The two fields
+// are typed here (WireParams) and the SDK forwards the body as it is.
+//
+// Not streaming: output is about 30 tokens and only fires on finalization, so there is nothing
+// meaningful to stream.
 //
 // Prompt caching is deliberately NOT attempted. Haiku 4.5's minimum cacheable prefix is 4096
 // tokens and our system prompt plus glossary is about 800, so cache_control would silently do
@@ -41,6 +66,68 @@ import { LlmFailure, MAX_OUTPUT_TOKENS, type LlmClient } from "./TranslationServ
 
 export { MAX_OUTPUT_TOKENS };
 export const TEMPERATURE = 0.2;
+
+export type Effort = "low" | "medium" | "high";
+
+/** How one model is asked: which optional fields its request carries. */
+export interface RequestProfile {
+  /** Sent as temperature, or null to send none, for a model that refuses sampling parameters. */
+  readonly temperature: number | null;
+  /**
+   * omit: no thinking field, the model's own default. disabled: thinking {type: "disabled"}.
+   * adaptive: thinking {type: "adaptive"}. Never a budget: budget_tokens is a 400 on the models
+   * that think adaptively.
+   */
+  readonly thinking: "omit" | "disabled" | "adaptive";
+  /** Sent as output_config.effort, or null to send none (it is a 400 on Haiku 4.5). */
+  readonly effort: Effort | null;
+  readonly maxTokens: number;
+  /** A JSON schema the answer must follow, sent as output_config.format, or null for free text. */
+  readonly jsonSchema: Record<string, unknown> | null;
+}
+
+/**
+ * The request shape for each model this repo calls by default. A model missing here gets no client
+ * at all (createAnthropicClient throws) rather than a guessed request.
+ */
+export const REQUEST_PROFILES: Readonly<Record<string, RequestProfile>> = Object.freeze({
+  "claude-haiku-4-5": Object.freeze({ temperature: TEMPERATURE, thinking: "omit", effort: null, maxTokens: MAX_OUTPUT_TOKENS, jsonSchema: null }),
+  "claude-haiku-5-5": Object.freeze({ temperature: null, thinking: "disabled", effort: null, maxTokens: MAX_OUTPUT_TOKENS, jsonSchema: null }),
+});
+
+export function profileFor(model: string): RequestProfile | null {
+  return REQUEST_PROFILES[model] ?? null;
+}
+
+/**
+ * The request body, as sent. The SDK's own params type (0.65.0) has no output_config and no
+ * adaptive thinking, so this widens it by exactly those two fields and nothing else.
+ */
+type WireParams = Omit<Anthropic.MessageCreateParamsNonStreaming, "thinking"> & {
+  thinking?: Anthropic.ThinkingConfigDisabled | { type: "adaptive" };
+  output_config?: { effort?: Effort; format?: { type: "json_schema"; schema: Record<string, unknown> } };
+};
+
+/**
+ * Build one request. Keys are added in a fixed order and only when the profile asks for them, so
+ * Haiku 4.5's body is byte for byte what it was before profiles existed.
+ */
+export function requestParams(model: string, profile: RequestProfile, system: string, user: string): WireParams {
+  const outputConfig: NonNullable<WireParams["output_config"]> = {
+    ...(profile.effort !== null ? { effort: profile.effort } : {}),
+    ...(profile.jsonSchema !== null ? { format: { type: "json_schema" as const, schema: profile.jsonSchema } } : {}),
+  };
+  return {
+    model,
+    max_tokens: profile.maxTokens,
+    ...(profile.temperature !== null ? { temperature: profile.temperature } : {}),
+    ...(profile.thinking === "disabled" ? { thinking: { type: "disabled" as const } } : {}),
+    ...(profile.thinking === "adaptive" ? { thinking: { type: "adaptive" as const } } : {}),
+    ...(Object.keys(outputConfig).length > 0 ? { output_config: outputConfig } : {}),
+    system,
+    messages: [{ role: "user", content: user }],
+  };
+}
 
 /**
  * Retries after the first request, made here rather than by the SDK.
@@ -196,7 +283,7 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
  * versus retriable: a 401 is a configuration fact and no number of retries changes it, while a
  * 429 is a moment in time and the next attempt genuinely might succeed.
  */
-function classify(error: unknown): LlmFailure {
+function classify(error: unknown, model: string): LlmFailure {
   if (error instanceof AuthenticationError) {
     return new LlmFailure(
       "terminal",
@@ -216,7 +303,7 @@ function classify(error: unknown): LlmFailure {
     return new LlmFailure(
       "terminal",
       "not_found",
-      `the model ${DEFAULT_MODEL} was not found. It may have been renamed or retired.`,
+      `the model ${model} was not found. It may have been renamed or retired.`,
     );
   }
   if (error instanceof BadRequestError) {
@@ -248,7 +335,22 @@ function classify(error: unknown): LlmFailure {
  * @param options.baseURL Where requests go, so the tests can point the real fetch at a loopback
  *   server that fails the way a network does. Unset in production: the SDK's default.
  */
-export function createAnthropicClient(apiKey: string, options: { fetch?: typeof fetch; baseURL?: string } = {}): LlmClient {
+export function createAnthropicClient(
+  apiKey: string,
+  options: {
+    fetch?: typeof fetch;
+    baseURL?: string;
+    /** The model every request names. DEFAULT_MODEL unless a caller (the blind test) asks for another. */
+    model?: string;
+    /** How that model is asked. Its REQUEST_PROFILES entry unless given. */
+    profile?: RequestProfile;
+  } = {},
+): LlmClient {
+  const model = options.model ?? DEFAULT_MODEL;
+  const profile = options.profile ?? profileFor(model);
+  if (profile === null) {
+    throw new Error(`no request profile for ${model}: add one to REQUEST_PROFILES, or pass one, rather than guess its request`);
+  }
   const send = options.fetch ?? globalThis.fetch;
   const anthropic = new Anthropic({
     apiKey,
@@ -266,14 +368,10 @@ export function createAnthropicClient(apiKey: string, options: { fetch?: typeof 
       for (let attempt = 0; ; attempt += 1) {
         if (signal.aborted) throw signal.reason ?? new Error("aborted");
         try {
+          // The one widening cast: WireParams is the SDK's type plus output_config and adaptive
+          // thinking, which this SDK forwards in the body untouched (see the header).
           response = await anthropic.messages.create(
-            {
-              model: DEFAULT_MODEL,
-              max_tokens: MAX_OUTPUT_TOKENS,
-              temperature: TEMPERATURE,
-              system,
-              messages: [{ role: "user", content: user }],
-            },
+            requestParams(model, profile, system, user) as Anthropic.MessageCreateParamsNonStreaming,
             { signal },
           );
           break;
@@ -291,7 +389,7 @@ export function createAnthropicClient(apiKey: string, options: { fetch?: typeof 
           // Reported, and so logged, before any retry goes out: every row is appended before the
           // next call is issued (CLAUDE.md).
           if (maybeBilled(error)) onLost();
-          const failure = classify(error);
+          const failure = classify(error, model);
           // Not only a retriable failure: the SDK retried whatever the server said to
           // (x-should-retry), even a 400.
           const delay = attempt < MAX_RETRIES ? retryDelayMs(error) : null;
@@ -305,14 +403,20 @@ export function createAnthropicClient(apiKey: string, options: { fetch?: typeof 
         }
       }
 
-      const text = response.content
-        .filter((block): block is Anthropic.TextBlock => block.type === "text")
-        .map((block) => block.text)
-        .join("")
-        .trim();
+      // A refusal is billed like any answer, so its usage is returned for the ledger, but its text,
+      // partial or not, is never an answer: no text is what every caller already treats as failed.
+      const refused = response.stop_reason === "refusal";
+      const text = refused
+        ? ""
+        : response.content
+            .filter((block): block is Anthropic.TextBlock => block.type === "text")
+            .map((block) => block.text)
+            .join("")
+            .trim();
 
       return {
         text,
+        stopReason: response.stop_reason,
         // The API's own usage numbers, which is what makes the ledger's cost_source "logged"
         // rather than an estimate. Never substitute a token count of our own here.
         inputTokens: response.usage.input_tokens,

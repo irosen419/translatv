@@ -133,7 +133,16 @@ export interface LlmClient {
      * the error.
      */
     onLost: () => void;
-  }): Promise<{ text: string; inputTokens: number; outputTokens: number }>;
+  }): Promise<{
+    text: string;
+    inputTokens: number;
+    outputTokens: number;
+    /**
+     * Why the model stopped, as the provider said, when the client knows. Informational: a refusal
+     * already arrives as no text, which is what this service acts on.
+     */
+    stopReason?: string | null;
+  }>;
 }
 
 /** Filled in by execute() for the timing line translate() logs. Null until the provider is called. */
