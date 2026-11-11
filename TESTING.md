@@ -178,6 +178,79 @@ Then restart the server and redo tests 1 and 2 with translation genuinely on. Th
 should climb for the cross language lines and **stay flat** for the same language and translation
 off ones. That is the direct proof rather than the test suite's proof.
 
+## The blind model test: Haiku 4.5 against Haiku 5.5, at most $6
+
+`npm run blind` runs the comparison planned in `docs/HANDOFF.md` section 6, narrowed by the owner
+to three arms on the 625 synthetic lines in `eval/blind/sentences.jsonl`:
+
+| arm | model | how it is asked |
+|-----|-------|-----------------|
+| A | `claude-haiku-4-5` | exactly as production asks it: temperature 0.2, max_tokens 512 |
+| B | `claude-haiku-5-5` | no temperature, thinking disabled, max_tokens 512 |
+| C | `claude-haiku-5-5` | no temperature, adaptive thinking at effort low, max_tokens 8192 |
+
+Every arm gets the production prompt and the earlier lines of its conversation as context, the
+way a room passes them, and no glossary (the set has none). Then a `claude-sonnet-5-5` judge rates
+each line's translations blind: it is never told the models, sees them as 1, 2, 3 in a seeded
+random order with identical ones shown once, and returns a 0 to 100 score, right dialect yes or
+no, and error tags, as structured output.
+
+**Do it in this order:**
+
+```bash
+npm run blind -- --dry-run --limit 10   # free: fake client, temporary ledger, no key needed
+npm run blind -- --limit 10             # real smoke run, 2 lines per target, a few cents
+npm run blind                           # the full run, capped at $6.00
+```
+
+A smoke run is its own run. The full run starts a new one; to finish a run that stopped, rerun
+with the id it printed, and the same `--limit` if it had one:
+
+```bash
+npm run blind -- --run-id 20261111T210000
+```
+
+**What it costs.** The hard cap is `--budget-usd` (default `6.00`) for the whole run, translations
+and judge together, and `--judge-budget-usd` (default `4.00`) for the judge's share inside it.
+Both are read off the ledger, not counted in memory, so a crash and a resume carry on against the
+same total. Before each call the run's ledger spend, plus the worst case of every call in flight,
+plus this call's worst case must fit, or the run stops cleanly and says so. A call's worst case is
+its prompt's bytes plus framing in and all of its max_tokens out, once for each request it may send
+(the adapter retries once), so the cap is never overshot. Estimated from the prompts' sizes (not
+measured: the smoke run measures it), the translations come to roughly a dollar for the full set
+and the judge to roughly $4, so expect the judge's budget, not the total, to be what may cut a
+full run short: it judges lines interleaved across the five targets, so
+whatever it reaches is a balanced sample, and the report says how many it judged. If every call of
+the full run hit its max_tokens, it would cost about $34.67 ($5.57 for translations, $29.10 for
+the judge); the caps are why that cannot happen. `--no-judge` skips the judge.
+
+Every call is appended to `out/translatv/spend_log.jsonl` under the `blind-test` program, with the
+run's own room hash, before its result is used. A call that may have been billed but never
+answered is logged at its worst case. It refuses to start without `ANTHROPIC_API_KEY` (checked for
+presence, never printed) or with a ledger that is missing or cannot be written.
+
+**What it writes,** in `out/translatv/blind/<run-id>/`, all meant to be committed (the text is
+synthetic):
+
+| file | what it is |
+|------|------------|
+| `run.json` | the settings, the seed, the run's ledger room hash |
+| `outputs.jsonl` | one line per translation as it arrived: item, arm, text, stop reason, latency, tokens, cost. A later line for the same item and arm (a retry) replaces an earlier one |
+| `judge.jsonl` | one line per judged item: which arms each label stood for, the scores, right dialect, error tags |
+| `report.md` | per target, overall and per arm: mean judge score with a paired bootstrap 95 percent interval for B minus A and C minus A, right dialect rate, dialect marker check pass rate, refusals and failures, latency p50 and p90, tokens and cost per call, cost per call hour at 20 translations a minute, spend by program, and the caveats. Every number is computed |
+| `rating_sheet.csv` | the real test: a blind sheet for native speaker raters, one row per line plus one in five again for agreement checking, with empty score, right dialect and notes columns |
+| `key.json` | which arm wrote each candidate on the sheet. Keep it from the raters |
+
+Commit the run directory together with the ledger rows and the regenerated `spend_log.md` (the run
+regenerates it on the way out). The dash check skips `out/translatv/blind/`, because those files
+hold model output verbatim. Exit codes: 0 finished, 3 finished early (budget, or an arm switched
+off by an error retrying cannot fix: the files are written and say so), 1 refused or failed.
+
+The pieces are tested against fake clients in `server/src/eval/blind/` (the dry run end to end
+included), so `npm run check` covers the harness without a key. What no test can cover is the
+live API accepting the new request shapes (see `server/src/translate/anthropic.ts`): the smoke run
+is where that is found out, for a few cents.
+
 ## The browser end to end suite
 
 ```bash

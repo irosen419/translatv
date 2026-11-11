@@ -365,9 +365,10 @@ today (the panel renders only from 860 pixels); the pull request should say whet
 
 Not for an agent to start alone.
 - **Pick a translation model before Haiku 4.5 retires.** It retires no sooner than
-  2026-10-15, with 60 days' notice, and there is no newer Haiku. The blind test in
-  [`HANDOFF.md`](HANDOFF.md) section 6 decides it, costs about $6 in API calls (each logged
-  first), and needs the owner's go ahead. Questions 10 to 12.
+  2026-10-15, with 60 days' notice. Claude Haiku 5.5 (`claude-haiku-5-5`) is the newer Haiku. The
+  blind test in [`HANDOFF.md`](HANDOFF.md) section 6, narrowed by the owner to Haiku 4.5 against
+  Haiku 5.5, is built (`npm run blind`, TESTING.md) and capped at $6 in API calls, each logged
+  first. Switching DEFAULT_MODEL after it is the owner's decision. Questions 10 to 12.
 - **The money model brainstorm** (questions 1 to 9), then reshape #2 (section 4).
 - **A late call's slot** (question 23), the design calls left by #1 (questions 17 to 20), launch
   platforms, people without accounts, and open signup (questions 13, 15 and 16).
