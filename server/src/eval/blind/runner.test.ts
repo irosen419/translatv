@@ -374,7 +374,7 @@ describe("npm run blind", () => {
     expect(report).toContain("DRY RUN");
     expect(report).toContain("B minus A");
     expect(report).toContain("SYNTHETIC");
-    expect(report).not.toMatch(/[–—]/);
+    expect(report).not.toMatch(/[\u2013\u2014]/);
 
     // The sheet: blind (no arm, no model), one row per item plus one in five again, with a key.
     const sheet = readFileSync(join(runDir, "rating_sheet.csv"), "utf8");
