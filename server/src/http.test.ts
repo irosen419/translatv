@@ -32,6 +32,7 @@ function config(overrides: Partial<Config> = {}): Config {
     trustProxy: false,
     dataDir: tmpdir(),
     databasePath: ":memory:",
+    serveClient: true,
     ...overrides,
   };
 }

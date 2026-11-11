@@ -93,6 +93,7 @@ function config(): Config {
     trustProxy: false,
     dataDir: tmpdir(),
     databasePath: ":memory:",
+    serveClient: true,
   };
 }
 

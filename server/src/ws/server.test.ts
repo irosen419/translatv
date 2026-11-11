@@ -51,6 +51,7 @@ function config(): Config {
     trustProxy: false,
     dataDir: root,
     databasePath: ":memory:",
+    serveClient: true,
   };
 }
 
@@ -1640,6 +1641,27 @@ describe("accounts on the socket", () => {
     it("refuses a token signed with some other key", async () => {
       const foreign = mintAccessToken(accessKey("some other secret entirely"), "user-ana", Date.now()).token;
       expect(await outcome(null, { bearer: foreign })).toBe("refused with 401");
+    });
+  });
+
+  describe("the upgrade, from a static site on its own origin (a split deploy)", () => {
+    // The web client served by a static host, this server API only. The page's Origin is the
+    // static host's, not this server's, so the socket is cross origin and passes only because
+    // that origin is listed in ORIGIN. The same rule CORS reads (security/origin.ts).
+    const STATIC_SITE = "https://app.example.com";
+    beforeEach(() => start({ isProduction: true, allowedOrigins: [STATIC_SITE], serveClient: false }));
+
+    it("accepts a browser upgrade from the listed static origin, token as a subprotocol", async () => {
+      const client = await connect(STATIC_SITE, { user: "user-ana", viaSubprotocol: true });
+      expect(client.socket.protocol).toBe("translatv.v1");
+      client.close();
+    });
+
+    it("refuses an unlisted origin, including this server's own dev origin, even with a valid token", async () => {
+      expect(await outcome(ORIGIN, { user: "user-ana", viaSubprotocol: true })).toBe("refused with 403");
+      expect(await outcome("https://app.example.com.evil.example", { user: "user-ana", viaSubprotocol: true })).toBe(
+        "refused with 403",
+      );
     });
   });
 

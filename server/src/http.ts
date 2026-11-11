@@ -2,16 +2,21 @@
 //
 // Small on purpose. Everything real in a call happens over the WebSocket; HTTP exists to deliver
 // the SPA, to answer a load balancer, and to carry the account API under /api (auth/routes.ts).
+//
+// The SPA is optional (SERVE_CLIENT). With it off this is the API half of a split deploy, and the
+// client, served from another origin, reaches /api and /healthz through CORS (security/cors.ts).
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express } from "express";
-import { API_VERSION, PROTOCOL_VERSION, type HealthResponse } from "@translatv/shared";
+import { API_VERSION, PROTOCOL_VERSION, type ApiError, type HealthResponse } from "@translatv/shared";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
 import { createAuthRouter } from "./auth/routes.js";
 import type { AuthService } from "./auth/service.js";
 import type { AccountService } from "./account/service.js";
+import { cors } from "./security/cors.js";
+import { originAllowed } from "./security/origin.js";
 
 /**
  * Content Security Policy.
@@ -70,6 +75,13 @@ export function createApp(
     next();
   });
 
+  // CORS before the routers, so a preflight is answered here and never reaches a limiter, and an
+  // actual request carries the header on every answer, refusals included. The same origin rule
+  // as the socket's Origin check, so the two doors cannot disagree about a static site.
+  const corsForAllowed = cors((origin) => originAllowed(config, origin));
+  app.use("/api", corsForAllowed);
+  app.use("/healthz", corsForAllowed);
+
   // The account API. Absent only in tests that exercise the rest of the surface on its own; the
   // real server always passes one.
   if (auth) app.use("/api", createAuthRouter(config, auth, account));
@@ -100,7 +112,13 @@ export function createApp(
     res.json(body);
   });
 
-  if (existsSync(clientDist)) {
+  if (!config.serveClient) {
+    // API only. Every other path is a JSON 404, not the SPA and not the "not built" page: a
+    // client reaching this host for a page has the wrong URL, and should be told so plainly.
+    app.use((_req, res) => {
+      res.status(404).json({ error: "NOT_FOUND" } satisfies ApiError);
+    });
+  } else if (existsSync(clientDist)) {
     app.use(express.static(clientDist, { index: false }));
     // SPA fallback. /r/<code> must serve the app rather than 404, so a shared room link works
     // as a first navigation rather than only as a client side route.

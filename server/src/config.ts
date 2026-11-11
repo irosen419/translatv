@@ -91,6 +91,16 @@ export interface Config {
   dataDir: string;
   /** The database file inside dataDir. */
   databasePath: string;
+  /**
+   * Whether this server also serves the built web client (SERVE_CLIENT, default on).
+   *
+   * On is the one image deploy: one origin serves the page, the API and the socket. Off is the
+   * API half of a split deploy, where the client is a static site on its own origin (DEPLOY.md,
+   * "Two services") and this server answers 404 JSON for anything that is not /api, /healthz or
+   * the socket. Off does not loosen anything: the static site's origin must still be in ORIGIN,
+   * which is what both CORS and the socket's Origin check read.
+   */
+  serveClient: boolean;
 }
 
 /** The database file's name inside DATA_DIR. */
@@ -166,6 +176,19 @@ export function loadConfig(repoRoot: string): Config {
     iceServers.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
   }
 
+  // Refused rather than defaulted when it is set to something unknown, like SIGNUP_MODE. Either
+  // wrong guess is a confusing deploy: a typo read as "on" serves a stale bundle from the API
+  // host, and one read as "off" takes the one image deploy's whole site down to 404s.
+  const serveRaw = (process.env["SERVE_CLIENT"] ?? "").trim().toLowerCase();
+  let serveClient: boolean;
+  if (serveRaw === "" || serveRaw === "1" || serveRaw === "true" || serveRaw === "on") serveClient = true;
+  else if (serveRaw === "0" || serveRaw === "false" || serveRaw === "off") serveClient = false;
+  else {
+    throw new Error(
+      `SERVE_CLIENT must be on (1, true, on) or off (0, false, off), got ${JSON.stringify(process.env["SERVE_CLIENT"])}.`,
+    );
+  }
+
   // Relative paths resolve against the repo root, not the working directory, so `npm start` from
   // the root and `npm start --workspace=server` agree on which database they open.
   const dataDirRaw = (process.env["DATA_DIR"] ?? "").trim();
@@ -186,6 +209,7 @@ export function loadConfig(repoRoot: string): Config {
     trustProxy: (process.env["TRUST_PROXY"] ?? "").trim() === "1",
     dataDir,
     databasePath: join(dataDir, DATABASE_FILE),
+    serveClient,
   };
 }
 
@@ -194,6 +218,9 @@ export function describeConfig(config: Config): string[] {
   const lines = [
     `listening on port ${config.port}`,
     `allowed origins: ${config.allowedOrigins.join(", ")}`,
+    config.serveClient
+      ? "serving the web client from this server (SERVE_CLIENT on)"
+      : "API only (SERVE_CLIENT off): the web client is served elsewhere, and its origin must be in ORIGIN",
     `ICE servers: ${config.iceServers.length} (${config.iceServers.length > 1 ? "STUN and TURN" : "STUN only"})`,
   ];
 

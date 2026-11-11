@@ -77,6 +77,7 @@ beforeEach(async () => {
     trustProxy: false,
     dataDir: root,
     databasePath: ":memory:",
+    serveClient: true,
   };
   const translation = new TranslationService(stub, new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5 }), root);
   server = createServer(createApp(cfg, join(root, "no-dist"), translation, auth, account));

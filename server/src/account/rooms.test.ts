@@ -52,6 +52,7 @@ function config(): Config {
     trustProxy: false,
     dataDir: root,
     databasePath: ":memory:",
+    serveClient: true,
   };
 }
 

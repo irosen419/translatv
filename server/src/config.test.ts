@@ -212,3 +212,45 @@ describe("accounts configuration", () => {
     expect("adminPassword" in loadConfig(root)).toBe(false);
   });
 });
+
+describe("SERVE_CLIENT", () => {
+  let savedServe: string | undefined;
+  beforeEach(() => {
+    savedServe = process.env["SERVE_CLIENT"];
+    delete process.env["SERVE_CLIENT"];
+  });
+  afterEach(() => {
+    if (savedServe === undefined) delete process.env["SERVE_CLIENT"];
+    else process.env["SERVE_CLIENT"] = savedServe;
+  });
+
+  it("is on by default, so the one image deploy serves the client exactly as before", () => {
+    expect(loadConfig(root).serveClient).toBe(true);
+    process.env["SERVE_CLIENT"] = "  ";
+    expect(loadConfig(root).serveClient).toBe(true);
+  });
+
+  it("turns off with 0, false or off, for an API only server behind a static site", () => {
+    for (const value of ["0", "false", "off", "OFF"]) {
+      process.env["SERVE_CLIENT"] = value;
+      expect(loadConfig(root).serveClient).toBe(false);
+    }
+  });
+
+  it("stays on with 1, true or on", () => {
+    for (const value of ["1", "true", "on"]) {
+      process.env["SERVE_CLIENT"] = value;
+      expect(loadConfig(root).serveClient).toBe(true);
+    }
+  });
+
+  it("refuses a value it does not know rather than guessing which one was meant", () => {
+    process.env["SERVE_CLIENT"] = "nope";
+    expect(thrownMessage()).toContain("SERVE_CLIENT");
+  });
+
+  it("says in the boot report when the server is API only", () => {
+    process.env["SERVE_CLIENT"] = "0";
+    expect(describeConfig(loadConfig(root)).join("\n")).toContain("API only");
+  });
+});
