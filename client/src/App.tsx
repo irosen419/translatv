@@ -15,6 +15,7 @@ import { browserLock, browserStore, SessionManager } from "./lib/session.js";
 import { PreferenceSync } from "./lib/preferences.js";
 import { savedCorrectionsRegistry } from "./lib/savedCorrections.js";
 import { useCopy } from "./i18n/useCopy.js";
+import { useApplyTheme } from "./theme/useTheme.js";
 import type { CopyRef } from "./i18n/copy.js";
 import { WebSpeechAdapter } from "./stt/WebSpeechAdapter.js";
 
@@ -75,6 +76,10 @@ async function createInvite(): Promise<string | null> {
 
 export function App() {
   const store = useStore();
+  // The one owner of the document element's colours. Here rather than in the picker, which is
+  // mounted only while the settings drawer exists: the landing and prejoin screens need the
+  // chosen theme too, and the theme has to be painted before there is anything to pick it with.
+  useApplyTheme();
   // Mirror the session into the store, restore a stored one, and ask the server whether signing
   // up needs an invite. Once, on mount.
   useEffect(() => {

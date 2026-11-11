@@ -1213,6 +1213,180 @@ try {
   await smallContext.close();
 
   // ---------------------------------------------------------------------
+  // The theme, measured in a browser rather than reasoned about in a unit suite.
+  //
+  // This section exists because the unit suite cannot see any of what it checks. The client
+  // tests run headless by deliberate design, so every fact about the theme REACHING the screen
+  // is a wiring fact they are structurally blind to. Review demonstrated that six separate
+  // mutations leave all 499 of them green with typecheck clean, and two of the six leave the
+  // whole feature inert: dropping useApplyTheme paints nothing at all, and handing the picker a
+  // no-op onChoose renders a control that changes nothing. Both shipped a working test suite
+  // over a dead feature.
+  //
+  // The rule is asserted rather than the values. A list of expected hexes would restate the
+  // palette table, would need editing whenever a colour is nudged, and would not have caught
+  // the bug this all comes from, which was the well taking the wrong palette rather than a
+  // wrong value in the right one. What is checked is what a reader would notice: the page
+  // follows the stored theme, the well stays dark whatever the page does, and the words on the
+  // well remain legible against it.
+  section("The theme reaches the screen");
+  {
+    const storedTheme = { paletteId: "jade", mode: "light" };
+    // A LIGHT theme on purpose. The well bug only shows up when the page and the well disagree,
+    // and with a dark page they agree by accident and every one of these assertions passes on
+    // broken code.
+    await ana.evaluate((choice) => {
+      window.localStorage.setItem("translatv.theme", JSON.stringify(choice));
+    }, storedTheme);
+    await ana.reload();
+    if (!(await ana.locator(".room").isVisible())) {
+      await ana.getByLabel("Room code").fill(code);
+      await ana.getByRole("button", { name: "Join chat" }).click();
+      await ana.getByLabel("Your name, just for this chat").fill("Ana");
+      await ana.getByRole("button", { name: /Join and allow microphone/ }).click();
+      await waitFor(async () => ana.locator(".room").isVisible(), "Ana to rejoin under a stored theme");
+    }
+
+    /** What the browser actually resolved, page and well, plus the well's own contrast. */
+    const painted = await ana.evaluate(() => {
+      const value = (style, name) => style.getPropertyValue(name).trim();
+      const luminance = (hex) => {
+        const channel = (pair) => {
+          const v = parseInt(pair, 16) / 255;
+          return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+        };
+        return (
+          0.2126 * channel(hex.slice(1, 3)) +
+          0.7152 * channel(hex.slice(3, 5)) +
+          0.0722 * channel(hex.slice(5, 7))
+        );
+      };
+      const root = getComputedStyle(document.documentElement);
+      const wellNode = document.querySelector(".video-area");
+      const well = wellNode ? getComputedStyle(wellNode) : null;
+      // A real text node on the well, not the well's own tokens. --text being the dark half's
+      // and the text actually BEING that colour are two different facts, and the gap between
+      // them is the original bug: `color` inherits as a computed value, so dropping the one
+      // declaration that re-establishes it on .video-area leaves every token correct and puts
+      // page ink back on the dark well. Reading the resolved `color` measures the glass.
+      const inkNode = document.querySelector(".video-area .invite-code") ?? wellNode;
+      const out = {
+        pageBg: value(root, "--bg"),
+        pageText: value(root, "--text"),
+        wellText: well ? value(well, "--text") : "",
+        wellStage: well ? value(well, "--stage") : "",
+        wellScheme: well ? well.colorScheme : "",
+        paintedInk: inkNode ? getComputedStyle(inkNode).color : "",
+        paintedGround: well ? well.backgroundColor : "",
+      };
+      // rgb(r, g, b) as the browser reports a resolved colour, back to the hex the ratio wants.
+      const fromRgb = (text) => {
+        const parts = /rgba?\(([^)]+)\)/.exec(text);
+        if (!parts) return "";
+        const [r, g, b] = parts[1].split(",").map((piece) => Number(piece.trim()));
+        return `#${[r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+      };
+      const ratio = (one, other) => {
+        const a = luminance(one);
+        const b = luminance(other);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      };
+      const ink = fromRgb(out.paintedInk);
+      // The well paints --stage through a background, so an unresolvable backgroundColor (a
+      // gradient, or transparent) falls back to the token rather than scoring 0 and failing
+      // for the wrong reason.
+      const ground = fromRgb(out.paintedGround) || out.wellStage;
+      out.paintedHex = ink;
+      out.groundHex = ground;
+      out.wellContrast = ink && ground ? ratio(ink, ground) : 0;
+      out.pageLuminance = out.pageBg ? luminance(out.pageBg) : -1;
+      out.wellLuminance = out.wellStage ? luminance(out.wellStage) : -1;
+      return out;
+    });
+
+    // Bone is the :root fallback, so a page still wearing it after a stored Jade means either
+    // nothing painted or nothing was read back out of storage. Both of those are green upstairs.
+    check(
+      "a stored theme is painted, not just remembered",
+      painted.pageBg !== "" && painted.pageBg !== "#f7f3ea",
+      `--bg is ${painted.pageBg || "unset"}`,
+    );
+    check(
+      "and the stored appearance wins, so a light theme gives a light page",
+      painted.pageLuminance > 0.5,
+      `--bg luminance ${painted.pageLuminance.toFixed(3)}`,
+    );
+    check(
+      "the video well stays dark while the page around it is light",
+      painted.wellLuminance >= 0 && painted.wellLuminance < 0.05,
+      `well --stage ${painted.wellStage} at luminance ${painted.wellLuminance.toFixed(4)}`,
+    );
+    // The one that matters. This is the 1.04 to 1 bug stated as an assertion: page ink over the
+    // dark well is what it produced, and no arrangement of the tokens survives it.
+    check(
+      "and the words on the well are legible against it",
+      painted.wellContrast >= 4.5,
+      `${painted.paintedHex} on ${painted.groundHex} is ${painted.wellContrast.toFixed(2)} to 1`,
+    );
+    check(
+      "the well asks for a dark colour scheme, which the scrollbar and caret read",
+      painted.wellScheme === "dark",
+      `color-scheme is ${painted.wellScheme || "unset"}`,
+    );
+
+    // The picker is wired, not decorative. A no-op onChoose renders a control that reports the
+    // right thing and changes nothing, and the unit suite cannot tell the difference.
+    await openSettings(ana);
+    // By ROLE, not by label alone: the picker's <section> carries the same accessible name via
+    // aria-labelledby, so getByLabel matches the region and the select both and goes strict.
+    const themeSelect = ana.getByRole("combobox", { name: en("room.theme.label") });
+    await themeSelect.selectOption("rosewood");
+    const repainted = await waitFor(
+      async () => {
+        const next = await ana.evaluate(() =>
+          getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(),
+        );
+        return next !== painted.pageBg ? next : null;
+      },
+      "the page to repaint after choosing another theme",
+      5_000,
+    ).catch(() => null);
+    check("choosing another theme repaints the page", repainted !== null, `--bg went to ${repainted}`);
+
+    // The WELL, separately, and not as a duplicate of the line above. The page is painted by
+    // installTheme and the well by its own memo, so they are two mechanisms that can disagree:
+    // memoizing the well on nothing at all freezes it on whichever palette was mounted while
+    // the page keeps following the picker perfectly, and every other check here still passes.
+    const wellFollowed = await waitFor(
+      async () => {
+        const next = await ana.evaluate(() => {
+          const node = document.querySelector(".video-area");
+          return node ? getComputedStyle(node).getPropertyValue("--stage").trim() : "";
+        });
+        return next !== "" && next !== painted.wellStage ? next : null;
+      },
+      "the well to follow the newly chosen theme",
+      5_000,
+    ).catch(() => null);
+    check(
+      "and the well follows it rather than staying on the palette it mounted with",
+      wellFollowed !== null,
+      `well --stage was ${painted.wellStage}, now ${wellFollowed ?? "unchanged"}`,
+    );
+
+    // Back to where the rest of the run expects to find things.
+    await ana.evaluate(() => window.localStorage.removeItem("translatv.theme"));
+    await ana.reload();
+    if (!(await ana.locator(".room").isVisible())) {
+      await ana.getByLabel("Room code").fill(code);
+      await ana.getByRole("button", { name: "Join chat" }).click();
+      await ana.getByLabel("Your name, just for this chat").fill("Ana");
+      await ana.getByRole("button", { name: /Join and allow microphone/ }).click();
+      await waitFor(async () => ana.locator(".room").isVisible(), "Ana to rejoin after clearing the theme");
+    }
+  }
+
+  // ---------------------------------------------------------------------
   section("Ending kills the room permanently");
   await openSettings(ana);
   await ana.getByRole("button", { name: "End chat" }).click();

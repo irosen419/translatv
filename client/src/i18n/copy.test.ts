@@ -1,12 +1,21 @@
 // What this suite is actually guarding.
 //
 // The completeness of the files is script/check_copy.mjs's job, and it runs in `npm run check`.
-// These tests cover the two things a completeness check cannot see: that the fallback chain
-// picks the right file, and that the dialect overrides say what the DIALECTS catalog says they
-// must. A file can be complete and still put tu in front of an Argentine.
+// These tests cover the three things a completeness check cannot see: that the fallback chain
+// picks the right file, that the dialect overrides say what the DIALECTS catalog says they must,
+// and that no key has outlived the screen that rendered it. A file can be complete and still put
+// tu in front of an Argentine, and it can be complete and still be carrying dead words.
+
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { DIALECT_CODES } from "@translatv/shared";
+
+import { THEMES } from "../theme/palettes.js";
+import { THEME_MODES } from "../theme/theme.js";
 import { copyFor, interpolate, type CopyRef } from "./copy.js";
 import esAR from "./es-AR.json";
 import esCO from "./es-CO.json";
@@ -367,5 +376,158 @@ describe("the account screens speak each dialect's register", () => {
     for (const dialect of ["en-US", "es", "es-AR", "es-CO", "es-ES"]) {
       expect(copyFor(dialect).t("auth.error.WEAK_PASSWORD", { min: 10 })).toContain("10");
     }
+  });
+});
+
+/**
+ * The words on the theme controls, in every dialect a reader can pick.
+ *
+ * Appearance stopped being a fieldset with three radios and became a second select. The five
+ * keys are the same five either way, which is the point: the ELEMENT changed and the vocabulary
+ * did not. check_copy.mjs proves every file HAS every key and runs first; what it cannot see is
+ * whether a key still resolves to prose for a reader in es-CO rather than to the placeholder,
+ * and it has no opinion about the ORDER the modes are offered in.
+ */
+describe("the theme control labels", () => {
+  const CONTROL_LABELS = ["room.theme.label", "room.theme.appearance"] as const;
+  const MODE_LABELS = [
+    "room.theme.mode.light",
+    "room.theme.mode.dark",
+    "room.theme.mode.system",
+  ] as const;
+  const KEYS = [...CONTROL_LABELS, ...MODE_LABELS];
+
+  // Every dialect the picker offers, plus one the app has never heard of, which lands on English.
+  const READERS = [...DIALECT_CODES, "de-CH"];
+
+  it("finds the dialects it sweeps, so a catalog move cannot silently empty this test", () => {
+    expect(READERS.length).toBeGreaterThan(4);
+  });
+
+  for (const dialect of READERS) {
+    it(`says all five out loud for ${dialect}`, () => {
+      const copy = copyFor(dialect);
+      for (const key of KEYS) {
+        const text = copy.t(key);
+        expect(text.trim(), `${key} is blank for ${dialect}`).not.toBe("");
+        expect(text, `${key} resolves to nothing for ${dialect}`).not.toBe(copy.t("copy.missing"));
+        expect(text, `${key} left a placeholder unfilled for ${dialect}`).not.toContain("{");
+      }
+    });
+
+    it(`names the three modes distinctly for ${dialect}`, () => {
+      // Three options a reader cannot tell apart is the same bug as a missing string, and a
+      // dialect override is exactly where two of them would collapse into one word.
+      const names = MODE_LABELS.map((key) => copyFor(dialect).t(key));
+      expect(new Set(names).size, `${dialect} offers: ${names.join(", ")}`).toBe(MODE_LABELS.length);
+    });
+  }
+
+  it("keeps one key per mode the control offers, in the order it offers them", () => {
+    expect(THEME_MODES.map((mode) => `room.theme.mode.${mode}`)).toEqual([...MODE_LABELS]);
+  });
+});
+
+/**
+ * Copy that died with the screen it was written for.
+ *
+ * Two retirements, for the same reason and with the same rule applied to each.
+ *
+ * The self view mic and camera buttons became icon only, so the four VISIBLE labels they carried
+ * have no renderer left. The action phrasings they sat beside are untouched: those are still the
+ * buttons' accessible names, and script/e2e.mjs finds the camera button by "Turn your camera on".
+ * `room.mic.level` is untouched too, since it is still the meter's title.
+ *
+ * The ten theme taglines went with the line of prose under the theme controls. That line made
+ * the theme group two rows tall inside a settings bar whose other two groups are one, which is
+ * the whole of why the bar could not sit on a single line. The words the controls are NAMED by
+ * are untouched: `room.theme.label` and `room.theme.appearance` are the hidden labels now, and
+ * `room.theme.title` is still the theme select's tooltip.
+ *
+ * This is a deletion test, which is unusual enough to say why it exists. check_copy.mjs proves
+ * every language HAS every key and cannot know whether anything asks for one, so a retired key
+ * is dead weight that reads as coverage: five files to keep in step by hand, forever, for a
+ * string nobody renders. The same reasoning the checker already applies to a NO OP override.
+ */
+describe("the copy its screens stopped rendering", () => {
+  const RETIRED = [
+    "room.mic.mute",
+    "room.mic.unmute",
+    "room.camera.off",
+    "room.camera.on",
+    // Read off the live catalog rather than written out, so this says the stronger thing: NO
+    // palette has a tagline key, including the eleventh one somebody adds next year by copying
+    // the tenth. The ten that existed are exactly THEMES today.
+    ...THEMES.map((theme) => `themes.${theme.id}.tagline`),
+  ];
+
+  /** Keys the same edits had to LEAVE ALONE, so a wholesale delete cannot pass this suite. */
+  const KEPT = [
+    "room.mic.muteLabel",
+    "room.mic.unmuteLabel",
+    "room.mic.level",
+    "room.camera.offLabel",
+    "room.camera.onLabel",
+    "room.theme.label",
+    "room.theme.appearance",
+    "room.theme.title",
+  ];
+
+  const I18N_DIR = dirname(fileURLToPath(import.meta.url));
+  const REPO_ROOT = join(I18N_DIR, "..", "..", "..");
+  const THIS_FILE = fileURLToPath(import.meta.url);
+
+  function localeFiles(): string[] {
+    return readdirSync(I18N_DIR).filter((name) => name.endsWith(".json"));
+  }
+
+  /** Every file that could ask for a key: the client's own source, and the node side scripts. */
+  function sourceFiles(dir: string): string[] {
+    const found: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) found.push(...sourceFiles(path));
+      else if (/\.(ts|tsx|mjs)$/.test(entry.name) && path !== THIS_FILE) found.push(path);
+    }
+    return found;
+  }
+
+  it("finds the files it sweeps, so a move cannot silently empty this test", () => {
+    expect(localeFiles().length).toBeGreaterThan(1);
+    expect(sourceFiles(join(REPO_ROOT, "client", "src")).length).toBeGreaterThan(10);
+  });
+
+  it("is gone from every locale file, base and dialect override alike", () => {
+    const survivors: string[] = [];
+    for (const file of localeFiles()) {
+      const table = JSON.parse(readFileSync(join(I18N_DIR, file), "utf8")) as Record<string, string>;
+      for (const key of RETIRED) if (key in table) survivors.push(`${file}  ${key}`);
+    }
+    expect(survivors, "no screen renders these, so every language is carrying dead words").toEqual([]);
+  });
+
+  it("is asked for nowhere in the source", () => {
+    // Matched WITH its quotes. "room.mic.mute" is a prefix of "room.mic.muteLabel", and a bare
+    // substring search would report the surviving accessible name as a reference to the dead
+    // key, which is the kind of false green that ends with a real one being deleted.
+    const files = [
+      ...sourceFiles(join(REPO_ROOT, "client", "src")),
+      ...sourceFiles(join(REPO_ROOT, "script")),
+    ];
+    const references: string[] = [];
+    for (const path of files) {
+      const text = readFileSync(path, "utf8");
+      for (const key of RETIRED) {
+        if (text.includes(`"${key}"`) || text.includes(`'${key}'`)) {
+          references.push(`${path.slice(REPO_ROOT.length + 1)}  ${key}`);
+        }
+      }
+    }
+    expect(references, "a key removed from the files but still asked for renders as missing copy").toEqual([]);
+  });
+
+  it("leaves the action phrasings and the meter title alone", () => {
+    const english = JSON.parse(readFileSync(join(I18N_DIR, "en.json"), "utf8")) as Record<string, string>;
+    for (const key of KEPT) expect(Object.keys(english)).toContain(key);
   });
 });

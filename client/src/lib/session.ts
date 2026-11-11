@@ -19,6 +19,7 @@
 // URL, dropped from storage the moment the server says it is no longer good.
 
 import type { AuthErrorCode, AuthSession, PublicUser } from "@translatv/shared";
+import { browserStorage, type WebStorage } from "./browserStorage.js";
 
 /** Where the refresh token lives between page loads. */
 export const REFRESH_KEY = "translatv.refresh";
@@ -36,26 +37,15 @@ export const REFRESH_MARGIN_MS = 60_000;
  */
 export const MIN_REFRESH_DELAY_MS = 60_000;
 
-/** The slice of Storage this needs. An interface so a test can hand it something that throws. */
-export interface TokenStore {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
-}
-
 /**
- * The browser's localStorage, or null when it cannot be used.
- *
- * Probed rather than assumed: merely READING the property throws in some configurations (Safari
- * private mode, blocked site data), so a bare `window.localStorage` is itself what can break.
+ * The slice of Storage this needs, and the browser's localStorage or null when it cannot be used.
+ * The guard itself lives in lib/browserStorage.ts, because the theme preference needs the same
+ * one and a second copy of it is a second chance to get it wrong.
  */
-export function browserStore(): TokenStore | null {
-  try {
-    return typeof window === "undefined" ? null : window.localStorage;
-  } catch {
-    return null;
-  }
-}
+export type TokenStore = WebStorage;
+
+/** The browser's localStorage, or null when it cannot be used. */
+export const browserStore: () => TokenStore | null = browserStorage;
 
 function readRefresh(store: TokenStore | null): string | null {
   if (!store) return null;

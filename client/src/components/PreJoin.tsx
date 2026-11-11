@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DIALECTS } from "@translatv/shared";
 import { detectCapabilities } from "../stt/WebSpeechAdapter.js";
 import { useStore } from "../state/store.js";
+import { SelectShell } from "./SelectShell.jsx";
 import { useCopy } from "../i18n/useCopy.js";
 import type { CopyRef } from "../i18n/copy.js";
 
@@ -35,7 +36,28 @@ export function PreJoin({ mode, code, notice, onCancel, onReady }: Props) {
     onDevice: boolean;
     notice?: CopyRef;
   } | null>(null);
+  const nameInput = useRef<HTMLInputElement>(null);
   const copy = useCopy();
+
+  /*
+   * Land with the cursor already in the name field, so arriving here is one step rather than two.
+   * It runs whichever way you got here: starting a chat and joining one both put this field
+   * first, and there is nothing else on the screen that wants the caret.
+   *
+   * Read matchMedia once here rather than through useMediaQuery, which is reactive. Focusing is
+   * a one time action, and the reactive version would yank the caret back into this field if the
+   * pointer type flipped mid session, which is exactly the kind of thing a plugged in mouse does.
+   *
+   * Skipped on a coarse pointer, where focusing opens the soft keyboard over the pre join screen
+   * before anybody asked it to, hiding the camera preview and half the form. No matchMedia at all
+   * means a test or an old desktop, and both of those want the focus.
+   */
+  useEffect(() => {
+    if (globalThis.matchMedia?.("(pointer: coarse)").matches) return;
+    // preventScroll because the camera preview sits above this field: the default scroll into
+    // view pushes it off the top on a short window.
+    nameInput.current?.focus({ preventScroll: true });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,7 +107,7 @@ export function PreJoin({ mode, code, notice, onCancel, onReady }: Props) {
           <div className="notice">{copy.t("prejoin.stt.cloud")}</div>
         )}
         {capability?.onDevice && (
-          <div className="notice" style={{ borderColor: "var(--accent)", background: "#0e1d1b", color: "#cdeee8" }}>
+          <div className="notice good">
             {copy.t("prejoin.stt.onDevice")}
           </div>
         )}
@@ -100,6 +122,7 @@ export function PreJoin({ mode, code, notice, onCancel, onReady }: Props) {
             <label htmlFor="name">{copy.t("prejoin.name.label")}</label>
             <input
               id="name"
+              ref={nameInput}
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               maxLength={24}
@@ -110,17 +133,22 @@ export function PreJoin({ mode, code, notice, onCancel, onReady }: Props) {
 
           <div className="field">
             <label htmlFor="dialect">{copy.t("prejoin.dialect.label")}</label>
-            <select
-              id="dialect"
-              value={dialect}
-              onChange={(event) => setDialect(event.target.value)}
-            >
-              {DIALECTS.map((d) => (
-                <option key={d.code} value={d.code}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
+            {/* The shell draws the chevron the browser stopped drawing when the stylesheet
+                turned the native control off. This one keeps its visible label: it is a form
+                field on a page with room for one, not a control in a one line bar. */}
+            <SelectShell>
+              <select
+                id="dialect"
+                value={dialect}
+                onChange={(event) => setDialect(event.target.value)}
+              >
+                {DIALECTS.map((d) => (
+                  <option key={d.code} value={d.code}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </SelectShell>
             {/* Each example is a whole clause inside its own <em>, rather than a sentence with
                 three emphasised fragments spliced into it. Splicing needs the connecting words
                 to sit in a fixed order, and they do not survive translation: the emphasis is

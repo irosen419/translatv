@@ -23,6 +23,9 @@ import { errorCopyKey } from "../i18n/codes.js";
 import type { PeerState } from "../rtc/PeerConnection.js";
 import type { SttStatus } from "../stt/types.js";
 import type { SessionState } from "../lib/session.js";
+import { browserStorage } from "../lib/browserStorage.js";
+import { loadTheme } from "../theme/storage.js";
+import type { ThemeChoice } from "../theme/theme.js";
 
 export type Phase = "landing" | "prejoin" | "room" | "ended";
 
@@ -67,6 +70,16 @@ interface State {
   signupMode: SignupMode;
   /** Prefilled from a /r/<code> link so a shared link lands straight on the join form. */
   pendingCode: string | null;
+  /**
+   * The colours, as a palette plus an appearance mode.
+   *
+   * Here rather than in a hook's own state for the same reason uiDialect is: two places read it
+   * that are nowhere near each other in the tree (the picker in the settings drawer, and the one
+   * effect at the root that owns the document element), and passing it between them would be
+   * prop drilling through every screen in the app. Device scoped, so it survives reset() along
+   * with the dialect: ending a call is not a reason to change somebody's colours.
+   */
+  theme: ThemeChoice;
 
   code: string | null;
   selfId: string | null;
@@ -117,6 +130,8 @@ interface State {
   setSession(session: SessionState): void;
   setSignupMode(mode: SignupMode): void;
   setPendingCode(code: string | null): void;
+  /** Writing it down is the caller's job, through chooseTheme in theme/useTheme.ts. */
+  setTheme(theme: ThemeChoice): void;
   apply(message: ServerMessage): void;
   reset(): void;
 
@@ -153,6 +168,7 @@ export const useStore = create<State>((set, get) => ({
   session: { status: "signedOut", user: null },
   signupMode: "invite",
   pendingCode: null,
+  theme: loadTheme(browserStorage()),
 
   code: null,
   selfId: null,
@@ -181,6 +197,7 @@ export const useStore = create<State>((set, get) => ({
   setSession: (session) => set({ session }),
   setSignupMode: (signupMode) => set({ signupMode }),
   setPendingCode: (pendingCode) => set({ pendingCode }),
+  setTheme: (theme) => set({ theme }),
   setPeerState: (peerState) => set({ peerState }),
   setSttStatus: (sttStatus) => set({ sttStatus }),
   setSocketState: (socketState) => set({ socketState }),
