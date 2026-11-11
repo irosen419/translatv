@@ -23,7 +23,8 @@
 //      real server, with the WebSocket wrapped by the harness rather than by the app, so no
 //      production code carries timing overhead.
 //   B  the translation stage, in process, against a fake client. This is the only way to see the
-//      spend gate, the per room ordering queue, and the ledger write separately.
+//      spend gate, lines in one room waiting (or not) on each other, and the ledger write
+//      separately.
 //   C  recognition, which cannot be measured here at all and is reported as unmeasured.
 //
 // The honesty rules live in latency_stats.mjs and are the spend ledger's, transposed to
@@ -61,9 +62,9 @@ const WARMUP_LINES = 2;
 const LINE_GAP_MS = 900;
 /** Ledger sizes for the spend gate sweep. The repo's own ledger is in the low hundreds today. */
 const LEDGER_SIZES = [100, 1_000, 10_000, 50_000];
-/** Lines fired at once into one room, to expose the per room ordering queue. */
+/** Lines fired at once into one room, to show whether any of them waits on another. */
 const QUEUE_DEPTH = 6;
-/** The delay the fake provider takes in the queue measurement. A plausible real round trip. */
+/** The delay the fake provider takes in that measurement. A plausible real round trip. */
 const QUEUE_PROVIDER_MS = 300;
 
 const cleanups = [];
@@ -236,9 +237,10 @@ async function planeB() {
   }, 20);
   console.log("  whole translate() call: measured");
 
-  // The per room ordering queue. translate() chains per room so a transcript cannot reorder
-  // itself, which is correct and has never been priced. Fire QUEUE_DEPTH lines at one room at
-  // once: line k cannot start until line k-1 has come back from the provider.
+  // Lines in one room at once. translate() used to chain per room, so line k could not start
+  // until line k-1 came back and the wait was cumulative (vt-0014). It is concurrent now, bounded
+  // by MAX_CONCURRENT across the process, so this ladder should be flat. A climbing one means
+  // something is serializing calls again.
   const queueRoot = seedLedger(REPRESENTATIVE);
   const queueService = new TranslationService(
     fakeClient(QUEUE_PROVIDER_MS),
@@ -252,7 +254,7 @@ async function planeB() {
       return performance.now() - queueStart;
     }),
   );
-  console.log("  per room queue: measured");
+  console.log("  one room, lines at once: measured");
 
   rows.push(
     measured(`spend gate check, cold, ${REPRESENTATIVE} row ledger`, gateSamples[REPRESENTATIVE], {
@@ -277,7 +279,7 @@ async function planeB() {
       }),
     ),
     measured(
-      `per room queue, last of ${QUEUE_DEPTH} lines at ${QUEUE_PROVIDER_MS} ms each`,
+      `one room, last of ${QUEUE_DEPTH} lines at once, ${QUEUE_PROVIDER_MS} ms each`,
       [queueWaits[QUEUE_DEPTH - 1]],
       {
         path: false,
@@ -762,11 +764,10 @@ try {
       `     append only so it only ever grows. Synchronous means the whole event loop, so past a`,
       `     few thousand rows this stalls every room on the process once per translated sentence.`,
       "",
-      `  2. The per room ordering queue serializes. ${QUEUE_DEPTH} lines against a ${QUEUE_PROVIDER_MS} ms provider finished`,
-      `     at ${b.queueWaits[QUEUE_DEPTH - 1].toFixed(0)} ms rather than ${QUEUE_PROVIDER_MS} ms, an amplification of ${queueAmplification.toFixed(1)}x. The ordering is`,
-      `     correct and worth keeping, and it means provider latency is multiplied under fast`,
-      `     speech rather than merely added. That is the strongest argument in this run for`,
-      `     comparing providers on SPEED. It is not an argument for comparing them on price.`,
+      `  2. Lines in one room translate concurrently. ${QUEUE_DEPTH} lines fired at once against a ${QUEUE_PROVIDER_MS} ms`,
+      `     provider finished by ${b.queueWaits[QUEUE_DEPTH - 1].toFixed(0)} ms, an amplification of ${queueAmplification.toFixed(1)}x, where 1.0x means none`,
+      `     waited on another. A per room queue used to make that wait cumulative (vt-0014),`,
+      `     so provider latency was multiplied under fast speech rather than merely added.`,
     ].join("\n"),
   );
 } catch (error) {

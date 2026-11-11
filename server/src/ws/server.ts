@@ -34,7 +34,7 @@ import {
   MAX_CONNECTIONS_PER_IP,
   TokenBuckets,
 } from "../security/rateLimit.js";
-import type { TranslationService } from "../translate/TranslationService.js";
+import type { TranslateResult, TranslationService } from "../translate/TranslationService.js";
 import { RoomSession } from "./RoomSession.js";
 
 /** How often expired rooms and seats are swept. */
@@ -792,7 +792,6 @@ export class SignalingServer {
     }
 
     this.sessions.delete(roomCode);
-    this.translation.forgetRoom(roomHash(roomCode));
     log.info("room.ended", { room: roomHash(roomCode) });
   }
 
@@ -975,20 +974,38 @@ export class SignalingServer {
     const session = this.sessions.get(roomCode);
     if (!session) return;
 
-    const result = await this.translation.translate({
-      lineId,
-      text,
-      sourceDialect,
-      targetDialect,
-      context: session.contextFor(text),
-      glossary: session.glossaryFor(readerId),
-      roomHash: roomHash(roomCode),
-      kind: "translation",
-    });
+    const ticket = session.beginTranslation(lineId);
+    let result: TranslateResult;
+    try {
+      result = await this.translation.translate({
+        lineId,
+        text,
+        sourceDialect,
+        targetDialect,
+        context: session.contextFor(text),
+        glossary: session.glossaryFor(readerId),
+        roomHash: roomHash(roomCode),
+        kind: "translation",
+      });
+    } catch (error) {
+      // No answer at all, from an unreadable ledger for one (see runDetached). This call stops
+      // being the newest, so an older call for the line that is still out is shown when it lands
+      // rather than dropped as stale behind a call that is never coming back. With no older call
+      // out the line still waits, exactly as it did before calls ran concurrently. The error still
+      // reaches runDetached's log, as it always has.
+      session.abandonTranslation(lineId, ticket);
+      throw error;
+    }
 
     // The room can end while a translation is in flight. Dropping the result is correct; the
     // handler must simply not throw when the room it belonged to is gone.
     if (!this.sessions.has(roomCode)) return;
+
+    // A newer call for this same line was made while this one was in flight, so this answer is
+    // stale whichever way it went. Without this, a late failure overwrites a retry that succeeded,
+    // or an old translation overwrites a new one. Dropping it changes nothing about spend: the
+    // call was recorded, or failed to be, before translate() returned, exactly like any other.
+    if (!session.settleTranslation(lineId, ticket)) return;
 
     if (result.ok) {
       const updated = session.setTranslation(lineId, result.text, "ok");
@@ -1388,9 +1405,6 @@ export class SignalingServer {
     for (const room of destroyed) {
       for (const member of room.members) this.closeCall(member.id, now);
       this.sessions.delete(room.code);
-      // The third lifetime. Room, session, and translation queue all end here now; the queue used
-      // to be left behind and accumulate one entry per room for the life of the process.
-      this.translation.forgetRoom(roomHash(room.code));
       log.info("room.destroyed", { room: roomHash(room.code) });
     }
 

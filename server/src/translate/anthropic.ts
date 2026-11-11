@@ -1,7 +1,7 @@
 // The Anthropic implementation of LlmClient.
 //
-// Deliberately thin: everything interesting (ordering, the spend gate, failure
-// behavior) lives in TranslationService, which is provider agnostic and tested against a fake.
+// Deliberately thin: everything interesting (the spend gate, failure behavior, timing)
+// lives in TranslationService, which is provider agnostic and tested against a fake.
 // Swapping providers should be a new file this size, not a rewrite.
 //
 // This file owns what TranslationService cannot see: the SDK's exception types, and each request

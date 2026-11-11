@@ -16,6 +16,7 @@ import { CLOSE, LIMITS, WS_PATH, type ServerMessage } from "@translatv/shared";
 import { GRACE_MS } from "../rooms/RoomManager.js";
 import type { Config } from "../config.js";
 import { roomHash, SpendGate } from "../spend/caps.js";
+import { load } from "../spend/ledger.js";
 import { MAX_CONNECTIONS_PER_IP } from "../security/rateLimit.js";
 import { TranslationService, type LlmClient } from "../translate/TranslationService.js";
 import { accessKey, ACCESS_TTL_MS, mintAccessToken, verifyAccessToken } from "../auth/accessTokens.js";
@@ -23,6 +24,12 @@ import { clientAddress, SignalingServer, type AccessVerifier } from "./server.js
 
 let server: Server;
 let signaling: SignalingServer;
+/**
+ * When set, that numbered spend gate check THROWS, the way SpendGate.check rethrows a ledger it
+ * cannot read (EACCES). That escapes translate() rather than coming back as a failure. Counted
+ * from 1 per test, and reset before each.
+ */
+let throwOnGateCheck: number | null = null;
 let port: number;
 let root: string;
 
@@ -79,12 +86,22 @@ interface ConnectOptions {
 // Counts its calls, because "no API call happened" is the actual requirement of the skip path
 // and every other signal for it is indirect. Without the counter a test can only assert that no
 // failure was reported, which a broken skip would also satisfy.
-const echoClient: LlmClient & { calls: number; lastPrompt: string } = {
+//
+// `script`, when set, answers instead of the echo. It gets the 1 based call number, so a test can
+// make one call slow or failing and the next one fast, which is how two calls for the same line
+// come back in the opposite order to the one they were made in. Reset before every test.
+const echoClient: LlmClient & {
+  calls: number;
+  lastPrompt: string;
+  script: ((call: number) => Promise<{ text: string; inputTokens: number; outputTokens: number }>) | null;
+} = {
   calls: 0,
   lastPrompt: "",
+  script: null,
   async complete({ system, user }) {
     echoClient.calls += 1;
     echoClient.lastPrompt = `${system}\n${user}`;
+    if (echoClient.script) return echoClient.script(echoClient.calls);
     const match = user.match(/<utterance>(.*)<\/utterance>/s);
     return { text: `ES:${match?.[1] ?? ""}`, inputTokens: 100, outputTokens: 10 };
   },
@@ -174,12 +191,21 @@ async function createRoom(client: Client, username = "Ana", dialect = "en-US") {
 
 beforeEach(async () => {
   echoClient.calls = 0;
+  echoClient.script = null;
+  throwOnGateCheck = null;
   root = mkdtempSync(join(tmpdir(), "ws-"));
   mkdirSync(join(root, "out", "translatv"), { recursive: true });
   writeFileSync(join(root, "out", "translatv", "spend_log.jsonl"), "", "utf8");
 
   const cfg = config();
   const gate = new SpendGate(root, { dailyCapUsd: cfg.dailyCapUsd, roomCapUsd: cfg.roomCapUsd });
+  const check = gate.check.bind(gate);
+  let gateChecks = 0;
+  gate.check = (room) => {
+    gateChecks += 1;
+    if (gateChecks === throwOnGateCheck) throw new Error("EACCES: permission denied, open 'spend_log.jsonl'");
+    return check(room);
+  };
   const translation = new TranslationService(echoClient, gate, root);
 
   server = createServer();
@@ -1021,6 +1047,147 @@ describe("retrying a line that needs no translation", () => {
 
     expect(skipped.reason).toBe("recipient_off");
     expect(echoClient.calls).toBe(0);
+
+    ana.close();
+    ben.close();
+  });
+});
+
+// Translations run concurrently, so two calls for the SAME line can be in flight together and
+// come back in either order. The line must end on the answer to the call made LAST, which is
+// what the per room queue used to guarantee by making them wait for each other.
+describe("two translations of one line that land out of order", () => {
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  /** Every result or failure frame for one line, in arrival order. */
+  function outcomesFor(client: Client, lineId: string) {
+    return client.received.filter(
+      (m): m is Extract<ServerMessage, { t: "translation.result" | "translation.failed" }> =>
+        (m.t === "translation.result" || m.t === "translation.failed") && m.lineId === lineId,
+    );
+  }
+
+  it("is not turned back into a failure when both people retry and the first retry fails late", async () => {
+    // The retry button shows on any failed line, for both people, so both clicking it is the
+    // ordinary case. Call 1 fails the line, call 2 (Ana's retry) fails slowly, call 3 (Ben's
+    // retry) succeeds quickly. A paid, successful translation must not be overwritten by the
+    // stale failure that lands after it.
+    echoClient.script = async (call) => {
+      if (call === 1) throw new Error("provider down");
+      if (call === 2) {
+        await delay(150);
+        throw new Error("provider down");
+      }
+      return { text: "GOOD", inputTokens: 100, outputTokens: 10 };
+    };
+    const { ana, ben } = await pair("en-US", "es-AR");
+
+    ana.send({ t: "stt.final", text: "do you have time", seq: 1 });
+    const line = await ben.next("transcript.final");
+    await ana.next("translation.failed");
+
+    ana.send({ t: "translation.retry", lineId: line.line.lineId });
+    await delay(20);
+    ben.send({ t: "translation.retry", lineId: line.line.lineId });
+    await settle(400);
+
+    expect(echoClient.calls).toBe(3);
+    for (const client of [ana, ben]) {
+      const last = outcomesFor(client, line.line.lineId).at(-1);
+      expect(last?.t).toBe("translation.result");
+      expect(last?.t === "translation.result" && last.text).toBe("GOOD");
+    }
+
+    ana.close();
+    ben.close();
+  });
+
+  it("is not overwritten by an earlier call's translation that lands after a retry's", async () => {
+    echoClient.script = async (call) => {
+      if (call === 1) {
+        await delay(150);
+        return { text: "OLD", inputTokens: 100, outputTokens: 10 };
+      }
+      return { text: "NEW", inputTokens: 100, outputTokens: 10 };
+    };
+    const { ana, ben } = await pair("en-US", "es-AR");
+
+    ana.send({ t: "stt.final", text: "do you have time", seq: 1 });
+    const line = await ben.next("transcript.final");
+    ben.send({ t: "translation.retry", lineId: line.line.lineId });
+    await settle(400);
+
+    expect(echoClient.calls).toBe(2);
+    const last = outcomesFor(ben, line.line.lineId).at(-1);
+    expect(last?.t === "translation.result" && last.text).toBe("NEW");
+    // The stale answer is dropped from the screen, never from the ledger: both calls returned, so
+    // both were recorded before either result was looked at.
+    expect(load({ root })).toHaveLength(2);
+
+    ana.close();
+    ben.close();
+  });
+
+  it("drops an older call's answer that lands first, while the newer call is still out", async () => {
+    // The other order. Call 1 fails the line, call 2 (Ana's retry, the OLDER call) fails fast,
+    // call 3 (Ben's retry, issued after it) succeeds slowly. The fast failure is stale the moment
+    // it lands, since a newer call is still out, and taking it would also close the line to the
+    // answer that comes after it.
+    echoClient.script = async (call) => {
+      if (call === 1) throw new Error("provider down");
+      if (call === 2) {
+        await delay(200);
+        throw new Error("provider down");
+      }
+      await delay(400);
+      return { text: "GOOD", inputTokens: 100, outputTokens: 10 };
+    };
+    const { ana, ben } = await pair("en-US", "es-AR");
+
+    ana.send({ t: "stt.final", text: "do you have time", seq: 1 });
+    const line = await ben.next("transcript.final");
+    await ana.next("translation.failed");
+    const before = outcomesFor(ana, line.line.lineId).length;
+
+    ana.send({ t: "translation.retry", lineId: line.line.lineId });
+    await delay(20);
+    ben.send({ t: "translation.retry", lineId: line.line.lineId });
+    await settle(800);
+
+    expect(echoClient.calls).toBe(3);
+    // Nothing from the stale call, then the newest call's answer.
+    const after = outcomesFor(ana, line.line.lineId).slice(before);
+    expect(after.map((m) => m.t)).toEqual(["translation.result"]);
+    expect(after[0]?.t === "translation.result" && after[0].text).toBe("GOOD");
+
+    ana.close();
+    ben.close();
+  });
+
+  it("still shows an older call's answer when the newer call throws instead of answering", async () => {
+    // Call 1 fails the line. Ana's retry reaches the provider and succeeds slowly. Ben's retry
+    // throws in the spend gate (gate check 3) and never answers at all. The line must not wait
+    // forever on Ben's call and throw Ana's paid translation away as stale.
+    throwOnGateCheck = 3;
+    echoClient.script = async (call) => {
+      if (call === 1) throw new Error("provider down");
+      await delay(300);
+      return { text: "GOOD", inputTokens: 100, outputTokens: 10 };
+    };
+    const { ana, ben } = await pair("en-US", "es-AR");
+
+    ana.send({ t: "stt.final", text: "do you have time", seq: 1 });
+    const line = await ben.next("transcript.final");
+    await ana.next("translation.failed");
+
+    ana.send({ t: "translation.retry", lineId: line.line.lineId });
+    await delay(20);
+    ben.send({ t: "translation.retry", lineId: line.line.lineId });
+    await settle(600);
+
+    expect(echoClient.calls).toBe(2);
+    const last = outcomesFor(ana, line.line.lineId).at(-1);
+    expect(last?.t === "translation.result" && last.text).toBe("GOOD");
 
     ana.close();
     ben.close();

@@ -22,6 +22,7 @@ import {
   TranslationService,
   type LlmClient,
   type TranslateRequest,
+  type TranslateResult,
 } from "./TranslationService.js";
 import { buildSystemPrompt, buildUserMessage, sanitizeForPrompt } from "./prompt.js";
 
@@ -304,16 +305,21 @@ describe("TranslationService", () => {
     if (!result.ok) expect(result.retriable).toBe(true);
   });
 
-  it("preserves per room ordering", async () => {
-    // A transcript that reorders itself reads as a bug even when every line is correct.
+  // There used to be a per room queue here, so a second sentence waited for the first one's
+  // translation to finish before its own call even started. Under fast speech that multiplied
+  // provider latency by queue depth: vt-0014 measured six lines at 300 ms each landing at 310,
+  // 615, 919, 1223, 1527 and 1829 ms. The ordering it bought is not needed. Every line reaches
+  // the transcript, in order, the moment it is finalized, and a translation fills in its own line
+  // by lineId, so a later sentence finishing first cannot reorder anything.
+  it("does not make a second line in the same room wait for the first", async () => {
     const completed: string[] = [];
     let call = 0;
     const staggered: LlmClient = {
       async complete() {
         call += 1;
         const mine = call;
-        // First call is slow, second is fast. Without ordering, the second would land first.
-        await new Promise((r) => setTimeout(r, mine === 1 ? 30 : 1));
+        // First call is slow, second is fast.
+        await new Promise((r) => setTimeout(r, mine === 1 ? 50 : 1));
         completed.push(`c${mine}`);
         return { text: `t${mine}`, inputTokens: 10, outputTokens: 5 };
       },
@@ -321,12 +327,18 @@ describe("TranslationService", () => {
     const service = new TranslationService(staggered, gate, root);
     const first = service.translate(request({ lineId: "L1" }));
     const second = service.translate(request({ lineId: "L2" }));
-    await Promise.all([first, second]);
+    const [one, two] = await Promise.all([first, second]);
 
-    expect(completed).toEqual(["c1", "c2"]);
+    expect(completed).toEqual(["c2", "c1"]);
+    // And each line still gets its OWN translation back.
+    expect(one.ok && one.text).toBe("t1");
+    expect(two.ok && two.text).toBe("t2");
+    // Both returned, so both are on the ledger: concurrency changes when a call is made, never
+    // whether it is recorded.
+    expect(load({ root })).toHaveLength(2);
   });
 
-  it("does not let one failure poison the queue for later lines in the room", async () => {
+  it("does not let one failed line affect the next line in the room", async () => {
     let call = 0;
     const flaky: LlmClient = {
       async complete() {
@@ -341,6 +353,63 @@ describe("TranslationService", () => {
 
     expect(first.ok).toBe(false);
     expect(second.ok).toBe(true);
+  });
+
+  it("holds no more than MAX_CONCURRENT calls open across the process, and frees a slot when one ends", async () => {
+    // With no per room queue this is the ONLY bound on how many calls one room can have open
+    // together, so it is also the bound on how far lines in flight together can overshoot the room
+    // cap, and on how many calls a broken ledger lets through before the latch trips.
+    const open: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
+    let calls = 0;
+    const held: LlmClient = {
+      async complete() {
+        calls += 1;
+        await new Promise<void>((resolve, reject) => open.push({ resolve, reject }));
+        return { text: "ok", inputTokens: 10, outputTokens: 5 };
+      },
+    };
+    // Caps wide enough that MAX_CONCURRENT rooms of calls all pass the gate: the bound under test
+    // is the slot count, not the spend cap.
+    const wideGate = new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5 });
+    const service = new TranslationService(held, wideGate, root);
+    // A DIFFERENT room each, so the bound is shown to be process wide rather than per room.
+    const room = (i: number) => `roomhash${String(i).padStart(8, "0")}`;
+    // The whole burst in ONE tick, the way lines land when one room fires several at once. Issued
+    // one by one with a wait between, a bound that is checked in one step and taken in a later
+    // one (an awaited spend gate between the two, say) would look correct, because each call
+    // would see the slots the earlier ones had already taken.
+    const outcomes = new Map<number, TranslateResult>();
+    const burst = Array.from({ length: MAX_CONCURRENT + 1 }, (_, i) => {
+      const call = service.translate(request({ lineId: `L${i}`, roomHash: room(i) }));
+      void call.then((result) => outcomes.set(i, result));
+      return call;
+    });
+    // Waited for rather than counted on the spot, so making the path to the provider async is
+    // not mistaken for breaking the bound. Then a beat more for a call that should not be there.
+    await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(MAX_CONCURRENT));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(calls).toBe(MAX_CONCURRENT);
+    // Exactly one of the burst came back already, refused, and it never reached the provider.
+    const refused = [...outcomes.values()];
+    expect(refused).toHaveLength(1);
+    expect(!refused[0]?.ok && refused[0]?.reason).toBe("TOO_MANY_IN_FLIGHT");
+    const first = burst.filter((_, i) => !outcomes.has(i));
+
+    // A call that FAILS frees its slot too. If only a success did, every failed or timed out call
+    // would leak one, and after MAX_CONCURRENT of them nothing would translate until a restart.
+    // Whichever call reached the provider first, which need not be the first one issued once the
+    // path there is async. The rest are held, so the first of them to settle is the one failed.
+    open.shift()?.reject(new Error("boom"));
+    expect((await Promise.race(first)).ok).toBe(false);
+    const next = service.translate(request({ lineId: "next", roomHash: room(100) }));
+    await vi.waitFor(() => expect(calls).toBe(MAX_CONCURRENT + 1));
+
+    for (const call of open.splice(0)) call.resolve();
+    const results = await Promise.all([...first, next]);
+    // The one failed above, and every other call answered.
+    expect(results.filter((r) => !r.ok)).toHaveLength(1);
+    // Every call that returned an answer is on the ledger.
+    expect(load({ root })).toHaveLength(MAX_CONCURRENT);
   });
 
   it("REFUSES an unresolvable dialect rather than falling back to English", async () => {
@@ -540,28 +609,107 @@ describe("a ledger that cannot be written", () => {
   });
 });
 
-describe("the per room promise chain", () => {
-  // One entry per roomHash, added on the first translation and never removed. Rooms are swept
-  // from RoomManager and from sessions, but nothing touched this map, so it grew for the lifetime
-  // of the process. Slow, quiet, and unbounded.
-  it("is released when its room is forgotten", async () => {
-    const root = mkdtempSync(join(tmpdir(), "queues-"));
+describe("timing", () => {
+  // The provider round trip has never been measured on a real call (vt-0014 left it as the one
+  // unknown). Real calls happen anyway, so each one reports its own durations. Counts and
+  // durations only: the logger refuses text regardless.
+  let root: string;
+  let gate: SpendGate;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "timing-"));
     mkdirSync(join(root, "out", "translatv"), { recursive: true });
     writeFileSync(join(root, "out", "translatv", "spend_log.jsonl"), "", "utf8");
-    const gate = new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5 });
-    const service = new TranslationService(fakeClient(), gate, root);
-
-    await service.translate({ ...request(), roomHash: "room-one" });
-    await service.translate({ ...request(), roomHash: "room-two" });
-    expect(service.pendingRooms).toBe(2);
-
-    service.forgetRoom("room-one");
-    expect(service.pendingRooms).toBe(1);
-
-    service.forgetRoom("room-two");
-    expect(service.pendingRooms).toBe(0);
-
+    gate = new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5 });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
     rmSync(root, { recursive: true, force: true });
+  });
+
+  function timingLines(spy: { mock: { calls: unknown[][] } }) {
+    return spy.mock.calls
+      .map((args) => JSON.parse(String(args[0])) as Record<string, unknown>)
+      .filter((line) => line["event"] === "translation.timing");
+  }
+
+  it("logs how long the provider took and how long the whole line took", async () => {
+    const slow: LlmClient = {
+      async complete() {
+        await new Promise((r) => setTimeout(r, 20));
+        return { text: "hola", inputTokens: 10, outputTokens: 5 };
+      },
+    };
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await new TranslationService(slow, gate, root).translate(request({ lineId: "L9" }));
+
+    const [line] = timingLines(spy);
+    expect(line).toMatchObject({ lineId: "L9", outcome: "ok", outputTokens: 5 });
+    expect(line?.["providerMs"]).toBeGreaterThanOrEqual(15);
+    expect(line?.["totalMs"]).toBeGreaterThanOrEqual(line?.["providerMs"] as number);
+  });
+
+  it("logs the timing only once the call is on the ledger", async () => {
+    // The order the spend rule asks for: a call that returned is recorded before anything else
+    // is done with it, the timing line included.
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    let rowsWhenTimed: number | null = null;
+    spy.mockImplementation((line: unknown) => {
+      if (String(line).includes("translation.timing")) rowsWhenTimed = load({ root }).length;
+    });
+    await new TranslationService(fakeClient(), gate, root).translate(request());
+    expect(rowsWhenTimed).toBe(1);
+  });
+
+  it("carries the size of the line as a count, never the line itself", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await new TranslationService(fakeClient(), gate, root).translate(
+      request({ text: "do you have time tomorrow" }),
+    );
+
+    const [line] = timingLines(spy);
+    expect(line?.["words"]).toBe(5);
+    expect(JSON.stringify(line)).not.toContain("tomorrow");
+    expect(JSON.stringify(line)).not.toContain("manana");
+  });
+
+  it("reports a failed call too, by its reason, since slow failures are latency as well", async () => {
+    const failing: LlmClient = {
+      async complete() {
+        throw new LlmFailure("retriable", "status_529", "overloaded");
+      },
+    };
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await new TranslationService(failing, gate, root).translate(request());
+
+    const [line] = timingLines(spy);
+    expect(line).toMatchObject({ outcome: "PROVIDER_ERROR" });
+    expect(typeof line?.["providerMs"]).toBe("number");
+  });
+
+  it("reports a timed out call as TIMED_OUT, with the time it was given", async () => {
+    // Here a timeout does not abort the call (settleLate), so it never surfaces as an error the
+    // way it does when the request is cut off. It is still a line that waited the whole timeout,
+    // which is exactly the latency this exists to show. performance is faked too, since that is
+    // the clock the durations are read from.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    const hung: LlmClient = { complete: () => new Promise(() => undefined) };
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const pending = new TranslationService(hung, gate, root).translate(request());
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1);
+    await pending;
+
+    const [line] = timingLines(spy);
+    expect(line).toMatchObject({ outcome: "TIMED_OUT", outputTokens: null });
+    expect(line?.["providerMs"]).toBeGreaterThanOrEqual(TIMEOUT_MS);
+  });
+
+  it("says nothing for a line that never reached the provider", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await new TranslationService(null, gate, root).translate(request());
+    expect(timingLines(spy)).toEqual([]);
   });
 });
 
