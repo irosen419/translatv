@@ -18,9 +18,15 @@ plan of record for the multi-user server and the iOS app.
   audiences and the length rule only applies to one.
 - NO em dashes or en dashes anywhere, including comments, strings, prompts, and docs. Use commas,
   periods, colons, or parentheses only. Enforced by `npm run check:dashes`, which must report zero.
-- Never spend against the Anthropic API without the spend going through the ledger first. Every call
-  that costs money appends to `out/translatv/spend_log.jsonl` before the next one is issued.
-  Untracked spend is the specific failure this repo was set up to avoid.
+- Never spend against the Anthropic API without the spend going through the ledger. Every call
+  that costs money appends to `out/translatv/spend_log.jsonl`, and a call that returned is
+  recorded before its result is used. Untracked spend is the specific failure this repo was set up
+  to avoid. Calls MAY run concurrently, in one room or across rooms (owner decision, 2026-10-22),
+  bounded by `MAX_CONCURRENT` in `TranslationService.ts`. The spend gate is checked before each
+  call, so calls in flight together can each pass a cap check before any is recorded, and the cap
+  can be overshot by up to `MAX_CONCURRENT` calls. That bounded overshoot is accepted. Unbounded or
+  unrecorded spend is not: any new path that spends must have a bound like `MAX_CONCURRENT` and
+  must record every call that returns.
 - There is no autopilot in this repo yet. If one is added, arming a step that spends is owner only,
   always, and no automation ever flips an `"armed"` flag.
 - Never log transcript text, chat text, usernames, or glossary content, and never emails,
