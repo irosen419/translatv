@@ -31,7 +31,8 @@
     "latency": "npm run build && tsx script/latency.mjs",
     "build:shared": "npm run build --workspace=shared",
     "check:spend-view": "node script/check_spend_view.mjs",
-    "verify": "tsx script/verify_translation.mjs"
+    "verify": "tsx script/verify_translation.mjs",
+    "blind": "npm run build:shared && tsx script/blind.mjs"
   },
   "devDependencies": {
     "ajv": "8.20.0",

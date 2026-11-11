@@ -42,6 +42,14 @@ export const PROGRAMS = {
    * in the real ledger, just not in that column.
    */
   verification: "verification",
+  /**
+   * The blind model comparison (src/eval/blind, `npm run blind`): every translation it asks of the
+   * three arms and every judge call. Its own column for the reason verification has one: hundreds
+   * of calls of synthetic text booked as runtime would move the runtime cost per call figure. Each
+   * run's rows also carry the run's own room hash, which is how the run's budget is read back off
+   * the ledger rather than kept in memory.
+   */
+  blindTest: "blind-test",
 } as const;
 
 export interface CapConfig {
