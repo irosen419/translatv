@@ -1594,6 +1594,34 @@ try {
   );
 
   // ---------------------------------------------------------------------
+  section("The public privacy and support pages");
+  // Reachable signed out, as a FIRST navigation (the server's SPA fallback serves the app at
+  // both paths), on a phone width with nothing to scroll sideways.
+  const reader = await (await browser.newContext({ viewport: { width: 360, height: 740 } })).newPage();
+  reader.on("pageerror", (e) => errors.push(`reader: ${e.message}`));
+  await reader.goto(BASE);
+  await waitFor(async () => (await reader.locator(".site-links a").count()) >= 3, "the sign in card to show its links");
+  check(
+    "the sign in card links to privacy, help, and support by mail",
+    JSON.stringify(await reader.locator(".site-links a").evaluateAll((as) => as.map((a) => a.getAttribute("href")))) ===
+      JSON.stringify(["/privacy", "/support", "mailto:help@harness.test"]),
+  );
+  for (const [path, title] of [["/privacy", en("privacy.title")], ["/support", en("support.title")]]) {
+    const response = await reader.goto(`${BASE}${path}`);
+    check(`${path} is served to someone signed out`, response?.status() === 200);
+    await waitFor(async () => (await reader.locator("h1").textContent()) === title, `${path} to render its title`);
+    check(`${path} shows its page, not the sign in form`, (await reader.getByRole("button", { name: en("auth.submit.signIn") }).count()) === 0);
+    check(
+      `${path} fits a phone with no sideways scroll`,
+      await reader.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth),
+    );
+    check(`${path} names the support address as a mailto link`, (await reader.locator("a[href='mailto:help@harness.test']").count()) === 1);
+  }
+  await reader.goto(`${BASE}/privacy`);
+  await waitFor(async () => (await reader.locator("h1").count()) === 1, "the privacy page");
+  check("the privacy page says it is a draft", (await reader.locator(".doc-draft").textContent()) === en("page.draft"));
+  await reader.close();
+
   section("Deleting an account");
   // A page of its own, outside the console error watch above: the wrong password below answers
   // 401 on purpose, and so does the sign in attempt after the account is gone.

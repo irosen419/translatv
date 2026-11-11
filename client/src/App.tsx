@@ -5,6 +5,8 @@ import { Landing } from "./components/Landing.jsx";
 import { PreJoin } from "./components/PreJoin.jsx";
 import { Room } from "./components/Room.jsx";
 import { codeFromPath } from "./lib/code.js";
+import { pageFromPath, PRIVACY_IS_DRAFT } from "./lib/pages.js";
+import { InfoPage } from "./components/InfoPage.jsx";
 import { adoptCameraTrack } from "./rtc/cameraHandoff.js";
 import { acquireCameraTrack, acquireMedia, LevelMeter } from "./rtc/media.js";
 import { PeerConnection } from "./rtc/PeerConnection.js";
@@ -166,6 +168,9 @@ export function App() {
   /** Guards against a second camera acquisition starting while the first is still awaiting the
    * permission prompt, which would otherwise add two video tracks for one click. */
   const acquiringCamera = useRef(false);
+
+  /** /privacy or /support, read once from the address the page was opened at. */
+  const [infoPage] = useState(() => pageFromPath(location.pathname));
 
   // A /r/<code> link lands straight on the join form with the code filled in.
   useEffect(() => {
@@ -629,6 +634,10 @@ export function App() {
   );
 
   const { phase, pendingCode, error, ended } = store;
+
+  // /privacy and /support: public, so they come before the session is looked at. Reached only by
+  // a full navigation (plain links), so the path the page was opened with is the whole answer.
+  if (infoPage) return <InfoPage page={infoPage} draft={PRIVACY_IS_DRAFT} />;
 
   if (phase === "ended" && ended) {
     return (

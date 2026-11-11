@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { PublicUser } from "@translatv/shared";
 import { codeFromShared, isLikelyCode, normalizeCode } from "../lib/code.js";
 import { useCopy } from "../i18n/useCopy.js";
+import { SiteLinks } from "./InfoPage.jsx";
 import type { CopyRef } from "../i18n/copy.js";
 import type { AuthOutcome } from "../lib/session.js";
 import { DeleteAccount } from "./DeleteAccount.jsx";
@@ -133,6 +134,7 @@ export function Landing({
           {user?.isOwner && <OwnerReports key={`reports:${user.id}`} api={safetyFor(user.id)} />}
           {user && <DeleteAccount key={user.id} onDelete={(password) => onDeleteAccount(password, user.id)} />}
         </div>
+        <SiteLinks />
       </div>
     </div>
   );
