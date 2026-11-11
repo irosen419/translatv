@@ -716,8 +716,19 @@ label, .label { display: block; font-size: 13px; color: var(--muted); margin-bot
   opacity: 0;
   transition: opacity 600ms ease-out;
 }
+/* The held sentence fades on its own clock, separately from the scrim, because the live row
+   beneath it can still have words in it. Same asymmetry as above: out slowly, back instantly. */
+.subtitles .held {
+  opacity: 1;
+  transition: none;
+}
+.subtitles .held.faded {
+  opacity: 0;
+  transition: opacity 600ms ease-out;
+}
 @media (prefers-reduced-motion: reduce) {
-  .subtitles.faded {
+  .subtitles.faded,
+  .subtitles .held.faded {
     transition: none;
   }
 }
@@ -745,8 +756,18 @@ label, .label { display: block; font-size: 13px; color: var(--muted); margin-bot
   margin: 0;
   min-height: 1.35em;
 }
-/* Live, still being spoken: dimmed so a settled line reads as settled. */
-.subtitles .original.live { color: rgba(255, 255, 255, 0.55); }
+/* Live, still being spoken, or finished and waiting on its translation. A row of its OWN under
+   the held pair, never one of the pair's rows: stacked straight under a translation it reads as
+   the words that translation is of, and it is the NEXT sentence. Dimmed, upright, and set apart
+   by a gap so a settled line reads as settled and this reads as something else. */
+.subtitles .live {
+  font-size: clamp(13px, 1.4vw, 17px);
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.35;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
+  margin: 14px 0 0;
+}
+.subtitles .live.pending::after { content: " ..."; }
 .subtitles .translated.pending { color: var(--muted); }
 .subtitles .translated.failed { color: var(--muted); font-weight: 400; }
 /* Both overlays, not just the desktop one. Scoped to .subtitles this rule left the mobile marker

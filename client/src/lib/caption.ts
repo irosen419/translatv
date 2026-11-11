@@ -77,27 +77,163 @@ const SKIP_NOTES: Record<SkipReason, CopyKey | null> = {
 };
 
 /**
- * The caption a LIVE subtitle should show while someone may still be talking.
+ * How long a settled subtitle stays up, from the moment it has something readable.
  *
- * A non-empty interim is speech that has not been finalized, so it is strictly newer than the
- * settled line handed in beside it. That makes the settled line the PREVIOUS sentence, and
- * stacking its translation directly above the words being spoken now presents it as a
- * translation OF those words. It is not one. The two rows were routinely different sentences:
- * a Spanish reader saw the translation of what was said a moment ago sitting on top of the live
- * English of what is being said right now, with nothing to say they were unrelated.
+ * Reading time, not a flat timer. This was 3 seconds for every line, which is plenty for "yes"
+ * and nowhere near enough for a twenty word answer: the reader was still on the first half when
+ * it faded. So the floor stays at the old 3 seconds and longer lines buy more, at 300 ms a word,
+ * which is about 200 words a minute: a comfortable pace for subtitles read over a moving picture
+ * by someone who is also watching a face. The ceiling exists because a monologue would otherwise
+ * park its subtitle over the video until it is no longer the thing being talked about.
  *
- * So the top waits, which is what the subtitle overlay always claimed to do and never did. An
- * empty row for the moment between sentences is honest; a confidently wrong pairing is not.
- *
- * The whole caption goes, not just its text. A failure marker left standing over live words
- * accuses the sentence being spoken of a failure that belonged to the last one.
+ * Counted in words of the row the reader actually reads, which is the prominent one.
  */
-export function liveCaptionFor(
-  line: RenderedLine | null,
-  interimText: string,
+export const HOLD_MIN_MS = 3_000;
+export const HOLD_BASE_MS = 1_500;
+export const HOLD_PER_WORD_MS = 300;
+export const HOLD_MAX_MS = 10_000;
+
+export function holdMsFor(text: string): number {
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return Math.min(HOLD_MAX_MS, Math.max(HOLD_MIN_MS, HOLD_BASE_MS + words * HOLD_PER_WORD_MS));
+}
+
+/**
+ * The reading clock for the held line: what restarts it, and how long it runs.
+ *
+ * Keyed on the scalars that change what that line SAYS, not on the line object: lines are derived
+ * per render from the whole transcript, so their identity changes whenever anything is added,
+ * including your OWN speech, and depending on it would restart the clock for as long as you kept
+ * talking. A translation landing, a correction, or a retry changes the key, so the reading time is
+ * time with something readable on screen rather than time spent watching an ellipsis.
+ *
+ * Nothing about the words being spoken now goes in, and that is the fix: the peer starting their
+ * next sentence must not restart the clock. Taking only the line keeps it out of the key by
+ * construction. The timer that runs on the key has to keep it out too; see SubtitleOverlay.
+ */
+export function holdFor(
+  settled: RenderedLine | null,
   viewerDialect: string | null,
-): Caption {
-  return captionFor(interimText ? null : line, viewerDialect);
+): { key: string | null; ms: number } {
+  if (!settled) return { key: null, ms: 0 };
+  return {
+    key: `${settled.lineId}:${settled.revision}:${settled.translationStatus}:${settled.translated ?? ""}`,
+    ms: holdMsFor(captionFor(settled, viewerDialect).primary),
+  };
+}
+
+/**
+ * The two peer lines the desktop subtitle needs.
+ *
+ * `newest` is the peer's latest finalized line, whatever state its translation is in. `settled`
+ * is the latest one whose translation is no longer in flight (landed, failed, or skipped), which
+ * is the line worth holding on screen. They differ exactly while a sentence is waiting on the
+ * model, and that window is where the overlay used to throw away a translation the reader had
+ * not finished.
+ */
+export function peerLinesFor(
+  lines: readonly RenderedLine[],
+  selfId: string | null,
+): { newest: RenderedLine | null; settled: RenderedLine | null } {
+  let newest: RenderedLine | null = null;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const candidate = lines[i];
+    if (!candidate || candidate.from === selfId) continue;
+    newest ??= candidate;
+    if (candidate.translationStatus !== "pending") return { newest, settled: candidate };
+    // A retry puts a line that had already settled back to pending, and it keeps the text it
+    // settled with (the failure fallback), which a line that never settled does not have. Walking
+    // past it would hand back an OLDER line as the one to hold, and bring a sentence the reader had
+    // already finished back on screen for a full hold, in place of the one they asked to retry.
+    // A line that settled once is as far back as this looks.
+    if (candidate.translated !== null) return { newest, settled: null };
+  }
+  return { newest, settled: null };
+}
+
+export interface SubtitleView {
+  /**
+   * The two row block: a sentence's prominent row with its OWN other row beneath. The pair is
+   * never split, which is what makes it safe to keep a sentence up while the next one is spoken.
+   */
+  caption: Caption;
+  /**
+   * Whether the block is on screen. False keeps it IN PLACE but invisible, so a held line can
+   * fade where it stands rather than collapsing and pulling the live row up under the reader.
+   */
+  captionShown: boolean;
+  /**
+   * A row beneath the block for something that is not that sentence: words still being spoken,
+   * or a finished sentence whose translation is in flight (`pending`). Null when there is none.
+   */
+  live: { text: string; pending: boolean } | null;
+  /** The scrim goes, only when there is nothing left to read at all: no block and no live row. */
+  faded: boolean;
+}
+
+/**
+ * What the desktop subtitle shows.
+ *
+ * The rule: a translation stays up until the reader has had time to read it (`heldExpired`,
+ * timed by the caller from holdMsFor) or a newer one replaces it. The peer starting their next
+ * sentence is NEITHER of those. It used to blank the top row on the spot, so in an ordinary back
+ * and forth a translation was on screen for the moment between landing and the next word, and
+ * often never at all, while the side panel showed it fine. That is the "they disappear too soon"
+ * a caller reported.
+ *
+ * The blanking was there for a real reason, and the reason still holds. Stacking the PREVIOUS
+ * sentence's translation directly over the live words of the current one presents it as a
+ * translation of them, and it is not one. So the held sentence keeps its own original beneath it,
+ * and the live words get a separate row of their own below the pair, the same shape the mobile
+ * overlay already uses for them.
+ */
+export function subtitleFor(input: {
+  newest: RenderedLine | null;
+  settled: RenderedLine | null;
+  heldExpired: boolean;
+  interimText: string;
+  viewerDialect: string | null;
+  /**
+   * The caption the block last SHOWED, or null if it never showed one. A hidden block fades out
+   * with this, because the fade is the tail of what was on screen. Fading anything else puts a
+   * sentence on screen for the length of the fade that was not there a moment before.
+   */
+  previous: Caption | null;
+}): SubtitleView {
+  const { newest, settled, heldExpired, interimText, viewerDialect, previous } = input;
+  const held = settled && !heldExpired ? settled : null;
+  const waiting = newest && newest !== settled ? newest : null;
+
+  if (held) {
+    // The newest words win the live row. A sentence that is only waiting on its translation is
+    // the older of the two, and it reaches the screen anyway, as the held line, once it lands.
+    const live = interimText
+      ? { text: interimText, pending: false }
+      : waiting
+        ? { text: waiting.text, pending: true }
+        : null;
+    return { caption: captionFor(held, viewerDialect), captionShown: true, live, faded: false };
+  }
+
+  const live = interimText ? { text: interimText, pending: false } : null;
+
+  // Nothing worth holding, and a sentence in flight with nobody talking over it: the ellipsis on
+  // top and the words beneath, as before. While someone IS talking, the top waits.
+  if (waiting && !live) {
+    return {
+      caption: captionFor(waiting, viewerDialect),
+      captionShown: true,
+      live: null,
+      faded: false,
+    };
+  }
+
+  // Hidden, but still handed back, so it fades where it stands. It is the caption last SHOWN and
+  // not one derived from the lines now, which can be a different sentence: with a held line
+  // expired and the next one waiting, the block showed the waiting ellipsis, and the moment the
+  // peer started talking this used to swap in the expired line and fade THAT, putting a sentence
+  // the reader had already finished back over the live words for the length of the fade.
+  return { caption: previous ?? EMPTY, captionShown: false, live, faded: live === null };
 }
 
 /**

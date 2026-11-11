@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Member, RenderedLine } from "@translatv/shared";
 import { FALLBACK_DIALECT } from "@translatv/shared";
 
+import { peerLinesFor } from "../lib/caption.js";
 import { initialUiDialect, useStore } from "./store.js";
 
 const PEER: Member = {
@@ -367,5 +368,23 @@ describe("initialUiDialect", () => {
   it("takes a dialect of the right language when only the base matches", () => {
     vi.stubGlobal("navigator", { language: "es" });
     expect(initialUiDialect()).toBe("es-AR");
+  });
+});
+
+// The join between this reducer and the subtitle's choice of line. peerLinesFor recognizes a
+// retried line by the text a failure leaves in `translated`, and that text is put there HERE. If
+// this handler stopped leaving it, a retry would hand the subtitle the line BEFORE the one being
+// retried, and bring a sentence the reader had finished back on screen for a full hold.
+describe("a retried line, as the subtitle sees it", () => {
+  it("stops the subtitle walking back past the line being retried", () => {
+    const earlier = line({ lineId: "A", from: "M2", translated: "hola", translationStatus: "ok" });
+    useStore.setState({ lines: [earlier, line({ lineId: "B", from: "M2" })] });
+    const { apply } = useStore.getState();
+    apply({ t: "translation.failed", lineId: "B", status: "unavailable", retriable: true, reason: "PROVIDER_ERROR" });
+    apply({ t: "translation.pending", lineId: "B" });
+
+    const { newest, settled } = peerLinesFor(useStore.getState().lines, "M1");
+    expect(newest?.lineId).toBe("B");
+    expect(settled).toBeNull();
   });
 });

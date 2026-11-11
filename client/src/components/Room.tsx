@@ -8,6 +8,7 @@ import { ConversationOverlay } from "./ConversationOverlay.jsx";
 import { ControlDrawer } from "./ControlDrawer.jsx";
 import { SelectShell } from "./SelectShell.jsx";
 import { ThemePickerView } from "./ThemePicker.jsx";
+import { peerLinesFor } from "../lib/caption.js";
 import { roomLink } from "../lib/code.js";
 import { NARROW_QUERY, useMediaQuery } from "../lib/useMediaQuery.js";
 import { buildChips, isProblem, sttAlert, type Chip, type SttAlert } from "../lib/chips.js";
@@ -451,14 +452,8 @@ export function Room(props: Props) {
     }
   }, [props.remoteStream, peerCameraOn]);
 
-  /** The peer's most recent finalized line drives the overlay. */
-  const peerLine = useMemo(() => {
-    for (let i = lines.length - 1; i >= 0; i -= 1) {
-      const line = lines[i];
-      if (line && line.from !== selfId) return line;
-    }
-    return null;
-  }, [lines, selfId]);
+  /** The peer's newest line, and the newest one with a translation settled, drive the overlay. */
+  const peerLines = useMemo(() => peerLinesFor(lines, selfId), [lines, selfId]);
 
   /**
    * Is the translation toggle meaningful right now?
@@ -703,7 +698,7 @@ export function Room(props: Props) {
             />
           ) : (
             <SubtitleOverlay
-              line={peerLine}
+              peer={peerLines}
               interimText={props.interimText}
               viewerDialect={me?.dialect ?? null}
             />
