@@ -99,6 +99,17 @@ export const COST_TOLERANCE_RELATIVE = 0.001;
  */
 export const COST_TOLERANCE_FLOOR_USD = 1e-9;
 
+/**
+ * Half of the smallest amount a stored cost can express: every cost is rounded to MONEY_PRECISION
+ * decimals, so a correct cost can sit up to this far from its unrounded arithmetic.
+ *
+ * Invisible while the cheapest call cost about $0.001, where it is 0.05 percent and inside the
+ * relative band. A Claude Haiku 5.5 line costs about $0.0001, where it is 0.5 percent, and without
+ * this every such row was refused over the module's own rounding. It is far too small to hide a
+ * real mismatch, which is off by a whole model's pricing.
+ */
+export const COST_TOLERANCE_ROUNDING_USD = 0.5 * 10 ** -MONEY_PRECISION;
+
 export interface SpendRecord {
   ts: string | null;
   project: string;
@@ -275,6 +286,9 @@ function checkCostConsistency(
     (inputTokens / 1_000_000) * inRate + (outputTokens / 1_000_000) * outRate;
   const tolerance = Math.max(
     COST_TOLERANCE_FLOOR_USD,
+    // Plus the tiniest margin, so a cost that rounded exactly half a unit is not refused over the
+    // floating point representation of that half.
+    COST_TOLERANCE_ROUNDING_USD * (1 + 1e-9),
     Math.abs(expected) * COST_TOLERANCE_RELATIVE,
   );
   if (Math.abs(costUsdValue - expected) <= tolerance) return;

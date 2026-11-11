@@ -286,6 +286,21 @@ describe("entry", () => {
     expect(tinyButWrong).toThrow(RangeError);
   });
 
+  it("accepts its own six decimal rounding on a call that costs a hundredth of a cent", () => {
+    // A Haiku 5.5 line costs about $0.0001, where rounding to the house's six decimals moves the
+    // cost by up to half a millionth: 0.5 percent, five times the relative band. Every row such a
+    // call wrote was refused by the module's own rounding (found by the blind test's dry run).
+    const record = entry({ program: "blind-test", kind: "eval", model: "claude-haiku-5-5", inputTokens: 953, outputTokens: 7 });
+    expect(record.cost_usd).toBe(0.000099);
+  });
+
+  it("still refuses a tiny cost that is wrong by more than its rounding", () => {
+    // Expected $0.0000988. A millionth off is twice what rounding can explain.
+    expect(() =>
+      entry({ program: "blind-test", kind: "eval", model: "claude-haiku-5-5", inputTokens: 953, outputTokens: 7, costUsdOverride: 0.000097 }),
+    ).toThrow(RangeError);
+  });
+
   it("does not write image_count, because this project renders nothing", () => {
     // It used to write a literal 0 on the theory that the dashboard needed the key present. It
     // does not: its reader is `value.is_a?(Numeric) ? value.to_i : 0`, so an absent key already
