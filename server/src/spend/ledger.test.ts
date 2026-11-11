@@ -286,6 +286,21 @@ describe("entry", () => {
     expect(tinyButWrong).toThrow(RangeError);
   });
 
+  it("accepts its own six decimal rounding on a call that costs a hundredth of a cent", () => {
+    // A Haiku 5.5 line costs about $0.0001, where rounding to the house's six decimals moves the
+    // cost by up to half a millionth: 0.5 percent, five times the relative band. Every row such a
+    // call wrote was refused by the module's own rounding (found by the blind test's dry run).
+    const record = entry({ program: "blind-test", kind: "eval", model: "claude-haiku-5-5", inputTokens: 953, outputTokens: 7 });
+    expect(record.cost_usd).toBe(0.000099);
+  });
+
+  it("still refuses a tiny cost that is wrong by more than its rounding", () => {
+    // Expected $0.0000988. A millionth off is twice what rounding can explain.
+    expect(() =>
+      entry({ program: "blind-test", kind: "eval", model: "claude-haiku-5-5", inputTokens: 953, outputTokens: 7, costUsdOverride: 0.000097 }),
+    ).toThrow(RangeError);
+  });
+
   it("does not write image_count, because this project renders nothing", () => {
     // It used to write a literal 0 on the theory that the dashboard needed the key present. It
     // does not: its reader is `value.is_a?(Numeric) ? value.to_i : 0`, so an absent key already
@@ -448,6 +463,23 @@ describe("pricing", () => {
     // A price with no citable source does not belong in the table at all.
     const price = priceFor("claude-haiku-4-5");
     expect(price?.source).toBeTruthy();
+  });
+
+  it("stamps a long prompt row with the rates it was billed at, so its arithmetic checks out", () => {
+    // A Haiku 5.5 call over 100,000 input tokens is billed at the long rate on everything. The row
+    // has to say so: written with the short unit prices, its own arithmetic would contradict its
+    // cost, and both readers would show a unit price nobody was charged.
+    const long = entry({ program: "p", kind: "eval", model: "claude-haiku-5-5", inputTokens: 100_001, outputTokens: 1000 });
+    expect(long).toMatchObject({ unit_cost_in_usd_per_mtok: 0.5, unit_cost_out_usd_per_mtok: 2.5, cost_usd: 0.052501 });
+    const short = entry({ program: "p", kind: "eval", model: "claude-haiku-5-5", inputTokens: 100_000, outputTokens: 1000 });
+    expect(short).toMatchObject({ unit_cost_in_usd_per_mtok: 0.1, unit_cost_out_usd_per_mtok: 0.5, cost_usd: 0.0105 });
+  });
+
+  it("refuses a long prompt cost stated at the short rate", () => {
+    // The under-logging this tier exists to prevent, arriving as an override.
+    expect(() =>
+      entry({ program: "p", kind: "eval", model: "claude-haiku-5-5", inputTokens: 100_001, outputTokens: 1000, costUsdOverride: 0.010501 }),
+    ).toThrow(RangeError);
   });
 
   it("rounds to six decimals, matching spend_log.py and the dashboard's Ruby reader", () => {

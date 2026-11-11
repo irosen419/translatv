@@ -42,7 +42,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { costUsd, MONEY_PRECISION, priceFor, roundMoney } from "./pricing.js";
+import { costUsd, MONEY_PRECISION, ratesFor, roundMoney } from "./pricing.js";
 
 export const LEDGER_FILE = "spend_log.jsonl";
 export const MARKDOWN_FILE = "spend_log.md";
@@ -98,6 +98,17 @@ export const COST_TOLERANCE_RELATIVE = 0.001;
  * a tolerance of zero and start refusing rows over pure float noise.
  */
 export const COST_TOLERANCE_FLOOR_USD = 1e-9;
+
+/**
+ * Half of the smallest amount a stored cost can express: every cost is rounded to MONEY_PRECISION
+ * decimals, so a correct cost can sit up to this far from its unrounded arithmetic.
+ *
+ * Invisible while the cheapest call cost about $0.001, where it is 0.05 percent and inside the
+ * relative band. A Claude Haiku 5.5 line costs about $0.0001, where it is 0.5 percent, and without
+ * this every such row was refused over the module's own rounding. It is far too small to hide a
+ * real mismatch, which is off by a whole model's pricing.
+ */
+export const COST_TOLERANCE_ROUNDING_USD = 0.5 * 10 ** -MONEY_PRECISION;
 
 export interface SpendRecord {
   ts: string | null;
@@ -275,6 +286,9 @@ function checkCostConsistency(
     (inputTokens / 1_000_000) * inRate + (outputTokens / 1_000_000) * outRate;
   const tolerance = Math.max(
     COST_TOLERANCE_FLOOR_USD,
+    // Plus the tiniest margin, so a cost that rounded exactly half a unit is not refused over the
+    // floating point representation of that half.
+    COST_TOLERANCE_ROUNDING_USD * (1 + 1e-9),
     Math.abs(expected) * COST_TOLERANCE_RELATIVE,
   );
   if (Math.abs(costUsdValue - expected) <= tolerance) return;
@@ -335,7 +349,9 @@ export function entry(options: EntryOptions): SpendRecord {
     billable = true,
   } = options;
 
-  const price = priceFor(model);
+  // The rates THIS call was billed at: a long prompt is billed at its model's long rate (see
+  // ModelPrice.longPrompt), and a row stamped with the base rate would contradict its own cost.
+  const price = ratesFor(model, inputTokens ?? 0);
   const inRate = price?.inputUsdPerMTok ?? null;
   const outRate = price?.outputUsdPerMTok ?? null;
 

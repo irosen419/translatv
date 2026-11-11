@@ -32,8 +32,16 @@ function trackedFiles() {
   return output.split("\0").filter((path) => path.length > 0);
 }
 
+// Blind test run outputs (npm run blind). They hold model output verbatim: the translations, the
+// judge's answers, and the rating sheet built from them. A model may well write a dash, and editing
+// its output to pass this gate would falsify the very thing the test measures. Everything this
+// repo itself writes into those files (report.md's prose) is dash free and is tested to be
+// (server/src/eval/blind/runner.test.ts).
+const SKIP_PREFIXES = ["out/translatv/blind/"];
+
 function shouldSkip(path) {
   if (SKIP_FILES.has(path)) return true;
+  if (SKIP_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
   const dot = path.lastIndexOf(".");
   return dot !== -1 && SKIP_EXTENSIONS.has(path.slice(dot).toLowerCase());
 }

@@ -133,7 +133,16 @@ export interface LlmClient {
      * the error.
      */
     onLost: () => void;
-  }): Promise<{ text: string; inputTokens: number; outputTokens: number }>;
+  }): Promise<{
+    text: string;
+    inputTokens: number;
+    outputTokens: number;
+    /**
+     * Why the model stopped, as the provider said, when the client knows. Informational: a refusal
+     * already arrives as no text, which is what this service acts on.
+     */
+    stopReason?: string | null;
+  }>;
 }
 
 /** Filled in by execute() for the timing line translate() logs. Null until the provider is called. */
@@ -175,6 +184,18 @@ export class LlmFailure extends Error {
     super(message);
     this.name = "LlmFailure";
   }
+}
+
+/**
+ * The most one request to `model` can be billed: the prompt's UTF-8 bytes plus FRAMING_TOKENS in
+ * (a byte level tokenizer never makes more tokens than bytes, whatever its ratio on ordinary text),
+ * and all of maxOutputTokens out, at the rate a prompt that long is billed at. Null when the model
+ * has no documented price. Exported for the blind test (src/eval/blind), which logs a lost request
+ * exactly as this service does.
+ */
+export function requestWorstCaseUsd(model: string, system: string, user: string, maxOutputTokens: number): number | null {
+  const inputTokens = Buffer.byteLength(system, "utf8") + Buffer.byteLength(user, "utf8") + FRAMING_TOKENS;
+  return costUsd(model, inputTokens, maxOutputTokens);
 }
 
 export class TranslationService {
@@ -542,8 +563,7 @@ export class TranslationService {
    * nobody could recover, and the harmful direction is under-counting.
    */
   private worstCaseUsd(system: string, user: string): number | null {
-    const inputTokens = Buffer.byteLength(system, "utf8") + Buffer.byteLength(user, "utf8") + FRAMING_TOKENS;
-    return costUsd(DEFAULT_MODEL, inputTokens, MAX_OUTPUT_TOKENS);
+    return requestWorstCaseUsd(DEFAULT_MODEL, system, user, MAX_OUTPUT_TOKENS);
   }
 
   /**
