@@ -1,0 +1,33 @@
+{
+  "reports": [
+    {
+      "id": "Qx7pL2vN9cR4tY8wK1mZ3a",
+      "reason": "harassment",
+      "details": "Kept insulting me after I asked them to stop.",
+      "status": "open",
+      "createdAt": 1791403700000,
+      "reviewedAt": null,
+      "reporter": {
+        "userId": "aB3dE5fG7hJ9kL1mN3pQ5r",
+        "displayName": "Ana"
+      },
+      "reported": {
+        "userId": "sT7uV9wX1yZ3aB5cD7eF9g",
+        "displayName": "Ben"
+      }
+    },
+    {
+      "id": "Hj4kL6mN8pQ0rS2tU4vW6x",
+      "reason": "spam_or_scam",
+      "details": null,
+      "status": "reviewed",
+      "createdAt": 1791300000000,
+      "reviewedAt": 1791400000000,
+      "reporter": null,
+      "reported": {
+        "userId": "sT7uV9wX1yZ3aB5cD7eF9g",
+        "displayName": "Ben"
+      }
+    }
+  ]
+}

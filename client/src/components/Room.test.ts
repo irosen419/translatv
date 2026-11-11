@@ -335,6 +335,17 @@ describe("each group keeps its own members", () => {
     expect(ofType(chat, "select")).toEqual([]);
   });
 
+  it("puts Report or block first in the chat controls group when there is someone to report", () => {
+    const used: string[] = [];
+    const props = drawerProps();
+    const tree = drawer({ ...props, chat: { ...props.chat, onReport: () => used.push("report") } });
+    const [, , chatGroup] = groupsOf(tree);
+    const buttons = ofType(chatGroup, "button");
+    expect(buttons.map(visibleTextOf)).toEqual([COPY.t("safety.open"), COPY.t("room.leave"), COPY.t("room.end")]);
+    (buttons[0] as ReactElement).props.onClick();
+    expect(used).toEqual(["report"]);
+  });
+
   it("leaves the dialect picker's sizing to the stylesheet", () => {
     expect(
       dialectSelect(drawer()).props.style,

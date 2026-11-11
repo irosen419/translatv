@@ -112,6 +112,14 @@ export const authErrorCode = z.enum([
    */
   "ACCOUNT_MISMATCH",
   "RATE_LIMITED",
+  /**
+   * The contactId names nobody this account has been on a call with (to block or report), or
+   * nobody it has blocked (to unblock). The same answer for an id that was never anyone's, so it
+   * says nothing about which accounts exist.
+   */
+  "CONTACT_NOT_FOUND",
+  /** The owner asked to review a report id that does not exist. */
+  "REPORT_NOT_FOUND",
 ]);
 export const AUTH_ERROR_CODES = authErrorCode.options;
 export type AuthErrorCode = z.infer<typeof authErrorCode>;

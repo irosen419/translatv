@@ -47,6 +47,12 @@ describe("scrub", () => {
     expect(JSON.stringify(scrubbed)).not.toContain("ana@example.test");
   });
 
+  it("withholds a report's details, the reporter's own words about someone", () => {
+    const scrubbed = scrub({ event: "account.reported", details: "they said awful things" }) as Record<string, unknown>;
+    expect(scrubbed["details"]).toBe("[withheld 22 chars]");
+    expect(JSON.stringify(scrubbed)).not.toContain("awful");
+  });
+
   it("withholds every key that can carry a credential or identify an account holder", () => {
     for (const key of [
       "email",

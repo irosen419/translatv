@@ -26,6 +26,8 @@
         "FORBIDDEN",
         "ACCOUNT_MISMATCH",
         "RATE_LIMITED",
+        "CONTACT_NOT_FOUND",
+        "REPORT_NOT_FOUND",
         "NOT_FOUND",
         "INTERNAL"
       ],
@@ -57,6 +59,38 @@
         "accessExpiresAt",
         "refreshToken",
         "user"
+      ],
+      "type": "object"
+    },
+    "blocksResponse": {
+      "additionalProperties": true,
+      "properties": {
+        "blocked": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "blockedAt": {
+                "type": "number"
+              },
+              "contactId": {
+                "$ref": "#/definitions/callPeer/properties/contactId"
+              },
+              "displayName": {
+                "$ref": "#/definitions/callPeer/properties/displayName"
+              }
+            },
+            "required": [
+              "contactId",
+              "displayName",
+              "blockedAt"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "blocked"
       ],
       "type": "object"
     },
@@ -174,6 +208,20 @@
       ],
       "type": "object"
     },
+    "contactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "contactId": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "contactId"
+      ],
+      "type": "object"
+    },
     "contactsResponse": {
       "additionalProperties": true,
       "properties": {
@@ -257,6 +305,12 @@
         "signup": {
           "$ref": "#/definitions/signupMode"
         },
+        "supportEmail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "translation": {
           "enum": [
             "enabled",
@@ -271,7 +325,8 @@
         "protocolVersion",
         "apiVersion",
         "signup",
-        "translation"
+        "translation",
+        "supportEmail"
       ],
       "type": "object"
     },
@@ -328,6 +383,83 @@
       },
       "required": [
         "user"
+      ],
+      "type": "object"
+    },
+    "ownerReport": {
+      "additionalProperties": true,
+      "properties": {
+        "createdAt": {
+          "type": "number"
+        },
+        "details": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/definitions/reportRequest/properties/reason"
+        },
+        "reported": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ownerReport/properties/reporter/anyOf/0"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reporter": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "properties": {
+                "displayName": {
+                  "type": "string"
+                },
+                "userId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "userId",
+                "displayName"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewedAt": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "open",
+            "reviewed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "reason",
+        "details",
+        "status",
+        "createdAt",
+        "reviewedAt",
+        "reporter",
+        "reported"
       ],
       "type": "object"
     },
@@ -392,6 +524,85 @@
       },
       "required": [
         "refreshToken"
+      ],
+      "type": "object"
+    },
+    "reportReceipt": {
+      "additionalProperties": true,
+      "properties": {
+        "blocked": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "blocked"
+      ],
+      "type": "object"
+    },
+    "reportRequest": {
+      "additionalProperties": true,
+      "properties": {
+        "alsoBlock": {
+          "type": "boolean"
+        },
+        "contactId": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "details": {
+          "description": "At most 500 UTF-16 code units once cleaned (control characters, line breaks included, replaced by spaces, ends trimmed). maxLength counts code points of the raw string, so it is a guide, not the rule: a client that keeps the cleaned text within 500 UTF-16 units is always accepted.",
+          "maxLength": 500,
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "harassment",
+            "hate",
+            "sexual_content",
+            "spam_or_scam",
+            "underage",
+            "other"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "contactId",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "reportsResponse": {
+      "additionalProperties": true,
+      "properties": {
+        "reports": {
+          "items": {
+            "$ref": "#/definitions/ownerReport"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "reports"
+      ],
+      "type": "object"
+    },
+    "reviewReportRequest": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
       ],
       "type": "object"
     },

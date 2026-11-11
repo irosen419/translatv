@@ -8,6 +8,7 @@ import { ConversationOverlay } from "./ConversationOverlay.jsx";
 import { ControlDrawer } from "./ControlDrawer.jsx";
 import { SelectShell } from "./SelectShell.jsx";
 import { ThemePickerView } from "./ThemePicker.jsx";
+import { SafetyDialog, type SafetyActions } from "./SafetyDialog.jsx";
 import { peerLinesFor } from "../lib/caption.js";
 import { roomLink } from "../lib/code.js";
 import { NARROW_QUERY, useMediaQuery } from "../lib/useMediaQuery.js";
@@ -253,6 +254,11 @@ interface ThemeGroup {
 interface ChatControlsGroup {
   onLeave(): void;
   onEnd(): void;
+  /**
+   * Report or block the other person. Absent with nobody there to report, or nothing to name them
+   * by (no contactId), and then the entry is not drawn at all.
+   */
+  onReport?(): void;
 }
 
 export interface DrawerContentsProps {
@@ -359,6 +365,7 @@ export function DrawerContents({ copy, header, language, theme, chat }: DrawerCo
             on screen; the conversation overlay now labels them, so a chip repeating the newest
             one was showing the same sentence twice in two places. */}
         <div className="settings-group">
+          {chat.onReport ? <button onClick={chat.onReport}>{copy.t("safety.open")}</button> : null}
           <button onClick={chat.onLeave}>{copy.t("room.leave")}</button>
           <button className="danger" onClick={chat.onEnd}>
             {copy.t("room.end")}
@@ -390,6 +397,10 @@ interface Props {
   onSendChat(text: string): void;
   /** Switch between the on device and cloud recognizers, which trade privacy against accuracy. */
   onToggleSttEngine(): void;
+  /** Reporting and blocking, as the signed in account. Null when nobody is signed in. */
+  safety: SafetyActions | null;
+  /** A block from inside the call landed, so the call is over: the name is the one on screen. */
+  onBlockedInCall(name: string): void;
 }
 
 export function Room(props: Props) {
@@ -407,6 +418,7 @@ export function Room(props: Props) {
     hasVideo,
     micLevel,
     translationUnavailable,
+    peerContactId,
   } = useStore();
 
   const localVideo = useRef<HTMLVideoElement>(null);
@@ -419,6 +431,8 @@ export function Room(props: Props) {
   // would light both up at once and leave you unsure which thing is on the clipboard.
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
+  /** Who the report or block dialog is open for, fixed when it opened. */
+  const [reporting, setReporting] = useState<{ contactId: string; name: string } | null>(null);
   const [dismissedAlert, setDismissedAlert] = useState<string | null>(null);
   const copy = useCopy();
   const wellStyle = useVideoWellStyle();
@@ -739,9 +753,25 @@ export function Room(props: Props) {
             onToggleTranslation: () => props.onToggleTranslation(!translationOn),
           }}
           theme={{ choice: theme, onChoose: chooseTheme }}
-          chat={{ onLeave: props.onLeave, onEnd: () => setConfirmEnd(true) }}
+          chat={{
+            onLeave: props.onLeave,
+            onEnd: () => setConfirmEnd(true),
+            ...(peer && peerContactId && props.safety
+              ? { onReport: () => setReporting({ contactId: peerContactId, name: peer.username }) }
+              : {}),
+          }}
         />
       </ControlDrawer>
+
+      {reporting && props.safety && (
+        <SafetyDialog
+          contactId={reporting.contactId}
+          name={reporting.name}
+          actions={props.safety}
+          onBlocked={() => props.onBlockedInCall(reporting.name)}
+          onClose={() => setReporting(null)}
+        />
+      )}
 
       {confirmEnd && (
         <EndDialog

@@ -35,6 +35,13 @@ export const AUTH_LIMITS = {
   account: { burst: 30, ratePerSecond: 1 },
 } as const satisfies Record<string, BucketConfig>;
 
+/**
+ * Reports, per ACCOUNT rather than per address: ten in a burst, refilling at ten a day. Enough for
+ * anyone reporting what actually happened to them, and a ceiling on one account filling the
+ * owner's list. In memory, like every limiter here, so a restart refills it.
+ */
+export const REPORT_LIMIT = { burst: 10, ratePerSecond: 10 / 86_400 } as const satisfies BucketConfig;
+
 /** The HTTP status for each refusal. */
 const STATUS: Record<AuthErrorCode, number> = {
   INVALID_INPUT: 400,
@@ -48,6 +55,8 @@ const STATUS: Record<AuthErrorCode, number> = {
   FORBIDDEN: 403,
   ACCOUNT_MISMATCH: 409,
   RATE_LIMITED: 429,
+  CONTACT_NOT_FOUND: 404,
+  REPORT_NOT_FOUND: 404,
 };
 
 function fail(res: Response, error: AuthErrorCode): void {
@@ -75,6 +84,7 @@ export function createAuthRouter(config: Config, auth: AuthService, account?: Ac
     refresh: new TokenBuckets(AUTH_LIMITS.refresh),
     account: new TokenBuckets(AUTH_LIMITS.account),
   };
+  const reportsByUser = new TokenBuckets(REPORT_LIMIT);
 
   // Nothing about a session may be cached by a proxy or the browser.
   router.use((_req, res, next) => {
@@ -217,6 +227,62 @@ export function createAuthRouter(config: Config, auth: AuthService, account?: Ac
       const userId = requireUser(req, res);
       if (userId === null) return;
       res.json(account.contactsFor(userId));
+    });
+
+    // Safety. A person is named by their contactId, resolved only against the caller's own
+    // history (account/service.ts), so these cannot reach anyone the caller has not met.
+    router.get("/me/blocks", limited("account"), (req, res) => {
+      const userId = requireUser(req, res);
+      if (userId === null) return;
+      res.json(account.blocksFor(userId));
+    });
+
+    router.post("/me/blocks", limited("account"), (req, res) => {
+      const userId = requireUser(req, res);
+      if (userId === null) return;
+      answer(res, account.block(userId, req.body, Date.now()));
+    });
+
+    router.delete("/me/blocks", limited("account"), (req, res) => {
+      const userId = requireUser(req, res);
+      if (userId === null) return;
+      answer(res, account.unblock(userId, req.body));
+    });
+
+    router.post("/me/reports", limited("account"), (req, res) => {
+      const userId = requireUser(req, res);
+      if (userId === null) return;
+      const now = Date.now();
+      reportsByUser.sweep(now);
+      if (!reportsByUser.take(userId, now)) {
+        log.warn("account.report_rate_limited", { user: userId });
+        fail(res, "RATE_LIMITED");
+        return;
+      }
+      answer(res, account.report(userId, req.body, now), 201);
+    });
+
+    // The owner's alone. Checked here on every request from the account row, which follows
+    // OWNER_EMAIL (users.ts syncOwner), never from anything the client says about itself.
+    const requireOwner = (req: Request, res: Response): string | null => {
+      const userId = requireUser(req, res);
+      if (userId === null) return null;
+      if (auth.userFor(userId)?.isOwner !== true) {
+        fail(res, "FORBIDDEN");
+        return null;
+      }
+      return userId;
+    };
+
+    router.get("/owner/reports", limited("account"), (req, res) => {
+      if (requireOwner(req, res) === null) return;
+      res.json(account.reportsForOwner());
+    });
+
+    router.post("/owner/reports/review", limited("account"), (req, res) => {
+      const ownerId = requireOwner(req, res);
+      if (ownerId === null) return;
+      answer(res, account.reviewReport(req.body, Date.now()));
     });
   }
 

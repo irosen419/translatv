@@ -44,6 +44,7 @@ function config(): Config {
     authSecret: null,
     signupMode: "invite",
     ownerEmail: null,
+    supportEmail: null,
     dailyCapUsd: 10,
     roomCapUsd: 1.5,
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }],

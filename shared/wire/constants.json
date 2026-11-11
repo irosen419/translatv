@@ -168,6 +168,72 @@
       "request": null,
       "response": "contactsResponse",
       "status": 200
+    },
+    {
+      "bearer": true,
+      "id": "me.blocks.get",
+      "method": "GET",
+      "path": "/api/me/blocks",
+      "request": null,
+      "response": "blocksResponse",
+      "status": 200
+    },
+    {
+      "bearer": true,
+      "id": "me.blocks.create",
+      "method": "POST",
+      "path": "/api/me/blocks",
+      "request": {
+        "in": "body",
+        "schema": "contactRef"
+      },
+      "response": "blocksResponse",
+      "status": 200
+    },
+    {
+      "bearer": true,
+      "id": "me.blocks.delete",
+      "method": "DELETE",
+      "path": "/api/me/blocks",
+      "request": {
+        "in": "body",
+        "schema": "contactRef"
+      },
+      "response": "blocksResponse",
+      "status": 200
+    },
+    {
+      "bearer": true,
+      "id": "me.reports.create",
+      "method": "POST",
+      "path": "/api/me/reports",
+      "request": {
+        "in": "body",
+        "schema": "reportRequest"
+      },
+      "response": "reportReceipt",
+      "status": 201
+    },
+    {
+      "bearer": true,
+      "id": "owner.reports.list",
+      "method": "GET",
+      "path": "/api/owner/reports",
+      "request": null,
+      "response": "reportsResponse",
+      "status": 200
+    },
+    {
+      "bearer": true,
+      "id": "owner.reports.review",
+      "method": "POST",
+      "path": "/api/owner/reports/review",
+      "request": {
+        "in": "body",
+        "schema": "reviewReportRequest"
+      },
+      "response": "ownerReport",
+      "status": 200
     }
   ],
   "LIMITS": {

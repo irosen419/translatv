@@ -1,5 +1,6 @@
 // The per user data API under /api/me and /api/account (M5): preferences, a stored glossary,
-// call history, contacts, and deleting the account.
+// call history, contacts, and deleting the account. And safety: blocks, reports, and the owner's
+// review of reports under /api/owner.
 //
 // Beside auth.ts rather than inside it because it is a different surface (what an account HOLDS,
 // not how a session is had), and in shared for the same reason auth.ts is: the web client and
@@ -139,3 +140,109 @@ export const deleteAccountRequest = z.object({
   userId: z.string().min(1).max(128),
 });
 export type DeleteAccountRequest = z.input<typeof deleteAccountRequest>;
+
+// ---------------------------------------------------------------------------
+// Safety: blocking, reporting, and the owner's review of reports
+// ---------------------------------------------------------------------------
+//
+// A person is named by their contactId, the same per viewer opaque id call history and contacts
+// carry (callPeer above), and never by an account id: being in a call with someone still does not
+// hand you their account id. The server resolves a contactId only against the viewer's OWN call
+// history (or, to unblock, their own blocks), so a person can block or report only someone they
+// have actually been on a call with, and an id typed in from anywhere else names nobody.
+
+/** POST /api/me/blocks and DELETE /api/me/blocks: the person to block or unblock. */
+export const contactRef = z
+  .object({
+    contactId: z.string().min(1).max(64),
+  })
+  .strict();
+export type ContactRef = z.input<typeof contactRef>;
+
+/** Someone this account has blocked. The name is their CURRENT display name, as in contacts. */
+export const blockedPerson = callPeer.extend({
+  /** Epoch milliseconds. */
+  blockedAt: z.number(),
+});
+export type BlockedPerson = z.infer<typeof blockedPerson>;
+
+/**
+ * GET /api/me/blocks, and the answer to blocking and unblocking (the list as it now stands), newest
+ * block first. Blocking is idempotent: blocking someone already blocked answers the same list.
+ */
+export const blocksResponse = z.object({ blocked: z.array(blockedPerson) });
+export type BlocksResponse = z.infer<typeof blocksResponse>;
+
+/** Why someone is being reported. A fixed set, so the owner's list can be read at a glance. */
+export const REPORT_REASONS = ["harassment", "hate", "sexual_content", "spam_or_scam", "underage", "other"] as const;
+export const reportReason = z.enum(REPORT_REASONS);
+export type ReportReason = z.infer<typeof reportReason>;
+
+/** The longest free text a report can carry, once cleaned. */
+export const REPORT_DETAILS_MAX = 500;
+
+/**
+ * POST /api/me/reports.
+ *
+ * details is the reporter's own words, and user content like a transcript: stored for the owner
+ * to read, never logged, and never sent to the person reported. Nothing from the call itself is
+ * attached, because nothing said on a call is stored anywhere to attach.
+ *
+ * alsoBlock blocks the same person in the same transaction as the report, so the two land
+ * together or not at all.
+ */
+export const reportRequest = z.object({
+  contactId: z.string().min(1).max(64),
+  reason: reportReason,
+  details: bodyText(REPORT_DETAILS_MAX).optional(),
+  alsoBlock: z.boolean().optional(),
+});
+export type ReportRequest = z.input<typeof reportRequest>;
+
+/** The answer to a report: its id, and whether the person is now blocked by the reporter. */
+export const reportReceipt = z.object({
+  id: z.string(),
+  blocked: z.boolean(),
+});
+export type ReportReceipt = z.infer<typeof reportReceipt>;
+
+export const reportStatus = z.enum(["open", "reviewed"]);
+export type ReportStatus = z.infer<typeof reportStatus>;
+
+/**
+ * An account as the OWNER's report list shows it. The owner runs the server and already holds
+ * every account id, so this is the one place an account id is sent on purpose. Null on a report
+ * whose account has since been deleted: a report outlives both accounts it names.
+ */
+export const reportParty = z.object({
+  userId: z.string(),
+  displayName: z.string(),
+});
+export type ReportParty = z.infer<typeof reportParty>;
+
+/** One report, as the owner reads it. */
+export const ownerReport = z.object({
+  id: z.string(),
+  reason: reportReason,
+  /** The reporter's own words, or null when they gave none. */
+  details: z.string().nullable(),
+  status: reportStatus,
+  /** Epoch milliseconds. */
+  createdAt: z.number(),
+  /** Epoch milliseconds, or null while open. */
+  reviewedAt: z.number().nullable(),
+  reporter: reportParty.nullable(),
+  reported: reportParty.nullable(),
+});
+export type OwnerReport = z.infer<typeof ownerReport>;
+
+/** The most reports GET /api/owner/reports answers with, newest first. */
+export const REPORTS_LIST_MAX = 200;
+
+/** GET /api/owner/reports. Open reports first, then reviewed, each newest first. */
+export const reportsResponse = z.object({ reports: z.array(ownerReport) });
+export type ReportsResponse = z.infer<typeof reportsResponse>;
+
+/** POST /api/owner/reports/review: mark one report reviewed. Marking it twice is harmless. */
+export const reviewReportRequest = z.object({ id: z.string().min(1).max(64) });
+export type ReviewReportRequest = z.input<typeof reviewReportRequest>;

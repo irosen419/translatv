@@ -24,12 +24,18 @@ function load(name) {
   }
 }
 
-/** The words one dialect reads, as a lookup by key. */
+/**
+ * The words one dialect reads, as a lookup by key. `{name}` placeholders are filled from `params`
+ * when given, the way the client's own interpolate does, so a harness can look for the exact
+ * sentence a person reads ("Block Kit?") rather than a fragment of it.
+ */
 export function copyFor(dialect) {
   const tables = [load(dialect), load(dialect.split("-")[0]), load("en")].filter(Boolean);
-  return (key) => {
+  return (key, params) => {
     for (const table of tables) {
-      if (table[key] !== undefined) return table[key];
+      if (table[key] === undefined) continue;
+      const text = table[key];
+      return params ? text.replace(/\{(\w+)\}/g, (whole, name) => (name in params ? String(params[name]) : whole)) : text;
     }
     throw new Error(`no copy for ${key}`);
   };

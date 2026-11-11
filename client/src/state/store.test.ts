@@ -388,3 +388,52 @@ describe("a retried line, as the subtitle sees it", () => {
     expect(settled).toBeNull();
   });
 });
+
+// Who the other person is, as this reader's contactId, so the drawer can offer to report or block
+// them. It travels beside the member rather than inside it, and goes with them.
+describe("the peer's contactId", () => {
+  const joined = {
+    t: "room.joined" as const,
+    code: "ABCD1234",
+    selfId: "M1",
+    resumeToken: "t",
+    you: { ...PEER, id: "M1", username: "Ana", isHost: true },
+    peer: PEER,
+    polite: true,
+    config: { graceMs: 1, maxMembers: 2 },
+    iceServers: [],
+    snapshot: { lines: [], glossary: [] },
+  };
+
+  beforeEach(() => useStore.getState().reset());
+
+  it("comes with room.joined, and is null when the frame has none", () => {
+    useStore.getState().apply({ ...joined, peerContactId: "c1" });
+    expect(useStore.getState().peerContactId).toBe("c1");
+    useStore.getState().apply(joined);
+    expect(useStore.getState().peerContactId).toBeNull();
+  });
+
+  it("comes with peer.joined, and leaves with peer.left", () => {
+    useStore.getState().apply({ t: "peer.joined", peer: PEER, contactId: "c2" });
+    expect(useStore.getState().peerContactId).toBe("c2");
+    useStore.getState().apply({ t: "peer.left", peerId: PEER.id, reason: "left" });
+    expect(useStore.getState().peerContactId).toBeNull();
+  });
+
+  it("is cleared by reset", () => {
+    useStore.getState().apply({ t: "peer.joined", peer: PEER, contactId: "c2" });
+    useStore.getState().reset();
+    expect(useStore.getState().peerContactId).toBeNull();
+  });
+});
+
+describe("the support contact", () => {
+  it("starts unknown, and survives reset, since it is about the server rather than a call", () => {
+    expect(useStore.getState().supportEmail).toBeNull();
+    useStore.getState().setSupportEmail("help@example.test");
+    useStore.getState().reset();
+    expect(useStore.getState().supportEmail).toBe("help@example.test");
+    useStore.getState().setSupportEmail(null);
+  });
+});

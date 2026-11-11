@@ -18,9 +18,9 @@ import { HTTP_ROUTES, HTTP_SCHEMAS, LIMITS } from "@translatv/shared";
 import type { Config } from "../config.js";
 import { expectContract } from "../contract.testkit.js";
 import { createApp } from "../http.js";
-import { AccountService } from "../account/service.js";
+import { AccountService, contactIdFor } from "../account/service.js";
 import { openStore, type Store } from "../store/index.js";
-import { AUTH_LIMITS, createAuthRouter } from "./routes.js";
+import { AUTH_LIMITS, createAuthRouter, REPORT_LIMIT } from "./routes.js";
 import { AuthService } from "./service.js";
 
 const realFetch = globalThis.fetch;
@@ -86,6 +86,7 @@ function config(): Config {
     authSecret: null,
     signupMode: "invite",
     ownerEmail: "owner@example.test",
+    supportEmail: null,
     dailyCapUsd: 10,
     roomCapUsd: 1.5,
     iceServers: [],
@@ -283,6 +284,12 @@ describe("/api/me", () => {
       ["PUT", "/api/me/glossary"],
       ["GET", "/api/me/calls"],
       ["GET", "/api/me/contacts"],
+      ["GET", "/api/me/blocks"],
+      ["POST", "/api/me/blocks"],
+      ["DELETE", "/api/me/blocks"],
+      ["POST", "/api/me/reports"],
+      ["GET", "/api/owner/reports"],
+      ["POST", "/api/owner/reports/review"],
       ["DELETE", "/api/account"],
     ] as const) {
       const response = await send(method, path, null, method === "GET" ? undefined : {});
@@ -416,6 +423,113 @@ describe("/api/me", () => {
     expect(contacts.contacts).toMatchObject([{ displayName: "ben", callCount: 1 }]);
 
     expect((await send("GET", "/api/me/calls?limit=9999", ana.body.accessToken)).status).toBe(400);
+  });
+});
+
+describe("blocks and reports", () => {
+  /** Two accounts that have been on a call together, and each one's contactId for the other. */
+  async function met() {
+    const ana = await signup("ana@example.test");
+    const ben = await signup("ben@example.test");
+    const anaId = (ana.body.user as { id: string }).id;
+    const benId = (ben.body.user as { id: string }).id;
+    account.callStarted({ userId: anaId, roomHash: "h", peerUserId: benId, now: Date.now() });
+    account.callStarted({ userId: benId, roomHash: "h", peerUserId: anaId, now: Date.now() });
+    return { ana, ben, anaId, benId, anaForBen: contactIdFor(benId, anaId), benForAna: contactIdFor(anaId, benId) };
+  }
+
+  it("blocks, lists and unblocks over HTTP", async () => {
+    const { ana, benForAna } = await met();
+    const blocked = await send("POST", "/api/me/blocks", ana.body.accessToken, { contactId: benForAna });
+    expect(blocked.status).toBe(200);
+    expect(((await blocked.json()) as { blocked: Array<{ displayName: string }> }).blocked.map((b) => b.displayName)).toEqual(["ben"]);
+    const listed = (await (await send("GET", "/api/me/blocks", ana.body.accessToken)).json()) as { blocked: unknown[] };
+    expect(listed.blocked).toHaveLength(1);
+    const contacts = (await (await send("GET", "/api/me/contacts", ana.body.accessToken)).json()) as { contacts: unknown[] };
+    expect(contacts.contacts).toEqual([]);
+    const lifted = await send("DELETE", "/api/me/blocks", ana.body.accessToken, { contactId: benForAna });
+    expect(lifted.status).toBe(200);
+    expect(await lifted.json()).toEqual({ blocked: [] });
+  });
+
+  it("answers 404 CONTACT_NOT_FOUND for a stranger, to block, unblock or report", async () => {
+    const { ana } = await met();
+    const cam = await signup("cam@example.test");
+    const stranger = contactIdFor((ana.body.user as { id: string }).id, (cam.body.user as { id: string }).id);
+    for (const [method, path, body] of [
+      ["POST", "/api/me/blocks", { contactId: stranger }],
+      ["DELETE", "/api/me/blocks", { contactId: stranger }],
+      ["POST", "/api/me/reports", { contactId: stranger, reason: "hate" }],
+    ] as const) {
+      const response = await send(method, path, ana.body.accessToken, body);
+      expect(response.status, `${method} ${path}`).toBe(404);
+      expect(await response.json()).toEqual({ error: "CONTACT_NOT_FOUND" });
+    }
+  });
+
+  it("answers 400 INVALID_INPUT for a report that does not parse", async () => {
+    const { ana, benForAna } = await met();
+    const response = await send("POST", "/api/me/reports", ana.body.accessToken, { contactId: benForAna, reason: "rude" });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "INVALID_INPUT" });
+  });
+
+  it("takes a report with 201, and blocks with it when asked", async () => {
+    const { ana, anaId, benId, benForAna } = await met();
+    const response = await send("POST", "/api/me/reports", ana.body.accessToken, {
+      contactId: benForAna,
+      reason: "harassment",
+      details: "kept at it",
+      alsoBlock: true,
+    });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ blocked: true });
+    expect(account.blockedBetween(anaId, benId)).toBe(true);
+  });
+
+  it("limits each account to REPORT_LIMIT.burst reports, then answers 429 RATE_LIMITED; another account is unaffected", async () => {
+    const { ana, ben, benForAna, anaForBen } = await met();
+    for (let i = 0; i < REPORT_LIMIT.burst; i += 1) {
+      expect((await send("POST", "/api/me/reports", ana.body.accessToken, { contactId: benForAna, reason: "spam_or_scam" })).status).toBe(201);
+    }
+    const over = await send("POST", "/api/me/reports", ana.body.accessToken, { contactId: benForAna, reason: "spam_or_scam" });
+    expect(over.status).toBe(429);
+    expect(await over.json()).toEqual({ error: "RATE_LIMITED" });
+    expect(store.db.prepare("SELECT count(*) AS n FROM reports").get()?.["n"]).toBe(REPORT_LIMIT.burst);
+    expect((await send("POST", "/api/me/reports", ben.body.accessToken, { contactId: anaForBen, reason: "other" })).status).toBe(201);
+  });
+
+  it("is about ten a day", () => {
+    expect(REPORT_LIMIT.burst).toBe(10);
+    expect(REPORT_LIMIT.ratePerSecond * 86_400).toBeCloseTo(10);
+  });
+
+  it("lets only the owner list reports and mark one reviewed; everyone else is answered 403 FORBIDDEN", async () => {
+    const { ana, benForAna } = await met();
+    const made = (await (await send("POST", "/api/me/reports", ana.body.accessToken, { contactId: benForAna, reason: "hate", details: "words" })).json()) as { id: string };
+
+    for (const [method, path, body] of [
+      ["GET", "/api/owner/reports", undefined],
+      ["POST", "/api/owner/reports/review", { id: made.id }],
+    ] as const) {
+      const refused = await send(method, path, ana.body.accessToken, body);
+      expect(refused.status, `${method} ${path}`).toBe(403);
+      expect(await refused.json()).toEqual({ error: "FORBIDDEN" });
+    }
+    expect(store.db.prepare("SELECT status FROM reports").get()?.["status"]).toBe("open");
+
+    const owner = await signup("owner@example.test");
+    const list = (await (await send("GET", "/api/owner/reports", owner.body.accessToken)).json()) as { reports: Array<Record<string, unknown>> };
+    expect(list.reports).toHaveLength(1);
+    expect(list.reports[0]).toMatchObject({ id: made.id, reason: "hate", details: "words", status: "open" });
+
+    const reviewed = await send("POST", "/api/owner/reports/review", owner.body.accessToken, { id: made.id });
+    expect(reviewed.status).toBe(200);
+    expect(await reviewed.json()).toMatchObject({ id: made.id, status: "reviewed" });
+
+    const missing = await send("POST", "/api/owner/reports/review", owner.body.accessToken, { id: "no-such-report" });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: "REPORT_NOT_FOUND" });
   });
 });
 

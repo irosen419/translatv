@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { MIN_PASSWORD_LENGTH, type SignupMode } from "@translatv/shared";
 import { useCopy } from "../i18n/useCopy.js";
+import { SiteLinks } from "./InfoPage.jsx";
 import type { CopyKey, CopyRef } from "../i18n/copy.js";
 import type { AuthFailure, AuthOutcome } from "../lib/session.js";
 
@@ -186,6 +187,7 @@ export function AuthScreen({ signupMode, error, onSignIn, onSignUp }: Props) {
             {copy.t(mode === "signIn" ? "auth.switch.toSignUp" : "auth.switch.toSignIn")}
           </button>
         </div>
+        <SiteLinks />
       </div>
     </div>
   );

@@ -64,6 +64,7 @@ describe("healthResponse", () => {
     signup: "invite",
     translation: "failed",
     reason: "the key was rejected",
+    supportEmail: null,
   };
 
   it("describes /healthz with both versions", () => {
@@ -77,5 +78,36 @@ describe("healthResponse", () => {
   it("takes any positive integer version, so an app can read a newer server's and refuse politely", () => {
     expect(healthResponse.safeParse({ ...body, apiVersion: API_VERSION + 5 }).success).toBe(true);
     expect(healthResponse.safeParse({ ...body, apiVersion: 0 }).success).toBe(false);
+  });
+});
+
+describe("the safety routes", () => {
+  const byId = (id: string) => HTTP_ROUTES.find((route) => route.id === id);
+
+  it("are listed, each with the schema the server parses and answers with", () => {
+    expect(byId("me.blocks.get")).toMatchObject({ method: "GET", path: "/api/me/blocks", bearer: true, request: null, status: 200, response: "blocksResponse" });
+    expect(byId("me.blocks.create")).toMatchObject({ method: "POST", path: "/api/me/blocks", bearer: true, request: { in: "body", schema: "contactRef" }, status: 200, response: "blocksResponse" });
+    expect(byId("me.blocks.delete")).toMatchObject({ method: "DELETE", path: "/api/me/blocks", bearer: true, request: { in: "body", schema: "contactRef" }, status: 200, response: "blocksResponse" });
+    expect(byId("me.reports.create")).toMatchObject({ method: "POST", path: "/api/me/reports", bearer: true, request: { in: "body", schema: "reportRequest" }, status: 201, response: "reportReceipt" });
+    expect(byId("owner.reports.list")).toMatchObject({ method: "GET", path: "/api/owner/reports", bearer: true, request: null, status: 200, response: "reportsResponse" });
+    expect(byId("owner.reports.review")).toMatchObject({ method: "POST", path: "/api/owner/reports/review", bearer: true, request: { in: "body", schema: "reviewReportRequest" }, status: 200, response: "ownerReport" });
+  });
+
+  it("have codes for a contact or report that is not there", () => {
+    expect(AUTH_ERROR_CODES).toContain("CONTACT_NOT_FOUND");
+    expect(AUTH_ERROR_CODES).toContain("REPORT_NOT_FOUND");
+  });
+});
+
+describe("healthResponse's support contact", () => {
+  const body = { ok: true, protocolVersion: PROTOCOL_VERSION, apiVersion: API_VERSION, signup: "invite", translation: "enabled" };
+
+  it("is an address, or null when the server has none", () => {
+    expect(healthResponse.safeParse({ ...body, supportEmail: "help@example.test" }).success).toBe(true);
+    expect(healthResponse.safeParse({ ...body, supportEmail: null }).success).toBe(true);
+  });
+
+  it("is always present, so a client never has to guess what absence means", () => {
+    expect(healthResponse.safeParse(body).success).toBe(false);
   });
 });

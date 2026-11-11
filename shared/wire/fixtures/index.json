@@ -51,6 +51,11 @@
     "error",
     "healthz.response",
     "invites.create.response",
+    "me.blocks.create.request",
+    "me.blocks.create.response",
+    "me.blocks.delete.request",
+    "me.blocks.delete.response",
+    "me.blocks.get.response",
     "me.calls.request",
     "me.calls.response",
     "me.contacts.response",
@@ -59,6 +64,11 @@
     "me.glossary.put.response",
     "me.preferences.get.response",
     "me.preferences.put.request",
-    "me.preferences.put.response"
+    "me.preferences.put.response",
+    "me.reports.create.request",
+    "me.reports.create.response",
+    "owner.reports.list.response",
+    "owner.reports.review.request",
+    "owner.reports.review.response"
   ]
 }

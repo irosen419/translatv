@@ -5,6 +5,8 @@ import { Landing } from "./components/Landing.jsx";
 import { PreJoin } from "./components/PreJoin.jsx";
 import { Room } from "./components/Room.jsx";
 import { codeFromPath } from "./lib/code.js";
+import { pageFromPath, PRIVACY_IS_DRAFT } from "./lib/pages.js";
+import { InfoPage } from "./components/InfoPage.jsx";
 import { adoptCameraTrack } from "./rtc/cameraHandoff.js";
 import { acquireCameraTrack, acquireMedia, LevelMeter } from "./rtc/media.js";
 import { PeerConnection } from "./rtc/PeerConnection.js";
@@ -15,6 +17,7 @@ import { AuthScreen } from "./components/AuthScreen.jsx";
 import { browserLock, browserStore, SessionManager } from "./lib/session.js";
 import { PreferenceSync } from "./lib/preferences.js";
 import { savedCorrectionsRegistry } from "./lib/savedCorrections.js";
+import { safetyRegistry } from "./lib/safety.js";
 import { useCopy } from "./i18n/useCopy.js";
 import { useApplyTheme } from "./theme/useTheme.js";
 import type { CopyRef } from "./i18n/copy.js";
@@ -63,6 +66,9 @@ const preferenceSync = new PreferenceSync((path, init) => session.authorizedFetc
 /** An account's saved corrections, listed on the start page with a delete, each pinned to its account. */
 const savedCorrectionsFor = savedCorrectionsRegistry(session);
 
+/** Blocking, reporting, recent calls and the owner's reports, each pinned to its account. */
+const safetyFor = safetyRegistry(session);
+
 /**
  * Mint an invite as the owner. The server checks ownership; this only asks.
  * Null for any refusal, which the landing page turns into one sentence.
@@ -96,6 +102,9 @@ export function App() {
         const mode = (body as { signup?: unknown }).signup;
         // Only a value it knows moves it. Anything else leaves the cautious default ("invite").
         if (mode === "invite" || mode === "open") useStore.getState().setSignupMode(mode);
+        // A string or nothing: anything else shows no address rather than a broken link.
+        const support = (body as { supportEmail?: unknown }).supportEmail;
+        useStore.getState().setSupportEmail(typeof support === "string" && support.includes("@") ? support : null);
       })
       .catch(() => {
         // Unreachable server. The default already shows the invite field, which is the safe
@@ -160,6 +169,9 @@ export function App() {
   /** Guards against a second camera acquisition starting while the first is still awaiting the
    * permission prompt, which would otherwise add two video tracks for one click. */
   const acquiringCamera = useRef(false);
+
+  /** /privacy or /support, read once from the address the page was opened at. */
+  const [infoPage] = useState(() => pageFromPath(location.pathname));
 
   // A /r/<code> link lands straight on the join form with the code filled in.
   useEffect(() => {
@@ -624,6 +636,10 @@ export function App() {
 
   const { phase, pendingCode, error, ended } = store;
 
+  // /privacy and /support: public, so they come before the session is looked at. Reached only by
+  // a full navigation (plain links), so the path the page was opened with is the whole answer.
+  if (infoPage) return <InfoPage page={infoPage} draft={PRIVACY_IS_DRAFT} />;
+
   if (phase === "ended" && ended) {
     return (
       <div className="center">
@@ -680,6 +696,15 @@ export function App() {
           }
           void stt.current?.setPreferOnDevice(next);
         }}
+        safety={store.session.user ? safetyFor(store.session.user.id) : null}
+        onBlockedInCall={(name) => {
+          // The server has ended the call for both, as End chat would. Close the socket FIRST, so
+          // its room.ended (which names this person as the one who ended it) cannot land after
+          // this and replace the sentence that says what actually happened.
+          socket.current?.close();
+          teardown();
+          useStore.getState().setEnded({ reason: "ended", notice: { key: "safety.ended.blocked", params: { name } } });
+        }}
       />
     );
   }
@@ -731,6 +756,7 @@ export function App() {
       onCreateInvite={createInvite}
       onDeleteAccount={(password, userId) => session.deleteAccount(password, userId)}
       savedCorrectionsFor={savedCorrectionsFor}
+      safetyFor={safetyFor}
       onCreate={() => {
         setMode("create");
         useStore.getState().setError(null);
