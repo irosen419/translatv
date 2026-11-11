@@ -8,7 +8,7 @@ ES_TGTS = ["es-AR", "es-CO", "es-MX", "es-ES"]
 
 raw = open(PATH, "rb").read()
 raw.decode("utf-8")  # raises on invalid UTF-8
-assert "–" not in raw.decode("utf-8") and "—" not in raw.decode("utf-8"), "en or em dash found"
+assert "\u2013" not in raw.decode("utf-8") and "\u2014" not in raw.decode("utf-8"), "en or em dash found"
 lines = raw.decode("utf-8").splitlines()
 assert len(lines) == 625, f"expected 625 lines, got {len(lines)}"
 rows = [json.loads(l) for l in lines]
