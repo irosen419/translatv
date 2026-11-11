@@ -1,0 +1,625 @@
+{"id": "b0001", "conv": "c001", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "Hi sweetie can you hear me okay", "address": "singular", "tags": []}
+{"id": "b0002", "conv": "c001", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "you look tired, are you sleeping enough down there or are you staying up all night again with your friends like you used to do here", "address": "singular", "tags": ["ambiguous", "long"]}
+{"id": "b0003", "conv": "c001", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "your dad says hi he's out in the garage fixing the lawnmower again even though I told him a hundred times to just buy a new one", "address": "singular", "tags": ["long"]}
+{"id": "b0004", "conv": "c001", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "Did you ever call your aunt Rosa back", "address": "singular", "tags": ["names"]}
+{"id": "b0005", "conv": "c001", "seq": 5, "src": "en-US", "tgt": "es-AR", "text": "ok call her this weekend please", "address": "singular", "tags": ["short"]}
+{"id": "b0006", "conv": "c002", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "are you guys still coming Saturday", "address": "plural", "tags": ["short"]}
+{"id": "b0007", "conv": "c002", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "I'm making burgers and maybe some chorizo", "address": "none", "tags": []}
+{"id": "b0008", "conv": "c002", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "bring whatever you two want to drink", "address": "plural", "tags": []}
+{"id": "b0009", "conv": "c002", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "it starts at like 7:30 but honestly nobody ever shows up before 9 so don't stress about it if you're running late or whatever", "address": "plural", "tags": ["numbers", "long"]}
+{"id": "b0010", "conv": "c002", "seq": 5, "src": "en-US", "tgt": "es-AR", "text": "You can crash on the couch if it gets late", "address": "singular", "tags": ["idiom"]}
+{"id": "b0011", "conv": "c003", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "wait you froze", "address": "singular", "tags": ["short"]}
+{"id": "b0012", "conv": "c003", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "can you hear me now", "address": "singular", "tags": ["short"]}
+{"id": "b0013", "conv": "c003", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "my wifi is acting up again sorry", "address": "none", "tags": ["loanword"]}
+{"id": "b0014", "conv": "c003", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "try turning your camera off and back on", "address": "singular", "tags": []}
+{"id": "b0015", "conv": "c004", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "Hi this is Maya from apartment 4B, did you get my email about the heater", "address": "singular", "tags": ["names", "numbers"]}
+{"id": "b0016", "conv": "c004", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "it's been making this clicking noise since Tuesday and um at night it's so loud that I can't really sleep and the apartment gets super cold by the morning", "address": "none", "tags": ["long"]}
+{"id": "b0017", "conv": "c004", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "um could you send someone before the weekend", "address": "singular", "tags": ["ambiguous"]}
+{"id": "b0018", "conv": "c004", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "I'll be home after 5 every day this week", "address": "none", "tags": ["numbers"]}
+{"id": "b0019", "conv": "c004", "seq": 5, "src": "en-US", "tgt": "es-AR", "text": "thanks I really appreciate it", "address": "singular", "tags": ["short"]}
+{"id": "b0020", "conv": "c005", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "I miss you so much", "address": "singular", "tags": ["short"]}
+{"id": "b0021", "conv": "c005", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "what did you have for dinner", "address": "singular", "tags": ["short"]}
+{"id": "b0022", "conv": "c005", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "honestly I just ate cereal standing over the sink because I got home at like ten and I was way too tired to cook anything", "address": "none", "tags": ["long"]}
+{"id": "b0023", "conv": "c005", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "don't laugh at me", "address": "singular", "tags": ["short"]}
+{"id": "b0024", "conv": "c005", "seq": 5, "src": "en-US", "tgt": "es-AR", "text": "you're the one who left me here with a sink full of dishes and a cat that refuses to eat anything except the expensive food you buy", "address": "singular", "tags": ["long"]}
+{"id": "b0025", "conv": "c006", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "so the blood work came back mostly normal", "address": "none", "tags": []}
+{"id": "b0026", "conv": "c006", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "Are you still taking the 20 milligrams in the morning", "address": "singular", "tags": ["numbers"]}
+{"id": "b0027", "conv": "c006", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "any dizziness or headaches since we last talked", "address": "none", "tags": []}
+{"id": "b0028", "conv": "c006", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "I'd like you to keep a log of your blood pressure for two weeks, once in the morning and once at night, and bring it with you to the next appointment", "address": "singular", "tags": ["numbers", "long"]}
+{"id": "b0029", "conv": "c006", "seq": 5, "src": "en-US", "tgt": "es-AR", "text": "if it goes over 140 call the office right away", "address": "singular", "tags": ["numbers"]}
+{"id": "b0030", "conv": "c007", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "okay so did you all see the new deadline", "address": "plural", "tags": []}
+{"id": "b0031", "conv": "c007", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "they moved the launch up to March 3rd which I mean is basically impossible with the current team and nobody even asked us before they told the client", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0032", "conv": "c007", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "I'm not even mad I'm just tired", "address": "none", "tags": []}
+{"id": "b0033", "conv": "c007", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "can you ping Diego and ask if QA can start early", "address": "singular", "tags": ["names", "loanword"]}
+{"id": "b0034", "conv": "c007", "seq": 5, "src": "en-US", "tgt": "es-AR", "text": "Thanks you're a lifesaver", "address": "singular", "tags": ["idiom", "short"]}
+{"id": "b0035", "conv": "c008", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "Your English is getting really good by the way", "address": "singular", "tags": []}
+{"id": "b0036", "conv": "c008", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "how do you say pain in the neck in Spanish", "address": "singular", "tags": ["idiom"]}
+{"id": "b0037", "conv": "c008", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "ha that's funny we say it kind of the same way but we use the word for kidney instead of neck, don't ask me why", "address": "none", "tags": ["long"]}
+{"id": "b0038", "conv": "c008", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "okay now you ask me something", "address": "singular", "tags": ["short"]}
+{"id": "b0039", "conv": "c009", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "we land in Buenos Aires at 6 a.m. on the 14th", "address": "none", "tags": ["names", "numbers"]}
+{"id": "b0040", "conv": "c009", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "is it easier to take a remis or an Uber from the airport or should we just get one of those shuttle vans that go to the city center", "address": "none", "tags": ["loanword", "names", "long"]}
+{"id": "b0041", "conv": "c009", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "you guys don't have to pick us up seriously", "address": "plural", "tags": []}
+{"id": "b0042", "conv": "c009", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "Do you two want anything from the duty free", "address": "plural", "tags": ["loanword"]}
+{"id": "b0043", "conv": "c009", "seq": 5, "src": "en-US", "tgt": "es-AR", "text": "my sister wants alfajores she won't stop talking about them since she tried the ones you brought us last year at Christmas", "address": "singular", "tags": ["long"]}
+{"id": "b0044", "conv": "c010", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "hey did you get the transfer I sent last night", "address": "singular", "tags": []}
+{"id": "b0045", "conv": "c010", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "it was 45,000 pesos for the rent and the internet", "address": "none", "tags": ["numbers"]}
+{"id": "b0046", "conv": "c010", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "Let me know if it didn't go through", "address": "singular", "tags": []}
+{"id": "b0047", "conv": "c010", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "the bank app is down half the time so if it doesn't show up by tomorrow I'll just go to the branch and do it in person", "address": "none", "tags": ["long"]}
+{"id": "b0048", "conv": "c011", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "say hi to Grandpa Tomás sweetheart", "address": "singular", "tags": ["names", "short"]}
+{"id": "b0049", "conv": "c011", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "she's being shy today she was talking nonstop five minutes ago about how she was going to tell you all about her new school", "address": "singular", "tags": ["long"]}
+{"id": "b0050", "conv": "c011", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "Show him the drawing you made", "address": "singular", "tags": ["short"]}
+{"id": "b0051", "conv": "c011", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "that's a horse apparently not a dog", "address": "none", "tags": []}
+{"id": "b0052", "conv": "c011", "seq": 5, "src": "en-US", "tgt": "es-AR", "text": "you're so patient with her honestly", "address": "singular", "tags": ["short"]}
+{"id": "b0053", "conv": "c012", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "anyway how's the weather on your end", "address": "singular", "tags": []}
+{"id": "b0054", "conv": "c012", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "it's freezing here it's like 2 degrees", "address": "none", "tags": ["numbers"]}
+{"id": "b0055", "conv": "c012", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "Is it hot there already", "address": "none", "tags": ["short"]}
+{"id": "b0056", "conv": "c012", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "lucky you", "address": "singular", "tags": ["idiom", "short"]}
+{"id": "b0057", "conv": "c013", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "okay you're not gonna believe this", "address": "singular", "tags": ["short"]}
+{"id": "b0058", "conv": "c013", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "Lucas and Sofi broke up", "address": "none", "tags": ["names", "short"]}
+{"id": "b0059", "conv": "c013", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "yeah after six years", "address": "none", "tags": ["numbers", "short"]}
+{"id": "b0060", "conv": "c013", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "did you know", "address": "singular", "tags": ["short"]}
+{"id": "b0061", "conv": "c013", "seq": 5, "src": "en-US", "tgt": "es-AR", "text": "swear you won't tell anybody because Sofi made me promise and if she finds out I told you she's literally never going to speak to me again", "address": "singular", "tags": ["names", "long"]}
+{"id": "b0062", "conv": "c014", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "what are you cooking, it looks amazing", "address": "singular", "tags": []}
+{"id": "b0063", "conv": "c014", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "it's my grandma's empanada recipe", "address": "none", "tags": ["short"]}
+{"id": "b0064", "conv": "c014", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "you have to send me the recipe", "address": "singular", "tags": []}
+{"id": "b0065", "conv": "c014", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "Do you bake them or fry them", "address": "singular", "tags": []}
+{"id": "b0066", "conv": "c015", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "can you all scoot closer I can only see half of you", "address": "plural", "tags": []}
+{"id": "b0067", "conv": "c015", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "you two in the back I can't hear you", "address": "plural", "tags": []}
+{"id": "b0068", "conv": "c015", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "okay that's better", "address": "none", "tags": ["short"]}
+{"id": "b0069", "conv": "c015", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "so what are you guys doing for Christmas this year are you staying in the city or going somewhere with the kids like last time", "address": "plural", "tags": ["long"]}
+{"id": "b0070", "conv": "c015", "seq": 5, "src": "en-US", "tgt": "es-AR", "text": "we're thinking about going to Mar del Plata for a week in January if we can find somewhere that isn't ridiculously expensive", "address": "none", "tags": ["names", "long"]}
+{"id": "b0071", "conv": "c016", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "So tell me a little about yourself", "address": "singular", "tags": []}
+{"id": "b0072", "conv": "c016", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "why do you want to leave your current job", "address": "singular", "tags": []}
+{"id": "b0073", "conv": "c016", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "we're looking for someone who can start on the first of the month and who's comfortable working with clients in both English and Spanish over the phone", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0074", "conv": "c016", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "Do you have any questions for me", "address": "singular", "tags": ["ambiguous"]}
+{"id": "b0075", "conv": "c017", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "did you go to the gym today", "address": "singular", "tags": []}
+{"id": "b0076", "conv": "c017", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "I skipped again I know I know", "address": "none", "tags": []}
+{"id": "b0077", "conv": "c017", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "You were supposed to keep me accountable", "address": "singular", "tags": []}
+{"id": "b0078", "conv": "c017", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "starting Monday for real this time", "address": "none", "tags": ["short"]}
+{"id": "b0079", "conv": "c018", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "my neighbor is a nurse at the Italian hospital", "address": "none", "tags": ["ambiguous"]}
+{"id": "b0080", "conv": "c018", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "the new teacher is really strict", "address": "none", "tags": ["ambiguous", "short"]}
+{"id": "b0081", "conv": "c018", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "are you sure", "address": "singular", "tags": ["ambiguous", "short"]}
+{"id": "b0082", "conv": "c018", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "We're ready whenever you are", "address": "singular", "tags": ["ambiguous", "short"]}
+{"id": "b0083", "conv": "c019", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "Sorry I'm late, have you been waiting long", "address": "singular", "tags": []}
+{"id": "b0084", "conv": "c019", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "the bus just never came and then the next one was packed so I had to wait for a third one in the rain like an idiot", "address": "none", "tags": ["long"]}
+{"id": "b0085", "conv": "c019", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "did you already eat", "address": "singular", "tags": ["short"]}
+{"id": "b0086", "conv": "c019", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "ok let's do it quick then I have class at 3", "address": "none", "tags": ["numbers"]}
+{"id": "b0087", "conv": "c020", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "Could you guys help me move on Sunday", "address": "plural", "tags": []}
+{"id": "b0088", "conv": "c020", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "it's just a few boxes and a mattress", "address": "none", "tags": []}
+{"id": "b0089", "conv": "c020", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "I'll buy you both pizza and beer", "address": "plural", "tags": []}
+{"id": "b0090", "conv": "c020", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "does your brother still have that truck", "address": "singular", "tags": []}
+{"id": "b0091", "conv": "c020", "seq": 5, "src": "en-US", "tgt": "es-AR", "text": "um I think it's like a twenty minute drive from my place to the new apartment, maybe thirty if there's traffic on the highway", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0092", "conv": "c021", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "can you see my screen", "address": "singular", "tags": ["short"]}
+{"id": "b0093", "conv": "c021", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "it's the spreadsheet with the budget for the trip that Vale and I put together last weekend, it's still kind of a mess", "address": "none", "tags": ["long"]}
+{"id": "b0094", "conv": "c021", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "scroll down to row 32", "address": "singular", "tags": ["numbers", "short"]}
+{"id": "b0095", "conv": "c021", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "no not that one the one highlighted in yellow", "address": "singular", "tags": []}
+{"id": "b0096", "conv": "c022", "seq": 1, "src": "en-US", "tgt": "es-AR", "text": "happy birthday", "address": "none", "tags": ["short"]}
+{"id": "b0097", "conv": "c022", "seq": 2, "src": "en-US", "tgt": "es-AR", "text": "How does it feel to be 30", "address": "none", "tags": ["numbers"]}
+{"id": "b0098", "conv": "c022", "seq": 3, "src": "en-US", "tgt": "es-AR", "text": "did you guys go out last night or stay in", "address": "plural", "tags": []}
+{"id": "b0099", "conv": "c022", "seq": 4, "src": "en-US", "tgt": "es-AR", "text": "I sent you a little something it should get there Thursday", "address": "singular", "tags": []}
+{"id": "b0100", "conv": "c022", "seq": 5, "src": "en-US", "tgt": "es-AR", "text": "don't open it until I'm on the call with you okay because I want to see your face when you open it and I already know you're going to cry", "address": "singular", "tags": ["long"]}
+{"id": "b0101", "conv": "c023", "seq": 1, "src": "en-GB", "tgt": "es-AR", "text": "Are you alright, you look knackered", "address": "singular", "tags": ["idiom", "ambiguous", "short"]}
+{"id": "b0102", "conv": "c023", "seq": 2, "src": "en-GB", "tgt": "es-AR", "text": "the flat's been an absolute tip since my flatmate moved out", "address": "none", "tags": ["idiom"]}
+{"id": "b0103", "conv": "c023", "seq": 3, "src": "en-GB", "tgt": "es-AR", "text": "fancy coming round for a cuppa on Sunday", "address": "singular", "tags": ["idiom"]}
+{"id": "b0104", "conv": "c023", "seq": 4, "src": "en-GB", "tgt": "es-AR", "text": "I'll nip to Tesco and get some biscuits", "address": "none", "tags": ["names"]}
+{"id": "b0105", "conv": "c023", "seq": 5, "src": "en-GB", "tgt": "es-AR", "text": "brilliant cheers, see you then", "address": "singular", "tags": ["short"]}
+{"id": "b0106", "conv": "c024", "seq": 1, "src": "en-GB", "tgt": "es-AR", "text": "right, have you all had a chance to look at the proposal", "address": "plural", "tags": []}
+{"id": "b0107", "conv": "c024", "seq": 2, "src": "en-GB", "tgt": "es-AR", "text": "the budget's about 12,000 pounds over what we agreed back in January, so we'll need to find some savings somewhere or go back to the board", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0108", "conv": "c024", "seq": 3, "src": "en-GB", "tgt": "es-AR", "text": "could you two sort out the figures by Friday", "address": "plural", "tags": []}
+{"id": "b0109", "conv": "c024", "seq": 4, "src": "en-GB", "tgt": "es-AR", "text": "I'm off on holiday from the 22nd so it's a bit tight, and I'd rather not be answering emails from a sun lounger if I can possibly avoid it", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0110", "conv": "c024", "seq": 5, "src": "en-GB", "tgt": "es-AR", "text": "Cheers, I owe you one", "address": "singular", "tags": ["idiom", "short"]}
+{"id": "b0111", "conv": "c025", "seq": 1, "src": "en-GB", "tgt": "es-AR", "text": "we're getting the train from King's Cross at quarter past nine", "address": "none", "tags": ["names", "numbers"]}
+{"id": "b0112", "conv": "c025", "seq": 2, "src": "en-GB", "tgt": "es-AR", "text": "have you booked the B&B yet", "address": "singular", "tags": ["loanword", "short"]}
+{"id": "b0113", "conv": "c025", "seq": 3, "src": "en-GB", "tgt": "es-AR", "text": "you lot are going to love Edinburgh", "address": "plural", "tags": ["names"]}
+{"id": "b0114", "conv": "c025", "seq": 4, "src": "en-GB", "tgt": "es-AR", "text": "mind you it'll probably chuck it down the whole weekend so bring a proper coat and not that daft little jacket you wore last time", "address": "singular", "tags": ["idiom", "long"]}
+{"id": "b0115", "conv": "c025", "seq": 5, "src": "en-GB", "tgt": "es-AR", "text": "pack your wellies the pair of you", "address": "plural", "tags": []}
+{"id": "b0116", "conv": "c026", "seq": 1, "src": "en-GB", "tgt": "es-AR", "text": "Have you been to the GP about that cough yet", "address": "singular", "tags": []}
+{"id": "b0117", "conv": "c026", "seq": 2, "src": "en-GB", "tgt": "es-AR", "text": "I rang the surgery but they couldn't fit me in till next fortnight, which is ridiculous because I've had it for nearly a month now", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0118", "conv": "c026", "seq": 3, "src": "en-GB", "tgt": "es-AR", "text": "you should pop down to the chemist then", "address": "singular", "tags": []}
+{"id": "b0119", "conv": "c026", "seq": 4, "src": "en-GB", "tgt": "es-AR", "text": "honestly don't leave it too long", "address": "singular", "tags": ["short"]}
+{"id": "b0120", "conv": "c026", "seq": 5, "src": "en-GB", "tgt": "es-AR", "text": "I'll ring them again on Monday morning", "address": "none", "tags": []}
+{"id": "b0121", "conv": "c027", "seq": 1, "src": "en-GB", "tgt": "es-AR", "text": "did you watch the match last night", "address": "singular", "tags": []}
+{"id": "b0122", "conv": "c027", "seq": 2, "src": "en-GB", "tgt": "es-AR", "text": "absolute shambles we were 2 nil up at half time", "address": "none", "tags": ["numbers", "idiom"]}
+{"id": "b0123", "conv": "c027", "seq": 3, "src": "en-GB", "tgt": "es-AR", "text": "gutted honestly", "address": "none", "tags": ["short"]}
+{"id": "b0124", "conv": "c027", "seq": 4, "src": "en-GB", "tgt": "es-AR", "text": "are you lads coming to the pub after work Friday", "address": "plural", "tags": []}
+{"id": "b0125", "conv": "c027", "seq": 5, "src": "en-GB", "tgt": "es-AR", "text": "go on then just the one", "address": "none", "tags": ["short"]}
+{"id": "b0126", "conv": "c028", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "Hi Grandma can you see me", "address": "singular", "tags": ["short"]}
+{"id": "b0127", "conv": "c028", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "you have to hold the phone a little higher, no higher, yeah like that, now I can see your whole face instead of just the ceiling fan", "address": "singular", "tags": ["long"]}
+{"id": "b0128", "conv": "c028", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "there you are hi", "address": "singular", "tags": ["short"]}
+{"id": "b0129", "conv": "c028", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "did the doctor say anything about your knee", "address": "singular", "tags": []}
+{"id": "b0130", "conv": "c028", "seq": 5, "src": "en-US", "tgt": "es-CO", "text": "promise me you'll take the pills he gave you, the white ones in the morning with breakfast and the little blue one before bed", "address": "singular", "tags": ["long"]}
+{"id": "b0131", "conv": "c029", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "so how's the coffee shop going", "address": "none", "tags": ["short"]}
+{"id": "b0132", "conv": "c029", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "I saw your post, the place looks super cute and the line outside on opening day was like around the block, I couldn't believe it", "address": "singular", "tags": ["long"]}
+{"id": "b0133", "conv": "c029", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "are you making any money yet or is it too early", "address": "singular", "tags": []}
+{"id": "b0134", "conv": "c029", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "I'll stop by when I'm in Medellín in May, I'm going for my cousin's graduation so I'll be there like a week and a half", "address": "none", "tags": ["names", "long"]}
+{"id": "b0135", "conv": "c030", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "you're muted", "address": "singular", "tags": ["short"]}
+{"id": "b0136", "conv": "c030", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "Hit the little microphone at the bottom", "address": "singular", "tags": []}
+{"id": "b0137", "conv": "c030", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "nope still nothing", "address": "none", "tags": ["short"]}
+{"id": "b0138", "conv": "c030", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "Maybe try leaving and joining again", "address": "singular", "tags": ["short"]}
+{"id": "b0139", "conv": "c030", "seq": 5, "src": "en-US", "tgt": "es-CO", "text": "ok there we go I can hear you now", "address": "singular", "tags": []}
+{"id": "b0140", "conv": "c031", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "good afternoon, this is Daniel the tenant from the third floor", "address": "none", "tags": ["names"]}
+{"id": "b0141", "conv": "c031", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "I wanted to ask you about renewing the lease", "address": "singular", "tags": []}
+{"id": "b0142", "conv": "c031", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "would you be open to keeping the rent the same for another year since we've always paid on time and we've taken really good care of the place", "address": "singular", "tags": ["long"]}
+{"id": "b0143", "conv": "c031", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "the kitchen faucet is still dripping by the way, I tried changing the rubber thing myself but it didn't really help much", "address": "none", "tags": ["long"]}
+{"id": "b0144", "conv": "c031", "seq": 5, "src": "en-US", "tgt": "es-CO", "text": "ok just let me know what you decide", "address": "singular", "tags": []}
+{"id": "b0145", "conv": "c032", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "you looked really pretty in that picture today", "address": "singular", "tags": []}
+{"id": "b0146", "conv": "c032", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "Are you still mad at me", "address": "singular", "tags": ["ambiguous", "short"]}
+{"id": "b0147", "conv": "c032", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "I said I was sorry like ten times", "address": "none", "tags": ["numbers"]}
+{"id": "b0148", "conv": "c032", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "okay okay what can I do to make it up to you", "address": "singular", "tags": ["idiom"]}
+{"id": "b0149", "conv": "c033", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "how have you been feeling since the surgery", "address": "singular", "tags": []}
+{"id": "b0150", "conv": "c033", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "Is the swelling going down", "address": "none", "tags": ["short"]}
+{"id": "b0151", "conv": "c033", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "the stitches come out a week from Friday", "address": "none", "tags": ["numbers"]}
+{"id": "b0152", "conv": "c033", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "try not to lift anything heavier than 5 kilos, and that includes your grandkids, I know it's hard but you really have to be careful for the next month", "address": "singular", "tags": ["numbers", "long"]}
+{"id": "b0153", "conv": "c033", "seq": 5, "src": "en-US", "tgt": "es-CO", "text": "and please don't skip the physical therapy", "address": "singular", "tags": []}
+{"id": "b0154", "conv": "c034", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "the client wants the deck by tomorrow at 9", "address": "none", "tags": ["loanword", "numbers"]}
+{"id": "b0155", "conv": "c034", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "can you take slides 4 through 10", "address": "singular", "tags": ["numbers"]}
+{"id": "b0156", "conv": "c034", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "I'll do the intro and the pricing part and then I guess we can split the case studies, whatever is left over at the end", "address": "none", "tags": ["long"]}
+{"id": "b0157", "conv": "c034", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "let's hop on a quick call at 4 to review", "address": "none", "tags": ["numbers"]}
+{"id": "b0158", "conv": "c034", "seq": 5, "src": "en-US", "tgt": "es-CO", "text": "did you get the feedback from Carolina", "address": "singular", "tags": ["names"]}
+{"id": "b0159", "conv": "c035", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "how long have you been learning English", "address": "singular", "tags": []}
+{"id": "b0160", "conv": "c035", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "you have a really good accent", "address": "singular", "tags": ["short"]}
+{"id": "b0161", "conv": "c035", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "I learned mostly from watching series and YouTube videos with subtitles, like hours and hours every night when I was in high school", "address": "none", "tags": ["loanword", "names", "long"]}
+{"id": "b0162", "conv": "c035", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "What's a word from Colombia you think I should know", "address": "singular", "tags": ["names"]}
+{"id": "b0163", "conv": "c035", "seq": 5, "src": "en-US", "tgt": "es-CO", "text": "everybody keeps saying parce but I don't know what it means", "address": "none", "tags": ["loanword"]}
+{"id": "b0164", "conv": "c036", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "so when are you guys flying to Cartagena", "address": "plural", "tags": ["names"]}
+{"id": "b0165", "conv": "c036", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "we found a deal 380 dollars round trip if we fly out on a Tuesday and come back the next Tuesday, so we're taking the whole week off", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0166", "conv": "c036", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "You both need a yellow fever vaccine I think, double check", "address": "plural", "tags": []}
+{"id": "b0167", "conv": "c036", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "the hotel has a pool and it's two blocks from the beach, and apparently breakfast is included but only until ten so we'll have to actually wake up", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0168", "conv": "c036", "seq": 5, "src": "en-US", "tgt": "es-CO", "text": "send me pictures of everything you two", "address": "plural", "tags": []}
+{"id": "b0169", "conv": "c037", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "can you lend me 200 thousand until Friday", "address": "singular", "tags": ["numbers"]}
+{"id": "b0170", "conv": "c037", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "I get paid on the 15th and I'll pay you right back", "address": "singular", "tags": ["numbers"]}
+{"id": "b0171", "conv": "c037", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "It's for the dentist, I'm not wasting it I swear", "address": "none", "tags": []}
+{"id": "b0172", "conv": "c037", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "thank you seriously you're the best", "address": "singular", "tags": ["ambiguous", "short"]}
+{"id": "b0173", "conv": "c038", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "did you finish your homework", "address": "singular", "tags": ["short"]}
+{"id": "b0174", "conv": "c038", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "no tablet until it's done", "address": "none", "tags": ["loanword", "short"]}
+{"id": "b0175", "conv": "c038", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "Put your sister on the phone please", "address": "singular", "tags": []}
+{"id": "b0176", "conv": "c038", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "hi girls are you behaving for your grandma or are you driving her crazy like last time, because she told me everything you did with the paint", "address": "plural", "tags": ["idiom", "long"]}
+{"id": "b0177", "conv": "c038", "seq": 5, "src": "en-US", "tgt": "es-CO", "text": "you two better be in bed by nine", "address": "plural", "tags": ["numbers"]}
+{"id": "b0178", "conv": "c039", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "wow it's been forever", "address": "none", "tags": ["short"]}
+{"id": "b0179", "conv": "c039", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "you haven't changed at all", "address": "singular", "tags": ["short"]}
+{"id": "b0180", "conv": "c039", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "what are you up to these days", "address": "singular", "tags": []}
+{"id": "b0181", "conv": "c039", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "same old same old, work and more work", "address": "none", "tags": ["idiom"]}
+{"id": "b0182", "conv": "c040", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "my car broke down on the highway", "address": "none", "tags": []}
+{"id": "b0183", "conv": "c040", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "Can you come get me", "address": "singular", "tags": ["short"]}
+{"id": "b0184", "conv": "c040", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "I'm at the gas station right after the toll, the one with the big yellow sign, and I've got maybe 10 percent battery left on my phone", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0185", "conv": "c040", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "yes I'll send you my location", "address": "singular", "tags": ["short"]}
+{"id": "b0186", "conv": "c041", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "did you use ripe plantains or green ones", "address": "singular", "tags": []}
+{"id": "b0187", "conv": "c041", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "the green ones are for patacones", "address": "none", "tags": ["loanword", "short"]}
+{"id": "b0188", "conv": "c041", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "you have to fry them twice", "address": "singular", "tags": ["short"]}
+{"id": "b0189", "conv": "c041", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "smash them in between, my mom uses a plate, but you can use the bottom of a pan or anything flat really, it doesn't matter", "address": "singular", "tags": ["long"]}
+{"id": "b0190", "conv": "c041", "seq": 5, "src": "en-US", "tgt": "es-CO", "text": "Add a little salt at the end and you're done", "address": "singular", "tags": []}
+{"id": "b0191", "conv": "c042", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "how are you all doing over there", "address": "plural", "tags": []}
+{"id": "b0192", "conv": "c042", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "did you guys get the package I sent", "address": "plural", "tags": []}
+{"id": "b0193", "conv": "c042", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "it took almost three weeks to get there and they charged me a fortune at the post office so I hope at least the chocolates didn't melt", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0194", "conv": "c042", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "You all look so grown up", "address": "plural", "tags": ["short"]}
+{"id": "b0195", "conv": "c042", "seq": 5, "src": "en-US", "tgt": "es-CO", "text": "Tía Marta is that you in the back", "address": "singular", "tags": ["names"]}
+{"id": "b0196", "conv": "c043", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "are you two coming to the wedding in Cali", "address": "plural", "tags": ["names"]}
+{"id": "b0197", "conv": "c043", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "it's on December 7th at a farm outside the city and there's going to be a bus from the church for anyone who doesn't want to drive", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0198", "conv": "c043", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "let me know if you need a place to stay", "address": "plural", "tags": []}
+{"id": "b0199", "conv": "c043", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "there's plenty of room at my parents' house and my mom has already been asking me if you two eat meat or not", "address": "plural", "tags": ["long"]}
+{"id": "b0200", "conv": "c044", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "my boss is on vacation so it's quiet this week", "address": "none", "tags": ["ambiguous"]}
+{"id": "b0201", "conv": "c044", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "My cousin's partner is coming too", "address": "none", "tags": ["ambiguous", "short"]}
+{"id": "b0202", "conv": "c044", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "are you tired", "address": "singular", "tags": ["ambiguous", "short"]}
+{"id": "b0203", "conv": "c044", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "the doctor told us to wait", "address": "none", "tags": ["ambiguous", "short"]}
+{"id": "b0204", "conv": "c044", "seq": 5, "src": "en-US", "tgt": "es-CO", "text": "You're very kind, thank you", "address": "singular", "tags": ["ambiguous", "short"]}
+{"id": "b0205", "conv": "c045", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "look at the dog he heard your voice", "address": "singular", "tags": []}
+{"id": "b0206", "conv": "c045", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "he's been sitting by the door all week waiting for you, every time a car goes by he runs to the window and starts barking", "address": "singular", "tags": ["long"]}
+{"id": "b0207", "conv": "c045", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "when are you coming home", "address": "singular", "tags": ["short"]}
+{"id": "b0208", "conv": "c045", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "we miss you a lot", "address": "singular", "tags": ["short"]}
+{"id": "b0209", "conv": "c046", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "I failed the statistics exam", "address": "none", "tags": ["short"]}
+{"id": "b0210", "conv": "c046", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "I got a 2.8 and you need a 3 to pass", "address": "none", "tags": ["numbers"]}
+{"id": "b0211", "conv": "c046", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "don't tell Mom yet", "address": "singular", "tags": ["short"]}
+{"id": "b0212", "conv": "c046", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "can you help me study for the makeup exam, it's next Wednesday at 7 in the morning and I still don't understand anything about probability", "address": "singular", "tags": ["numbers", "long"]}
+{"id": "b0213", "conv": "c047", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "sorry is that your neighbor drilling", "address": "singular", "tags": ["short"]}
+{"id": "b0214", "conv": "c047", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "it's been like that every single morning since they started remodeling the apartment upstairs, and they told us it would take two weeks", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0215", "conv": "c047", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "Can you mute while I present", "address": "singular", "tags": ["short"]}
+{"id": "b0216", "conv": "c047", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "no worries happens to everyone", "address": "none", "tags": ["idiom", "short"]}
+{"id": "b0217", "conv": "c048", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "okay listen you two", "address": "plural", "tags": ["short"]}
+{"id": "b0218", "conv": "c048", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "the party is a surprise so not a word to Camila", "address": "none", "tags": ["names", "idiom"]}
+{"id": "b0219", "conv": "c048", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "you have to get her to the restaurant by 8", "address": "plural", "tags": ["numbers"]}
+{"id": "b0220", "conv": "c048", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "Can you guys handle the cake", "address": "plural", "tags": ["short"]}
+{"id": "b0221", "conv": "c048", "seq": 5, "src": "en-US", "tgt": "es-CO", "text": "I'll take care of the music and the decorations and I already talked to the manager about letting us in through the back door", "address": "none", "tags": ["long"]}
+{"id": "b0222", "conv": "c049", "seq": 1, "src": "en-US", "tgt": "es-CO", "text": "okay I have to go", "address": "none", "tags": ["short"]}
+{"id": "b0223", "conv": "c049", "seq": 2, "src": "en-US", "tgt": "es-CO", "text": "take care of yourself", "address": "singular", "tags": ["short"]}
+{"id": "b0224", "conv": "c049", "seq": 3, "src": "en-US", "tgt": "es-CO", "text": "call me when you land", "address": "singular", "tags": ["short"]}
+{"id": "b0225", "conv": "c049", "seq": 4, "src": "en-US", "tgt": "es-CO", "text": "love you", "address": "singular", "tags": ["short"]}
+{"id": "b0226", "conv": "c050", "seq": 1, "src": "en-GB", "tgt": "es-CO", "text": "how was your weekend, did you get up to much", "address": "singular", "tags": ["idiom"]}
+{"id": "b0227", "conv": "c050", "seq": 2, "src": "en-GB", "tgt": "es-CO", "text": "we went to a car boot sale in the pouring rain and honestly it was the most fun I've had in ages, everyone was just huddled under umbrellas", "address": "none", "tags": ["idiom", "long"]}
+{"id": "b0228", "conv": "c050", "seq": 3, "src": "en-GB", "tgt": "es-CO", "text": "I bought a lamp for three quid", "address": "none", "tags": ["numbers"]}
+{"id": "b0229", "conv": "c050", "seq": 4, "src": "en-GB", "tgt": "es-CO", "text": "you'd have loved it honestly", "address": "singular", "tags": ["short"]}
+{"id": "b0230", "conv": "c050", "seq": 5, "src": "en-GB", "tgt": "es-CO", "text": "are you still shattered from the move", "address": "singular", "tags": ["ambiguous"]}
+{"id": "b0231", "conv": "c051", "seq": 1, "src": "en-GB", "tgt": "es-CO", "text": "morning all, can you hear me alright", "address": "plural", "tags": []}
+{"id": "b0232", "conv": "c051", "seq": 2, "src": "en-GB", "tgt": "es-CO", "text": "I'm afraid the report's been delayed till Thursday", "address": "none", "tags": []}
+{"id": "b0233", "conv": "c051", "seq": 3, "src": "en-GB", "tgt": "es-CO", "text": "could you both have a look at the spreadsheet before then", "address": "plural", "tags": []}
+{"id": "b0234", "conv": "c051", "seq": 4, "src": "en-GB", "tgt": "es-CO", "text": "Gareth's off sick so we're a bit short staffed, and the client's been ringing every afternoon asking for updates, which isn't helping", "address": "none", "tags": ["names", "long"]}
+{"id": "b0235", "conv": "c051", "seq": 5, "src": "en-GB", "tgt": "es-CO", "text": "let me know if you need anything from me", "address": "singular", "tags": []}
+{"id": "b0236", "conv": "c052", "seq": 1, "src": "en-GB", "tgt": "es-CO", "text": "have you sorted the travel insurance yet", "address": "singular", "tags": []}
+{"id": "b0237", "conv": "c052", "seq": 2, "src": "en-GB", "tgt": "es-CO", "text": "the flight's at ten to seven in the morning from Gatwick", "address": "none", "tags": ["names", "numbers"]}
+{"id": "b0238", "conv": "c052", "seq": 3, "src": "en-GB", "tgt": "es-CO", "text": "You'll need to be at the airport by five at the latest", "address": "singular", "tags": ["numbers"]}
+{"id": "b0239", "conv": "c052", "seq": 4, "src": "en-GB", "tgt": "es-CO", "text": "are you lot getting a taxi or should I drive", "address": "plural", "tags": []}
+{"id": "b0240", "conv": "c052", "seq": 5, "src": "en-GB", "tgt": "es-CO", "text": "right I'll put the kettle on and we'll sort it", "address": "none", "tags": ["idiom"]}
+{"id": "b0241", "conv": "c053", "seq": 1, "src": "en-GB", "tgt": "es-CO", "text": "how are your exams going", "address": "singular", "tags": ["short"]}
+{"id": "b0242", "conv": "c053", "seq": 2, "src": "en-GB", "tgt": "es-CO", "text": "I've got a resit in maths in August", "address": "none", "tags": []}
+{"id": "b0243", "conv": "c053", "seq": 3, "src": "en-GB", "tgt": "es-CO", "text": "you'll smash it don't worry", "address": "singular", "tags": ["idiom", "short"]}
+{"id": "b0244", "conv": "c053", "seq": 4, "src": "en-GB", "tgt": "es-CO", "text": "revision is doing my head in to be honest, I've been sat in the library every day since Easter and I can't remember a single formula", "address": "none", "tags": ["idiom", "names", "long"]}
+{"id": "b0245", "conv": "c053", "seq": 5, "src": "en-GB", "tgt": "es-CO", "text": "ring me if you fancy a break", "address": "singular", "tags": []}
+{"id": "b0246", "conv": "c054", "seq": 1, "src": "en-GB", "tgt": "es-CO", "text": "the boiler's packed in again", "address": "none", "tags": ["idiom", "short"]}
+{"id": "b0247", "conv": "c054", "seq": 2, "src": "en-GB", "tgt": "es-CO", "text": "Can you ring the letting agent for me", "address": "singular", "tags": []}
+{"id": "b0248", "conv": "c054", "seq": 3, "src": "en-GB", "tgt": "es-CO", "text": "there's mould all over the bathroom ceiling", "address": "none", "tags": []}
+{"id": "b0249", "conv": "c054", "seq": 4, "src": "en-GB", "tgt": "es-CO", "text": "you two shouldn't be paying full rent for this", "address": "plural", "tags": []}
+{"id": "b0250", "conv": "c054", "seq": 5, "src": "en-GB", "tgt": "es-CO", "text": "I reckon you should hold back the rent until they've actually sent someone round to fix it properly, not just another bloke with a hairdryer", "address": "singular", "tags": ["idiom", "long"]}
+{"id": "b0251", "conv": "c055", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "hey kiddo how's school going, do you like your new teacher", "address": "singular", "tags": []}
+{"id": "b0252", "conv": "c055", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "Are you still playing soccer on Saturdays", "address": "singular", "tags": []}
+{"id": "b0253", "conv": "c055", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "your mom told me you scored two goals last week and that the coach wants to move you up to the older team next season", "address": "singular", "tags": ["numbers", "long"]}
+{"id": "b0254", "conv": "c055", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "that's awesome I'm so proud of you", "address": "singular", "tags": []}
+{"id": "b0255", "conv": "c055", "seq": 5, "src": "en-US", "tgt": "es-MX", "text": "send me a video of the next game", "address": "singular", "tags": []}
+{"id": "b0256", "conv": "c056", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "so are you guys down for Guadalajara next month", "address": "plural", "tags": ["names", "idiom"]}
+{"id": "b0257", "conv": "c056", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "I can drive, my car fits five", "address": "none", "tags": ["numbers"]}
+{"id": "b0258", "conv": "c056", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "gas is gonna be like 1,500 pesos round trip split four ways, plus the tolls, which are kind of expensive on that highway but it's way faster", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0259", "conv": "c056", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "You need to tell me by Friday so I can book the Airbnb", "address": "plural", "tags": ["loanword", "names"]}
+{"id": "b0260", "conv": "c056", "seq": 5, "src": "en-US", "tgt": "es-MX", "text": "and don't you dare bail on me last minute", "address": "plural", "tags": ["idiom"]}
+{"id": "b0261", "conv": "c057", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "your video is super pixelated I can barely see your face", "address": "singular", "tags": []}
+{"id": "b0262", "conv": "c057", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "I think my internet is slow because everybody in the house is streaming something right now, my brother is literally watching three things at once", "address": "none", "tags": ["loanword", "long"]}
+{"id": "b0263", "conv": "c057", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "can you move closer to the router", "address": "singular", "tags": ["loanword"]}
+{"id": "b0264", "conv": "c057", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "okay that's way better", "address": "none", "tags": ["short"]}
+{"id": "b0265", "conv": "c058", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "hi good morning I'm calling about the apartment on Insurgentes", "address": "none", "tags": ["names"]}
+{"id": "b0266", "conv": "c058", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "Is it still available, because I saw the listing on Facebook like two weeks ago and I wasn't sure if somebody already took it", "address": "none", "tags": ["long"]}
+{"id": "b0267", "conv": "c058", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "how much is the deposit", "address": "none", "tags": ["short"]}
+{"id": "b0268", "conv": "c058", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "I can do a two year contract if that helps, and I have references from my last landlord, I lived there for almost five years without any problems", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0269", "conv": "c058", "seq": 5, "src": "en-US", "tgt": "es-MX", "text": "could you show it to me Thursday around 6", "address": "singular", "tags": ["numbers", "ambiguous"]}
+{"id": "b0270", "conv": "c059", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "babe you're breaking up", "address": "singular", "tags": ["short"]}
+{"id": "b0271", "conv": "c059", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "what did you say about the weekend", "address": "singular", "tags": []}
+{"id": "b0272", "conv": "c059", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "ok I heard Saturday and then nothing", "address": "none", "tags": []}
+{"id": "b0273", "conv": "c059", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "just text me okay, I'm going into the metro and I'll lose signal for like twenty minutes but I'll read it as soon as I get out", "address": "singular", "tags": ["long"]}
+{"id": "b0274", "conv": "c059", "seq": 5, "src": "en-US", "tgt": "es-MX", "text": "love you more", "address": "singular", "tags": ["short"]}
+{"id": "b0275", "conv": "c060", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "Good afternoon how have you been with the new medication", "address": "singular", "tags": ["ambiguous"]}
+{"id": "b0276", "conv": "c060", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "your glucose levels look much better", "address": "singular", "tags": ["short"]}
+{"id": "b0277", "conv": "c060", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "keep avoiding soda and white bread", "address": "singular", "tags": ["short"]}
+{"id": "b0278", "conv": "c060", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "have you been walking 30 minutes a day like we talked about, because honestly that's going to make a bigger difference than any pill I can give you", "address": "singular", "tags": ["numbers", "long"]}
+{"id": "b0279", "conv": "c060", "seq": 5, "src": "en-US", "tgt": "es-MX", "text": "we'll check again in three months", "address": "none", "tags": ["numbers", "short"]}
+{"id": "b0280", "conv": "c061", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "did you push the fix to staging", "address": "singular", "tags": ["loanword"]}
+{"id": "b0281", "conv": "c061", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "the build is failing on the payment tests", "address": "none", "tags": ["loanword"]}
+{"id": "b0282", "conv": "c061", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "Can you send me the logs from last night's run", "address": "singular", "tags": ["loanword"]}
+{"id": "b0283", "conv": "c061", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "it's probably the timezone thing again, the server thinks it's UTC and the tests think it's Mexico City time, so every night at six everything breaks", "address": "none", "tags": ["loanword", "names", "numbers", "long"]}
+{"id": "b0284", "conv": "c061", "seq": 5, "src": "en-US", "tgt": "es-MX", "text": "okay ping me when it's green", "address": "singular", "tags": ["loanword", "idiom", "short"]}
+{"id": "b0285", "conv": "c062", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "wait what does ahorita actually mean", "address": "none", "tags": ["loanword", "short"]}
+{"id": "b0286", "conv": "c062", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "because my friend said ahorita and came back two hours later", "address": "none", "tags": ["loanword", "numbers"]}
+{"id": "b0287", "conv": "c062", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "You're telling me it can mean right now or maybe never", "address": "singular", "tags": []}
+{"id": "b0288", "conv": "c062", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "that's hilarious, my grandma does the same thing with mañana, she says she'll call me mañana and then I don't hear from her for a week", "address": "none", "tags": ["long"]}
+{"id": "b0289", "conv": "c063", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "you two are going to love Oaxaca", "address": "plural", "tags": ["names"]}
+{"id": "b0290", "conv": "c063", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "the food alone is worth the trip", "address": "none", "tags": []}
+{"id": "b0291", "conv": "c063", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "Make sure you guys try the mole negro and the tlayudas at the market, there's a lady in the back corner who makes the best ones, just ask anybody", "address": "plural", "tags": ["loanword", "long"]}
+{"id": "b0292", "conv": "c063", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "don't drink the tap water you two", "address": "plural", "tags": []}
+{"id": "b0293", "conv": "c063", "seq": 5, "src": "en-US", "tgt": "es-MX", "text": "and Hierve el Agua is like an hour and a half from the city", "address": "none", "tags": ["names", "numbers"]}
+{"id": "b0294", "conv": "c064", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "how much do I owe you for the tickets", "address": "singular", "tags": []}
+{"id": "b0295", "conv": "c064", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "it was 2,340 total so 1,170 each", "address": "none", "tags": ["numbers"]}
+{"id": "b0296", "conv": "c064", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "can I just Venmo you", "address": "singular", "tags": ["loanword", "names", "short"]}
+{"id": "b0297", "conv": "c064", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "oh wait you don't have Venmo here do you", "address": "singular", "tags": ["names"]}
+{"id": "b0298", "conv": "c064", "seq": 5, "src": "en-US", "tgt": "es-MX", "text": "ok I'll do a bank transfer tonight as soon as I get home, I just need the account number, the long one, what's it called again", "address": "none", "tags": ["long"]}
+{"id": "b0299", "conv": "c065", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "buddy you have to finish your vegetables", "address": "singular", "tags": []}
+{"id": "b0300", "conv": "c065", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "he says broccoli tastes like trees", "address": "none", "tags": ["short"]}
+{"id": "b0301", "conv": "c065", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "just three more bites and you can have dessert", "address": "singular", "tags": ["numbers"]}
+{"id": "b0302", "conv": "c065", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "both of you go brush your teeth and put your pajamas on, and I don't want to hear any arguing about who goes first this time", "address": "plural", "tags": ["long"]}
+{"id": "b0303", "conv": "c065", "seq": 5, "src": "en-US", "tgt": "es-MX", "text": "Good night you two, I love you", "address": "plural", "tags": []}
+{"id": "b0304", "conv": "c066", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "it's been raining nonstop all week", "address": "none", "tags": ["short"]}
+{"id": "b0305", "conv": "c066", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "did the rain flood your street again", "address": "singular", "tags": []}
+{"id": "b0306", "conv": "c066", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "ugh the whole neighborhood was underwater, the cars were floating and my neighbor had to carry his grandma out because the water got into the first floor", "address": "none", "tags": ["long"]}
+{"id": "b0307", "conv": "c067", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "guess what", "address": "singular", "tags": ["short"]}
+{"id": "b0308", "conv": "c067", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "I got the job, they called me this morning while I was in the shower and I almost didn't pick up because I thought it was spam", "address": "none", "tags": ["long"]}
+{"id": "b0309", "conv": "c067", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "yes the one I told you about with the airline", "address": "singular", "tags": []}
+{"id": "b0310", "conv": "c067", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "I start on the second of January", "address": "none", "tags": ["numbers"]}
+{"id": "b0311", "conv": "c067", "seq": 5, "src": "en-US", "tgt": "es-MX", "text": "You have to come celebrate with us this weekend, we're going to that rooftop place downtown that you always say you want to try", "address": "singular", "tags": ["loanword", "long"]}
+{"id": "b0312", "conv": "c068", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "what's the best taco place near you", "address": "singular", "tags": []}
+{"id": "b0313", "conv": "c068", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "the al pastor at the corner stand is honestly the best in the city", "address": "none", "tags": ["loanword"]}
+{"id": "b0314", "conv": "c068", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "have you ever tried birria with consomé", "address": "singular", "tags": ["loanword"]}
+{"id": "b0315", "conv": "c068", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "it's the best hangover cure, trust me, every Sunday morning there's a line of people at the stand still wearing their clothes from Saturday night", "address": "none", "tags": ["idiom", "long"]}
+{"id": "b0316", "conv": "c068", "seq": 5, "src": "en-US", "tgt": "es-MX", "text": "Next time you're here I'm taking you", "address": "singular", "tags": []}
+{"id": "b0317", "conv": "c069", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "hi everybody can you hear me", "address": "plural", "tags": ["short"]}
+{"id": "b0318", "conv": "c069", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "are you all at Grandma's house", "address": "plural", "tags": ["short"]}
+{"id": "b0319", "conv": "c069", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "I can see Uncle Beto in the background", "address": "none", "tags": ["names"]}
+{"id": "b0320", "conv": "c069", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "you guys look like you're having so much fun", "address": "plural", "tags": []}
+{"id": "b0321", "conv": "c069", "seq": 5, "src": "en-US", "tgt": "es-MX", "text": "I wish I was there with all of you instead of stuck here in this tiny apartment eating leftovers by myself on a holiday", "address": "plural", "tags": ["long"]}
+{"id": "b0322", "conv": "c070", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "thank you for taking the time to meet with me", "address": "singular", "tags": ["ambiguous"]}
+{"id": "b0323", "conv": "c070", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "I'm attaching the quote right now", "address": "none", "tags": ["short"]}
+{"id": "b0324", "conv": "c070", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "let me know if you have any questions", "address": "singular", "tags": []}
+{"id": "b0325", "conv": "c070", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "we can deliver within 10 business days once we get the signed purchase order and the 50 percent deposit, and installation is included in the price", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0326", "conv": "c071", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "My doctor said it's nothing serious", "address": "none", "tags": ["ambiguous", "short"]}
+{"id": "b0327", "conv": "c071", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "the engineer is coming tomorrow to look at the leak", "address": "none", "tags": ["ambiguous"]}
+{"id": "b0328", "conv": "c071", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "are you nervous about tomorrow", "address": "singular", "tags": ["ambiguous", "short"]}
+{"id": "b0329", "conv": "c071", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "You must be exhausted", "address": "singular", "tags": ["ambiguous", "short"]}
+{"id": "b0330", "conv": "c072", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "did you take my charger again", "address": "singular", "tags": ["short"]}
+{"id": "b0331", "conv": "c072", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "I've been looking for it for like an hour", "address": "none", "tags": []}
+{"id": "b0332", "conv": "c072", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "it's fine I'm not mad just put it back when you're done", "address": "singular", "tags": ["ambiguous"]}
+{"id": "b0333", "conv": "c072", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "and can you take out the trash tonight, they come early tomorrow and last time we missed it and the whole kitchen smelled for a week", "address": "singular", "tags": ["long"]}
+{"id": "b0334", "conv": "c073", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "how's your back, are you still sleeping on the floor like the chiropractor told you or did you finally give up on that", "address": "singular", "tags": ["long"]}
+{"id": "b0335", "conv": "c073", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "I threw it out lifting a box of books", "address": "none", "tags": ["idiom"]}
+{"id": "b0336", "conv": "c073", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "Go see someone, don't just take ibuprofen", "address": "singular", "tags": []}
+{"id": "b0337", "conv": "c073", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "seriously you can't keep ignoring it", "address": "singular", "tags": ["short"]}
+{"id": "b0338", "conv": "c074", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "is that the new iPhone", "address": "none", "tags": ["loanword", "names", "short"]}
+{"id": "b0339", "conv": "c074", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "mine is so old the battery dies by noon", "address": "none", "tags": []}
+{"id": "b0340", "conv": "c074", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "how much did you pay for it", "address": "singular", "tags": []}
+{"id": "b0341", "conv": "c074", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "that's like three months of rent", "address": "none", "tags": ["numbers", "short"]}
+{"id": "b0342", "conv": "c075", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "so what are you guys bringing to the posada", "address": "plural", "tags": ["loanword"]}
+{"id": "b0343", "conv": "c075", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "I already have the piñata and the ponche", "address": "none", "tags": ["loanword"]}
+{"id": "b0344", "conv": "c075", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "can you two bring tamales from that place in Coyoacán", "address": "plural", "tags": ["names"]}
+{"id": "b0345", "conv": "c075", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "they open at 7 so you'd have to go early", "address": "plural", "tags": ["numbers"]}
+{"id": "b0346", "conv": "c075", "seq": 5, "src": "en-US", "tgt": "es-MX", "text": "thank you both seriously", "address": "plural", "tags": ["short"]}
+{"id": "b0347", "conv": "c076", "seq": 1, "src": "en-US", "tgt": "es-MX", "text": "ok I'll let you go", "address": "singular", "tags": ["short"]}
+{"id": "b0348", "conv": "c076", "seq": 2, "src": "en-US", "tgt": "es-MX", "text": "Tell your mom I said hi", "address": "singular", "tags": ["short"]}
+{"id": "b0349", "conv": "c076", "seq": 3, "src": "en-US", "tgt": "es-MX", "text": "we'll talk Sunday", "address": "none", "tags": ["short"]}
+{"id": "b0350", "conv": "c076", "seq": 4, "src": "en-US", "tgt": "es-MX", "text": "Be careful driving back okay", "address": "singular", "tags": ["short"]}
+{"id": "b0351", "conv": "c077", "seq": 1, "src": "en-GB", "tgt": "es-MX", "text": "Hiya, how are you getting on", "address": "singular", "tags": ["short"]}
+{"id": "b0352", "conv": "c077", "seq": 2, "src": "en-GB", "tgt": "es-MX", "text": "sorry the signal's a bit dodgy, I'm on the train and we keep going through tunnels, so if I cut out just give me a minute and I'll come back", "address": "none", "tags": ["idiom", "long"]}
+{"id": "b0353", "conv": "c077", "seq": 3, "src": "en-GB", "tgt": "es-MX", "text": "can you speak up a bit", "address": "singular", "tags": ["short"]}
+{"id": "b0354", "conv": "c077", "seq": 4, "src": "en-GB", "tgt": "es-MX", "text": "we're just pulling into Manchester Piccadilly", "address": "none", "tags": ["names", "short"]}
+{"id": "b0355", "conv": "c077", "seq": 5, "src": "en-GB", "tgt": "es-MX", "text": "I'll ring you back in ten minutes", "address": "singular", "tags": ["numbers"]}
+{"id": "b0356", "conv": "c078", "seq": 1, "src": "en-GB", "tgt": "es-MX", "text": "have you ever made a proper Sunday roast", "address": "singular", "tags": []}
+{"id": "b0357", "conv": "c078", "seq": 2, "src": "en-GB", "tgt": "es-MX", "text": "the trick is goose fat on the potatoes", "address": "none", "tags": []}
+{"id": "b0358", "conv": "c078", "seq": 3, "src": "en-GB", "tgt": "es-MX", "text": "you've got to let the joint rest for twenty minutes", "address": "singular", "tags": ["numbers"]}
+{"id": "b0359", "conv": "c078", "seq": 4, "src": "en-GB", "tgt": "es-MX", "text": "and Yorkshire puddings obviously, my nan's recipe, which she never wrote down so I just sort of guess every time and hope for the best", "address": "none", "tags": ["names", "long"]}
+{"id": "b0360", "conv": "c078", "seq": 5, "src": "en-GB", "tgt": "es-MX", "text": "come over next Sunday and I'll show you", "address": "singular", "tags": []}
+{"id": "b0361", "conv": "c079", "seq": 1, "src": "en-GB", "tgt": "es-MX", "text": "right you two, wellies on, we're going to the park", "address": "plural", "tags": []}
+{"id": "b0362", "conv": "c079", "seq": 2, "src": "en-GB", "tgt": "es-MX", "text": "Oliver's lost his jumper again", "address": "none", "tags": ["names", "short"]}
+{"id": "b0363", "conv": "c079", "seq": 3, "src": "en-GB", "tgt": "es-MX", "text": "have you both had your lunch", "address": "plural", "tags": ["short"]}
+{"id": "b0364", "conv": "c079", "seq": 4, "src": "en-GB", "tgt": "es-MX", "text": "stop bickering the pair of you", "address": "plural", "tags": ["short"]}
+{"id": "b0365", "conv": "c079", "seq": 5, "src": "en-GB", "tgt": "es-MX", "text": "honestly they're driving me round the bend", "address": "none", "tags": ["idiom"]}
+{"id": "b0366", "conv": "c080", "seq": 1, "src": "en-GB", "tgt": "es-MX", "text": "did you get my email about the rota", "address": "singular", "tags": []}
+{"id": "b0367", "conv": "c080", "seq": 2, "src": "en-GB", "tgt": "es-MX", "text": "I'm afraid I can't do the late shift on Saturday because it's my sister's hen do and I promised her months ago I'd be there", "address": "none", "tags": ["long"]}
+{"id": "b0368", "conv": "c080", "seq": 3, "src": "en-GB", "tgt": "es-MX", "text": "could you swap with me, I'd do Thursday's early shift for you, I know it's a pain but I'm a bit desperate here", "address": "singular", "tags": ["long"]}
+{"id": "b0369", "conv": "c080", "seq": 4, "src": "en-GB", "tgt": "es-MX", "text": "I'll cover your Tuesday in return", "address": "singular", "tags": ["short"]}
+{"id": "b0370", "conv": "c080", "seq": 5, "src": "en-GB", "tgt": "es-MX", "text": "ta very much", "address": "none", "tags": ["idiom", "short"]}
+{"id": "b0371", "conv": "c081", "seq": 1, "src": "en-GB", "tgt": "es-MX", "text": "are you going anywhere nice this summer", "address": "singular", "tags": []}
+{"id": "b0372", "conv": "c081", "seq": 2, "src": "en-GB", "tgt": "es-MX", "text": "we've booked a fortnight in Cornwall", "address": "none", "tags": ["names", "short"]}
+{"id": "b0373", "conv": "c081", "seq": 3, "src": "en-GB", "tgt": "es-MX", "text": "you and Priya should come down for a few days", "address": "plural", "tags": ["names"]}
+{"id": "b0374", "conv": "c081", "seq": 4, "src": "en-GB", "tgt": "es-MX", "text": "the cottage sleeps six and it's only a short walk to the beach, though the walk back up the hill is a bit of a killer", "address": "none", "tags": ["numbers", "idiom", "long"]}
+{"id": "b0375", "conv": "c081", "seq": 5, "src": "en-GB", "tgt": "es-MX", "text": "think about it and let me know", "address": "singular", "tags": []}
+{"id": "b0376", "conv": "c082", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "Hey Mom did you get the photos I sent", "address": "singular", "tags": []}
+{"id": "b0377", "conv": "c082", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "that's the view from my balcony", "address": "none", "tags": ["short"]}
+{"id": "b0378", "conv": "c082", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "no I know it's small but you have to admit the light is great, especially in the afternoon when the sun hits the building across the street", "address": "singular", "tags": ["long"]}
+{"id": "b0379", "conv": "c082", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "are you and Dad still going to Valencia in June", "address": "plural", "tags": ["names"]}
+{"id": "b0380", "conv": "c082", "seq": 5, "src": "en-US", "tgt": "es-ES", "text": "you two should come visit me after", "address": "plural", "tags": []}
+{"id": "b0381", "conv": "c083", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "how was the party last night you guys", "address": "plural", "tags": []}
+{"id": "b0382", "conv": "c083", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "I had to leave early because of my 8 a.m. class", "address": "none", "tags": ["numbers"]}
+{"id": "b0383", "conv": "c083", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "Did you end up going to that club by the beach", "address": "plural", "tags": []}
+{"id": "b0384", "conv": "c083", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "Inés told me you all stayed till 6 and then went for churros", "address": "plural", "tags": ["names", "numbers", "loanword"]}
+{"id": "b0385", "conv": "c083", "seq": 5, "src": "en-US", "tgt": "es-ES", "text": "you're crazy all of you", "address": "plural", "tags": ["short"]}
+{"id": "b0386", "conv": "c084", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "hold on your audio is really echoey", "address": "singular", "tags": []}
+{"id": "b0387", "conv": "c084", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "are you using headphones", "address": "singular", "tags": ["short"]}
+{"id": "b0388", "conv": "c084", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "ok perfect it's fixed", "address": "none", "tags": ["short"]}
+{"id": "b0389", "conv": "c085", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "Hi is this Mr. Gómez", "address": "singular", "tags": ["names", "ambiguous", "short"]}
+{"id": "b0390", "conv": "c085", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "I'm calling about the room in Lavapiés that I saw online, the one with the window onto the patio and the shared kitchen", "address": "none", "tags": ["names", "long"]}
+{"id": "b0391", "conv": "c085", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "Are bills included in the 550 a month", "address": "none", "tags": ["numbers"]}
+{"id": "b0392", "conv": "c085", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "would you mind if I came to see it tomorrow evening", "address": "singular", "tags": []}
+{"id": "b0393", "conv": "c085", "seq": 5, "src": "en-US", "tgt": "es-ES", "text": "great I'll be there at 7 then", "address": "none", "tags": ["numbers"]}
+{"id": "b0394", "conv": "c086", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "did you see the message I sent you this morning", "address": "singular", "tags": []}
+{"id": "b0395", "conv": "c086", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "I booked the hotel in Sevilla for our anniversary", "address": "none", "tags": ["names"]}
+{"id": "b0396", "conv": "c086", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "you're gonna love it, it has a pool on the roof and you can see the cathedral from the room, I already asked them for late checkout", "address": "singular", "tags": ["names", "loanword", "long"]}
+{"id": "b0397", "conv": "c086", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "don't tell me you forgot", "address": "singular", "tags": ["short"]}
+{"id": "b0398", "conv": "c086", "seq": 5, "src": "en-US", "tgt": "es-ES", "text": "I'm kidding I know you didn't", "address": "singular", "tags": ["short"]}
+{"id": "b0399", "conv": "c087", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "How's the ankle feeling", "address": "none", "tags": ["short"]}
+{"id": "b0400", "conv": "c087", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "the X-ray showed it's not broken just a bad sprain, which honestly is good news, but these can take longer to heal than a clean break", "address": "none", "tags": ["long"]}
+{"id": "b0401", "conv": "c087", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "keep it elevated and put ice on it for 15 minutes at a time, three or four times a day, and don't walk on it more than you absolutely have to", "address": "singular", "tags": ["numbers", "long"]}
+{"id": "b0402", "conv": "c087", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "Can you put any weight on it yet", "address": "singular", "tags": []}
+{"id": "b0403", "conv": "c087", "seq": 5, "src": "en-US", "tgt": "es-ES", "text": "we'll see you again in ten days", "address": "singular", "tags": ["numbers"]}
+{"id": "b0404", "conv": "c088", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "morning team can everybody see the agenda", "address": "plural", "tags": []}
+{"id": "b0405", "conv": "c088", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "you all should've gotten the invite for Thursday's workshop", "address": "plural", "tags": ["loanword"]}
+{"id": "b0406", "conv": "c088", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "the main topic is the new onboarding process, which I know a lot of you have opinions about, so please come with questions and actual examples", "address": "plural", "tags": ["loanword", "long"]}
+{"id": "b0407", "conv": "c088", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "please fill out the survey before Wednesday, all of you", "address": "plural", "tags": []}
+{"id": "b0408", "conv": "c088", "seq": 5, "src": "en-US", "tgt": "es-ES", "text": "Marta can you share your screen", "address": "singular", "tags": ["names", "short"]}
+{"id": "b0409", "conv": "c089", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "wait is vale like okay", "address": "none", "tags": ["loanword", "short"]}
+{"id": "b0410", "conv": "c089", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "you say it all the time", "address": "singular", "tags": ["short"]}
+{"id": "b0411", "conv": "c089", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "in Mexico they'd say órale or something right", "address": "none", "tags": ["names", "loanword"]}
+{"id": "b0412", "conv": "c089", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "do you guys still say guay or is that old fashioned now", "address": "plural", "tags": ["idiom", "loanword"]}
+{"id": "b0413", "conv": "c089", "seq": 5, "src": "en-US", "tgt": "es-ES", "text": "my students would laugh at me if I said it in class, they already think everything I say is from the nineties", "address": "none", "tags": ["long"]}
+{"id": "b0414", "conv": "c090", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "so you two are flying into Barcelona or Madrid", "address": "plural", "tags": ["names"]}
+{"id": "b0415", "conv": "c090", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "the high speed train between them is like two and a half hours, so you could easily do both if you wanted, just maybe not on the same weekend", "address": "plural", "tags": ["numbers", "long"]}
+{"id": "b0416", "conv": "c090", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "You should definitely book the Sagrada Familia tickets in advance, like weeks in advance, because in summer they sell out and the line at the door is ridiculous", "address": "plural", "tags": ["names", "long"]}
+{"id": "b0417", "conv": "c090", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "send us a postcard you two", "address": "plural", "tags": ["short"]}
+{"id": "b0418", "conv": "c091", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "did you pay the electricity bill", "address": "singular", "tags": ["short"]}
+{"id": "b0419", "conv": "c091", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "it came out to 87 euros this month, which is insane because we were barely home, I think the heater in the bathroom is eating all the electricity", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0420", "conv": "c091", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "can you send me half on Bizum when you get a sec", "address": "singular", "tags": ["loanword", "names"]}
+{"id": "b0421", "conv": "c091", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "and the water one hasn't come yet but last time it was like 30 something, so I'll let you know when it arrives and we'll split that too", "address": "singular", "tags": ["numbers", "long"]}
+{"id": "b0422", "conv": "c092", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "kids say hi to your cousins in Spain", "address": "plural", "tags": ["names"]}
+{"id": "b0423", "conv": "c092", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "look at you two, you're getting so big", "address": "plural", "tags": []}
+{"id": "b0424", "conv": "c092", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "Lucía are you losing a tooth", "address": "singular", "tags": ["names", "short"]}
+{"id": "b0425", "conv": "c092", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "the tooth fairy is gonna be broke", "address": "none", "tags": ["idiom"]}
+{"id": "b0426", "conv": "c092", "seq": 5, "src": "en-US", "tgt": "es-ES", "text": "show me how wiggly it is", "address": "singular", "tags": ["short"]}
+{"id": "b0427", "conv": "c093", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "it's 40 degrees in Madrid right now", "address": "none", "tags": ["numbers", "names"]}
+{"id": "b0428", "conv": "c093", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "how do you even sleep", "address": "singular", "tags": ["short"]}
+{"id": "b0429", "conv": "c093", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "the AC in our building broke last week and the landlord says the guy can't come until after the fifteenth because everyone is on vacation in August", "address": "none", "tags": ["loanword", "numbers", "long"]}
+{"id": "b0430", "conv": "c093", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "you poor thing", "address": "singular", "tags": ["idiom", "short"]}
+{"id": "b0431", "conv": "c094", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "so are you seeing anyone", "address": "singular", "tags": ["short"]}
+{"id": "b0432", "conv": "c094", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "come on you can tell me", "address": "singular", "tags": ["short"]}
+{"id": "b0433", "conv": "c094", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "I knew it", "address": "none", "tags": ["short"]}
+{"id": "b0434", "conv": "c094", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "What's their name", "address": "none", "tags": ["ambiguous", "short"]}
+{"id": "b0435", "conv": "c094", "seq": 5, "src": "en-US", "tgt": "es-ES", "text": "how did you two meet", "address": "plural", "tags": ["short"]}
+{"id": "b0436", "conv": "c095", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "did you make the tortilla with onion or without", "address": "singular", "tags": ["loanword"]}
+{"id": "b0437", "conv": "c095", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "I'm team onion all the way", "address": "none", "tags": ["idiom", "short"]}
+{"id": "b0438", "conv": "c095", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "you're wrong but I still love you", "address": "singular", "tags": []}
+{"id": "b0439", "conv": "c095", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "my abuela never put onion in hers, she said it made it go bad faster, and to be fair hers was the best tortilla I've ever had in my life", "address": "none", "tags": ["loanword", "long"]}
+{"id": "b0440", "conv": "c095", "seq": 5, "src": "en-US", "tgt": "es-ES", "text": "okay you have to send me a picture when it's done", "address": "singular", "tags": []}
+{"id": "b0441", "conv": "c096", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "are you guys coming to the wedding in Bilbao", "address": "plural", "tags": ["names"]}
+{"id": "b0442", "conv": "c096", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "have you booked flights yet", "address": "plural", "tags": ["short"]}
+{"id": "b0443", "conv": "c096", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "the ceremony is at 12 and then lunch goes until like midnight because it's a Basque wedding and apparently that's completely normal there", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0444", "conv": "c096", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "You should stay the whole weekend, seriously, the city is beautiful and there's a ton of pintxos bars right by the hotel where everybody's staying", "address": "plural", "tags": ["loanword", "long"]}
+{"id": "b0445", "conv": "c096", "seq": 5, "src": "en-US", "tgt": "es-ES", "text": "I'll look for an apartment for all of us", "address": "none", "tags": []}
+{"id": "b0446", "conv": "c097", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "thank you for your patience while we review your application", "address": "singular", "tags": ["ambiguous"]}
+{"id": "b0447", "conv": "c097", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "could you send us a copy of your passport", "address": "singular", "tags": []}
+{"id": "b0448", "conv": "c097", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "the position starts on September 1st", "address": "none", "tags": ["numbers", "short"]}
+{"id": "b0449", "conv": "c097", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "Do you have any availability for a second interview next week, ideally Tuesday or Wednesday morning, with the head of the department and someone from the London office", "address": "singular", "tags": ["ambiguous", "names", "long"]}
+{"id": "b0450", "conv": "c098", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "my friend from work is moving to Málaga", "address": "none", "tags": ["ambiguous", "names"]}
+{"id": "b0451", "conv": "c098", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "the lawyer said we have to wait until the bank answers, which could take another month or two, and there's nothing else we can do", "address": "none", "tags": ["ambiguous", "long"]}
+{"id": "b0452", "conv": "c098", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "are you ready", "address": "singular", "tags": ["ambiguous", "short"]}
+{"id": "b0453", "conv": "c098", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "we're so excited to see you", "address": "singular", "tags": ["ambiguous", "short"]}
+{"id": "b0454", "conv": "c099", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "guys whose turn is it to clean the bathroom", "address": "plural", "tags": []}
+{"id": "b0455", "conv": "c099", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "it's definitely not mine I did it last week", "address": "none", "tags": []}
+{"id": "b0456", "conv": "c099", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "you two always do this", "address": "plural", "tags": ["short"]}
+{"id": "b0457", "conv": "c099", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "can you please at least take out the recycling", "address": "plural", "tags": []}
+{"id": "b0458", "conv": "c099", "seq": 5, "src": "en-US", "tgt": "es-ES", "text": "fine I'll make a chart and stick it on the fridge and then nobody can say they didn't know whose turn it was, okay, I'm serious this time", "address": "none", "tags": ["long"]}
+{"id": "b0459", "conv": "c100", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "can you hear me now or should I call you on WhatsApp", "address": "singular", "tags": ["names", "loanword"]}
+{"id": "b0460", "conv": "c100", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "the connection here in the village is terrible, the whole town shares like one antenna and when it's windy everything just stops working", "address": "none", "tags": ["long"]}
+{"id": "b0461", "conv": "c100", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "I'll send you the file by email", "address": "singular", "tags": ["loanword"]}
+{"id": "b0462", "conv": "c100", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "it's like 200 megabytes so it might take a while", "address": "none", "tags": ["numbers"]}
+{"id": "b0463", "conv": "c101", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "Did you watch the Madrid game", "address": "singular", "tags": ["names", "short"]}
+{"id": "b0464", "conv": "c101", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "what a goal in the 90th minute", "address": "none", "tags": ["numbers"]}
+{"id": "b0465", "conv": "c101", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "you must be thrilled", "address": "singular", "tags": ["ambiguous", "short"]}
+{"id": "b0466", "conv": "c101", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "I can't believe they almost blew it", "address": "none", "tags": ["idiom"]}
+{"id": "b0467", "conv": "c102", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "ok you guys I'm gonna go", "address": "plural", "tags": ["short"]}
+{"id": "b0468", "conv": "c102", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "Have fun tonight and don't do anything I wouldn't do", "address": "plural", "tags": ["idiom"]}
+{"id": "b0469", "conv": "c102", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "I'll call Sunday", "address": "none", "tags": ["short"]}
+{"id": "b0470", "conv": "c102", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "love you both", "address": "plural", "tags": ["short"]}
+{"id": "b0471", "conv": "c102", "seq": 5, "src": "en-US", "tgt": "es-ES", "text": "Take care of each other", "address": "plural", "tags": ["short"]}
+{"id": "b0472", "conv": "c103", "seq": 1, "src": "en-US", "tgt": "es-ES", "text": "are you still doing pottery", "address": "singular", "tags": ["short"]}
+{"id": "b0473", "conv": "c103", "seq": 2, "src": "en-US", "tgt": "es-ES", "text": "I made my first mug last week it's very crooked and the handle fell off in the kiln but I'm keeping it anyway because I'm weirdly proud of it", "address": "none", "tags": ["long"]}
+{"id": "b0474", "conv": "c103", "seq": 3, "src": "en-US", "tgt": "es-ES", "text": "you have to show me", "address": "singular", "tags": ["short"]}
+{"id": "b0475", "conv": "c103", "seq": 4, "src": "en-US", "tgt": "es-ES", "text": "Can you make me one for my birthday", "address": "singular", "tags": []}
+{"id": "b0476", "conv": "c104", "seq": 1, "src": "en-GB", "tgt": "es-ES", "text": "are you lot still coming out to Mallorca in August", "address": "plural", "tags": ["names"]}
+{"id": "b0477", "conv": "c104", "seq": 2, "src": "en-GB", "tgt": "es-ES", "text": "the villa's got a pool and it's ten minutes from the beach", "address": "none", "tags": ["numbers"]}
+{"id": "b0478", "conv": "c104", "seq": 3, "src": "en-GB", "tgt": "es-ES", "text": "you'll need to hire a car the pair of you, because the buses are hopeless out there and the taxis cost an absolute fortune", "address": "plural", "tags": ["idiom", "long"]}
+{"id": "b0479", "conv": "c104", "seq": 4, "src": "en-GB", "tgt": "es-ES", "text": "flights from Stansted are dirt cheap at the moment, I saw some for under forty quid return if you book for a Tuesday", "address": "none", "tags": ["names", "idiom", "long"]}
+{"id": "b0480", "conv": "c104", "seq": 5, "src": "en-GB", "tgt": "es-ES", "text": "let me know your dates by the end of the month", "address": "plural", "tags": []}
+{"id": "b0481", "conv": "c105", "seq": 1, "src": "en-GB", "tgt": "es-ES", "text": "blimey it's been ages, how are you", "address": "singular", "tags": ["idiom"]}
+{"id": "b0482", "conv": "c105", "seq": 2, "src": "en-GB", "tgt": "es-ES", "text": "I've been run off my feet with work", "address": "none", "tags": ["idiom"]}
+{"id": "b0483", "conv": "c105", "seq": 3, "src": "en-GB", "tgt": "es-ES", "text": "are you still living in Leeds", "address": "singular", "tags": ["names", "short"]}
+{"id": "b0484", "conv": "c105", "seq": 4, "src": "en-GB", "tgt": "es-ES", "text": "you must come down to London sometime, we've got a spare room now that the lodger's moved out and you could stay as long as you like", "address": "singular", "tags": ["names", "long"]}
+{"id": "b0485", "conv": "c105", "seq": 5, "src": "en-GB", "tgt": "es-ES", "text": "I'll text you when I've got a free weekend", "address": "singular", "tags": []}
+{"id": "b0486", "conv": "c106", "seq": 1, "src": "en-GB", "tgt": "es-ES", "text": "Have you finished your coursework", "address": "singular", "tags": ["short"]}
+{"id": "b0487", "conv": "c106", "seq": 2, "src": "en-GB", "tgt": "es-ES", "text": "the deadline's half past four on Friday", "address": "none", "tags": ["numbers"]}
+{"id": "b0488", "conv": "c106", "seq": 3, "src": "en-GB", "tgt": "es-ES", "text": "you can't keep leaving everything to the last minute", "address": "singular", "tags": ["idiom"]}
+{"id": "b0489", "conv": "c106", "seq": 4, "src": "en-GB", "tgt": "es-ES", "text": "do you want me to have a look at it", "address": "singular", "tags": []}
+{"id": "b0490", "conv": "c106", "seq": 5, "src": "en-GB", "tgt": "es-ES", "text": "right I'll give you till tea time", "address": "singular", "tags": ["idiom"]}
+{"id": "b0491", "conv": "c107", "seq": 1, "src": "en-GB", "tgt": "es-ES", "text": "have you two paid the council tax yet", "address": "plural", "tags": []}
+{"id": "b0492", "conv": "c107", "seq": 2, "src": "en-GB", "tgt": "es-ES", "text": "it's about a hundred and twenty quid each this month", "address": "none", "tags": ["numbers"]}
+{"id": "b0493", "conv": "c107", "seq": 3, "src": "en-GB", "tgt": "es-ES", "text": "could you sort the broadband as well", "address": "plural", "tags": ["loanword"]}
+{"id": "b0494", "conv": "c107", "seq": 4, "src": "en-GB", "tgt": "es-ES", "text": "Ben you said you'd ring them last week", "address": "singular", "tags": ["names"]}
+{"id": "b0495", "conv": "c107", "seq": 5, "src": "en-GB", "tgt": "es-ES", "text": "honestly mate sort it out", "address": "singular", "tags": ["short"]}
+{"id": "b0496", "conv": "c108", "seq": 1, "src": "en-GB", "tgt": "es-ES", "text": "are you going to Jess and Tom's wedding", "address": "singular", "tags": ["names"]}
+{"id": "b0497", "conv": "c108", "seq": 2, "src": "en-GB", "tgt": "es-ES", "text": "it's in a barn in the Cotswolds about forty minutes from the nearest train station, so I've no idea how we're getting back afterwards", "address": "none", "tags": ["names", "long"]}
+{"id": "b0498", "conv": "c108", "seq": 3, "src": "en-GB", "tgt": "es-ES", "text": "what are you wearing", "address": "singular", "tags": ["short"]}
+{"id": "b0499", "conv": "c108", "seq": 4, "src": "en-GB", "tgt": "es-ES", "text": "I'm thinking of getting something from Marks, or maybe I'll just wear the blue dress again, nobody there will have seen it apart from you", "address": "singular", "tags": ["names", "long"]}
+{"id": "b0500", "conv": "c108", "seq": 5, "src": "en-GB", "tgt": "es-ES", "text": "we should share a taxi from the station", "address": "none", "tags": []}
+{"id": "b0501", "conv": "c109", "seq": 1, "src": "es-AR", "tgt": "en-US", "text": "che, ¿vos viste lo que pasó en el partido?", "address": "singular", "tags": ["idiom"]}
+{"id": "b0502", "conv": "c109", "seq": 2, "src": "es-AR", "tgt": "en-US", "text": "no lo puedo creer, perdimos tres a cero en casa contra un equipo que venía último, encima con un penal que no existió", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0503", "conv": "c109", "seq": 3, "src": "es-AR", "tgt": "en-US", "text": "¿Vos tenés entradas para el domingo?", "address": "singular", "tags": ["short"]}
+{"id": "b0504", "conv": "c109", "seq": 4, "src": "es-AR", "tgt": "en-US", "text": "dale, avisame si conseguís, yo puedo pagar la mitad", "address": "singular", "tags": ["idiom"]}
+{"id": "b0505", "conv": "c109", "seq": 5, "src": "es-AR", "tgt": "en-US", "text": "igual va a estar lleno de gente", "address": "none", "tags": []}
+{"id": "b0506", "conv": "c110", "seq": 1, "src": "es-AR", "tgt": "en-US", "text": "hola má, ¿me escuchás bien o subo el volumen?", "address": "singular", "tags": []}
+{"id": "b0507", "conv": "c110", "seq": 2, "src": "es-AR", "tgt": "en-US", "text": "acá está todo bien, laburando mucho", "address": "none", "tags": ["idiom", "short"]}
+{"id": "b0508", "conv": "c110", "seq": 3, "src": "es-AR", "tgt": "en-US", "text": "¿Ya cobraste la jubilación este mes?", "address": "singular", "tags": ["short"]}
+{"id": "b0509", "conv": "c110", "seq": 4, "src": "es-AR", "tgt": "en-US", "text": "no te hagas drama, yo te mando la plata", "address": "singular", "tags": ["idiom"]}
+{"id": "b0510", "conv": "c110", "seq": 5, "src": "es-AR", "tgt": "en-US", "text": "son 80 mil pesos, mañana a la mañana te llegan, y si no te llegan me llamás y voy al banco a ver qué pasó", "address": "singular", "tags": ["numbers", "long"]}
+{"id": "b0511", "conv": "c111", "seq": 1, "src": "es-AR", "tgt": "en-US", "text": "boludo se te congeló la cámara, estás con la boca abierta", "address": "singular", "tags": ["idiom"]}
+{"id": "b0512", "conv": "c111", "seq": 2, "src": "es-AR", "tgt": "en-US", "text": "¿podés apagar el video un toque?", "address": "singular", "tags": ["idiom", "short"]}
+{"id": "b0513", "conv": "c111", "seq": 3, "src": "es-AR", "tgt": "en-US", "text": "ahora sí, te escucho joya", "address": "singular", "tags": ["idiom", "short"]}
+{"id": "b0514", "conv": "c111", "seq": 4, "src": "es-AR", "tgt": "en-US", "text": "bancame que cierro la otra pestaña", "address": "singular", "tags": ["idiom", "short"]}
+{"id": "b0515", "conv": "c111", "seq": 5, "src": "es-AR", "tgt": "en-US", "text": "listo, ya está", "address": "none", "tags": ["short"]}
+{"id": "b0516", "conv": "c112", "seq": 1, "src": "es-AR", "tgt": "en-US", "text": "¿querés que pidamos unas empanadas?", "address": "singular", "tags": ["short"]}
+{"id": "b0517", "conv": "c112", "seq": 2, "src": "es-AR", "tgt": "en-US", "text": "yo quiero de carne y de jamón y queso", "address": "none", "tags": []}
+{"id": "b0518", "conv": "c112", "seq": 3, "src": "es-AR", "tgt": "en-US", "text": "fijate si tienen la de humita, que te encanta, y pedí también una docena para mañana así no cocinamos", "address": "singular", "tags": ["numbers", "long"]}
+{"id": "b0519", "conv": "c112", "seq": 4, "src": "es-AR", "tgt": "en-US", "text": "el delivery tarda como 40 minutos", "address": "none", "tags": ["numbers", "loanword", "short"]}
+{"id": "b0520", "conv": "c112", "seq": 5, "src": "es-AR", "tgt": "en-US", "text": "¿Vos ponés la mesa mientras? y sacá la gaseosa de la heladera, que si no después está caliente y nadie la quiere tomar", "address": "singular", "tags": ["long"]}
+{"id": "b0521", "conv": "c113", "seq": 1, "src": "es-AR", "tgt": "en-US", "text": "chicos, ¿ustedes van a venir al asado del sábado?", "address": "plural", "tags": []}
+{"id": "b0522", "conv": "c113", "seq": 2, "src": "es-AR", "tgt": "en-US", "text": "traigan algo para tomar, no sean ratas", "address": "plural", "tags": ["idiom"]}
+{"id": "b0523", "conv": "c113", "seq": 3, "src": "es-AR", "tgt": "en-US", "text": "Martín pone la carne y yo el carbón, y la Flor dijo que hace el postre si alguien le presta una fuente grande", "address": "none", "tags": ["names", "long"]}
+{"id": "b0524", "conv": "c113", "seq": 4, "src": "es-AR", "tgt": "en-US", "text": "¿A qué hora pueden llegar ustedes?", "address": "plural", "tags": ["short"]}
+{"id": "b0525", "conv": "c113", "seq": 5, "src": "es-AR", "tgt": "en-US", "text": "después de las nueve está bárbaro", "address": "none", "tags": ["numbers", "idiom", "short"]}
+{"id": "b0526", "conv": "c114", "seq": 1, "src": "es-AR", "tgt": "en-US", "text": "buen día, perdón la demora, estaba en otra reunión", "address": "none", "tags": []}
+{"id": "b0527", "conv": "c114", "seq": 2, "src": "es-AR", "tgt": "en-US", "text": "¿Pudiste revisar el presupuesto que te mandé?", "address": "singular", "tags": ["ambiguous"]}
+{"id": "b0528", "conv": "c114", "seq": 3, "src": "es-AR", "tgt": "en-US", "text": "el total da 1.250.000 pesos con IVA incluido", "address": "none", "tags": ["numbers"]}
+{"id": "b0529", "conv": "c114", "seq": 4, "src": "es-AR", "tgt": "en-US", "text": "si querés lo vemos el jueves a las 15", "address": "singular", "tags": ["numbers"]}
+{"id": "b0530", "conv": "c114", "seq": 5, "src": "es-AR", "tgt": "en-US", "text": "mandame un mail con los cambios y yo el lunes te paso la versión final, así lo firmamos antes de fin de mes", "address": "singular", "tags": ["loanword", "long"]}
+{"id": "b0531", "conv": "c114", "seq": 6, "src": "es-AR", "tgt": "en-US", "text": "bueno, quedamos así entonces", "address": "none", "tags": ["short"]}
+{"id": "b0532", "conv": "c115", "seq": 1, "src": "es-CO", "tgt": "en-US", "text": "¿Quiubo parce, usted qué ha hecho?", "address": "singular", "tags": ["idiom", "short"]}
+{"id": "b0533", "conv": "c115", "seq": 2, "src": "es-CO", "tgt": "en-US", "text": "uy no, aquí trabajando como loco, no he tenido ni un fin de semana libre desde que me cambiaron de proyecto en marzo", "address": "none", "tags": ["names", "long"]}
+{"id": "b0534", "conv": "c115", "seq": 3, "src": "es-CO", "tgt": "en-US", "text": "¿Usted sí va a ir a la fiesta de Valentina?", "address": "singular", "tags": ["names"]}
+{"id": "b0535", "conv": "c115", "seq": 4, "src": "es-CO", "tgt": "en-US", "text": "venga pues y nos tomamos algo antes", "address": "singular", "tags": ["idiom"]}
+{"id": "b0536", "conv": "c115", "seq": 5, "src": "es-CO", "tgt": "en-US", "text": "listo, nos vemos a las ocho", "address": "none", "tags": ["numbers", "short"]}
+{"id": "b0537", "conv": "c116", "seq": 1, "src": "es-CO", "tgt": "en-US", "text": "mija, ¿usted ya comió o se va a quedar otra vez sin almorzar?", "address": "singular", "tags": []}
+{"id": "b0538", "conv": "c116", "seq": 2, "src": "es-CO", "tgt": "en-US", "text": "no se me vaya a enfermar, que allá hace mucho frío", "address": "singular", "tags": []}
+{"id": "b0539", "conv": "c116", "seq": 3, "src": "es-CO", "tgt": "en-US", "text": "le mandé unas arepas con su tía Gloria", "address": "singular", "tags": ["names", "ambiguous"]}
+{"id": "b0540", "conv": "c116", "seq": 4, "src": "es-CO", "tgt": "en-US", "text": "¿Le llegó la encomienda o todavía no?", "address": "singular", "tags": []}
+{"id": "b0541", "conv": "c116", "seq": 5, "src": "es-CO", "tgt": "en-US", "text": "ay, qué pena, la oficina de correos es lentísima, la vez pasada se demoraron casi un mes y llegó todo mojado", "address": "none", "tags": ["long"]}
+{"id": "b0542", "conv": "c117", "seq": 1, "src": "es-CO", "tgt": "en-US", "text": "¿me escucha? yo a usted la veo pero no la oigo", "address": "singular", "tags": []}
+{"id": "b0543", "conv": "c117", "seq": 2, "src": "es-CO", "tgt": "en-US", "text": "se le está cortando la voz", "address": "singular", "tags": ["short"]}
+{"id": "b0544", "conv": "c117", "seq": 3, "src": "es-CO", "tgt": "en-US", "text": "muévase hacia la ventana a ver si coge mejor señal", "address": "singular", "tags": []}
+{"id": "b0545", "conv": "c117", "seq": 4, "src": "es-CO", "tgt": "en-US", "text": "¿Ya actualizó la aplicación? porque a mí me pasaba lo mismo y apenas la actualicé se arregló todo de una vez", "address": "singular", "tags": ["long"]}
+{"id": "b0546", "conv": "c117", "seq": 5, "src": "es-CO", "tgt": "en-US", "text": "ahora sí, perfecto", "address": "none", "tags": ["short"]}
+{"id": "b0547", "conv": "c118", "seq": 1, "src": "es-CO", "tgt": "en-US", "text": "buenas tardes, don Hernando, ¿cómo ha seguido?", "address": "singular", "tags": ["names"]}
+{"id": "b0548", "conv": "c118", "seq": 2, "src": "es-CO", "tgt": "en-US", "text": "¿Se ha tomado la pastilla todos los días?", "address": "singular", "tags": []}
+{"id": "b0549", "conv": "c118", "seq": 3, "src": "es-CO", "tgt": "en-US", "text": "la tensión le salió en 130 con 85, eso está bien", "address": "singular", "tags": ["numbers"]}
+{"id": "b0550", "conv": "c118", "seq": 4, "src": "es-CO", "tgt": "en-US", "text": "siga caminando media hora por la mañana, pero no salga al sol del mediodía y tómese por lo menos dos litros de agua", "address": "singular", "tags": ["numbers", "long"]}
+{"id": "b0551", "conv": "c118", "seq": 5, "src": "es-CO", "tgt": "en-US", "text": "lo veo en un mes para el control", "address": "singular", "tags": ["numbers", "ambiguous"]}
+{"id": "b0552", "conv": "c119", "seq": 1, "src": "es-CO", "tgt": "en-US", "text": "¿ustedes ya compraron los tiquetes para diciembre?", "address": "plural", "tags": ["loanword"]}
+{"id": "b0553", "conv": "c119", "seq": 2, "src": "es-CO", "tgt": "en-US", "text": "están carísimos, como 900 mil ida y vuelta", "address": "none", "tags": ["numbers"]}
+{"id": "b0554", "conv": "c119", "seq": 3, "src": "es-CO", "tgt": "en-US", "text": "si quieren se quedan en la finca con nosotros, hay espacio de sobra y mi papá ya está preguntando cuándo llegan", "address": "plural", "tags": ["long"]}
+{"id": "b0555", "conv": "c119", "seq": 4, "src": "es-CO", "tgt": "en-US", "text": "¿Cuántos días se van a quedar ustedes?", "address": "plural", "tags": []}
+{"id": "b0556", "conv": "c119", "seq": 5, "src": "es-CO", "tgt": "en-US", "text": "qué chévere que vengan, de verdad", "address": "none", "tags": ["idiom", "short"]}
+{"id": "b0557", "conv": "c120", "seq": 1, "src": "es-CO", "tgt": "en-US", "text": "¿Usted me puede colaborar con el informe?", "address": "singular", "tags": ["idiom"]}
+{"id": "b0558", "conv": "c120", "seq": 2, "src": "es-CO", "tgt": "en-US", "text": "el jefe lo necesita antes del mediodía", "address": "none", "tags": []}
+{"id": "b0559", "conv": "c120", "seq": 3, "src": "es-CO", "tgt": "en-US", "text": "regáleme cinco minutos y ya le confirmo", "address": "singular", "tags": ["idiom", "numbers"]}
+{"id": "b0560", "conv": "c120", "seq": 4, "src": "es-CO", "tgt": "en-US", "text": "es que el archivo de Excel no me abre, me sale un error raro y ya intenté desde el computador de la oficina y tampoco", "address": "none", "tags": ["loanword", "names", "long"]}
+{"id": "b0561", "conv": "c120", "seq": 5, "src": "es-CO", "tgt": "en-US", "text": "¿me lo puede mandar otra vez por WhatsApp?", "address": "singular", "tags": ["loanword", "names"]}
+{"id": "b0562", "conv": "c120", "seq": 6, "src": "es-CO", "tgt": "en-US", "text": "listo, mil gracias", "address": "none", "tags": ["short"]}
+{"id": "b0563", "conv": "c121", "seq": 1, "src": "es-MX", "tgt": "en-US", "text": "¿qué onda güey, cómo estás? hace siglos que no hablamos", "address": "singular", "tags": ["idiom"]}
+{"id": "b0564", "conv": "c121", "seq": 2, "src": "es-MX", "tgt": "en-US", "text": "aquí nomás, echándole ganas a la chamba", "address": "none", "tags": ["idiom"]}
+{"id": "b0565", "conv": "c121", "seq": 3, "src": "es-MX", "tgt": "en-US", "text": "¿Ya viste la nueva de Marvel?", "address": "singular", "tags": ["names", "short"]}
+{"id": "b0566", "conv": "c121", "seq": 4, "src": "es-MX", "tgt": "en-US", "text": "no manches, tienes que verla, el final está buenísimo y no te voy a decir nada pero vas a llorar, te lo juro", "address": "singular", "tags": ["idiom", "long"]}
+{"id": "b0567", "conv": "c121", "seq": 5, "src": "es-MX", "tgt": "en-US", "text": "órale, vamos el viernes al cine", "address": "none", "tags": ["idiom", "short"]}
+{"id": "b0568", "conv": "c122", "seq": 1, "src": "es-MX", "tgt": "en-US", "text": "mijo, ¿ya te tomaste la medicina?", "address": "singular", "tags": ["short"]}
+{"id": "b0569", "conv": "c122", "seq": 2, "src": "es-MX", "tgt": "en-US", "text": "ahorita te paso a tu papá", "address": "singular", "tags": ["idiom", "short"]}
+{"id": "b0570", "conv": "c122", "seq": 3, "src": "es-MX", "tgt": "en-US", "text": "¿cuándo vienes a visitarnos?", "address": "singular", "tags": ["short"]}
+{"id": "b0571", "conv": "c122", "seq": 4, "src": "es-MX", "tgt": "en-US", "text": "tu abuelita pregunta por ti todos los días, ya le dije que vienes en diciembre pero no me cree hasta que te vea", "address": "singular", "tags": ["long"]}
+{"id": "b0572", "conv": "c122", "seq": 5, "src": "es-MX", "tgt": "en-US", "text": "Cuídate mucho, ¿eh? y abrígate que dicen que va a hacer frío", "address": "singular", "tags": []}
+{"id": "b0573", "conv": "c123", "seq": 1, "src": "es-MX", "tgt": "en-US", "text": "no te escucho, estás en mute, abajo a la izquierda", "address": "singular", "tags": ["loanword"]}
+{"id": "b0574", "conv": "c123", "seq": 2, "src": "es-MX", "tgt": "en-US", "text": "¿le puedes subir al volumen? casi no te oigo con el ruido de la calle", "address": "singular", "tags": []}
+{"id": "b0575", "conv": "c123", "seq": 3, "src": "es-MX", "tgt": "en-US", "text": "se trabó otra vez el internet, ya le hablé a la compañía tres veces esta semana y nada más me dicen que están trabajando en la zona", "address": "none", "tags": ["loanword", "numbers", "long"]}
+{"id": "b0576", "conv": "c123", "seq": 4, "src": "es-MX", "tgt": "en-US", "text": "a ver, cuelga y te marco yo", "address": "singular", "tags": []}
+{"id": "b0577", "conv": "c123", "seq": 5, "src": "es-MX", "tgt": "en-US", "text": "ya, ya se oye bien", "address": "none", "tags": ["short"]}
+{"id": "b0578", "conv": "c124", "seq": 1, "src": "es-MX", "tgt": "en-US", "text": "oye, ¿me prestas 500 pesos hasta la quincena?", "address": "singular", "tags": ["numbers", "idiom"]}
+{"id": "b0579", "conv": "c124", "seq": 2, "src": "es-MX", "tgt": "en-US", "text": "te los regreso el 15, te lo juro", "address": "singular", "tags": ["numbers"]}
+{"id": "b0580", "conv": "c124", "seq": 3, "src": "es-MX", "tgt": "en-US", "text": "es que se me descompuso el coche", "address": "none", "tags": []}
+{"id": "b0581", "conv": "c124", "seq": 4, "src": "es-MX", "tgt": "en-US", "text": "neta, eres un sol, no sabes de la que me salvas, ya no sabía a quién pedirle y mi jefe no me quiso adelantar nada", "address": "singular", "tags": ["idiom", "long"]}
+{"id": "b0582", "conv": "c124", "seq": 5, "src": "es-MX", "tgt": "en-US", "text": "luego te invito unos tacos, o si quieres vamos a la fonda de doña Lupe que te gustó tanto la otra vez", "address": "singular", "tags": ["names", "long"]}
+{"id": "b0583", "conv": "c125", "seq": 1, "src": "es-MX", "tgt": "en-US", "text": "¿ustedes qué van a hacer en Día de Muertos?", "address": "plural", "tags": ["names"]}
+{"id": "b0584", "conv": "c125", "seq": 2, "src": "es-MX", "tgt": "en-US", "text": "vénganse a la casa, vamos a poner el altar", "address": "plural", "tags": []}
+{"id": "b0585", "conv": "c125", "seq": 3, "src": "es-MX", "tgt": "en-US", "text": "mi tía hace un pan de muerto buenísimo", "address": "none", "tags": ["loanword"]}
+{"id": "b0586", "conv": "c125", "seq": 4, "src": "es-MX", "tgt": "en-US", "text": "traigan fotos de sus abuelitos para la ofrenda, y si quieren algo que les gustaba comer, aunque sea un refresco o unos dulces", "address": "plural", "tags": ["long"]}
+{"id": "b0587", "conv": "c125", "seq": 5, "src": "es-MX", "tgt": "en-US", "text": "¿a qué hora llegan, como a las siete?", "address": "plural", "tags": ["numbers"]}
+{"id": "b0588", "conv": "c126", "seq": 1, "src": "es-MX", "tgt": "en-US", "text": "buenas tardes, una disculpa por el retraso", "address": "none", "tags": []}
+{"id": "b0589", "conv": "c126", "seq": 2, "src": "es-MX", "tgt": "en-US", "text": "¿Me podría mandar la cotización actualizada?", "address": "singular", "tags": ["ambiguous", "short"]}
+{"id": "b0590", "conv": "c126", "seq": 3, "src": "es-MX", "tgt": "en-US", "text": "el pago se hace a 30 días", "address": "none", "tags": ["numbers"]}
+{"id": "b0591", "conv": "c126", "seq": 4, "src": "es-MX", "tgt": "en-US", "text": "¿le parece bien si lo vemos el lunes a las diez? así ya tengo la autorización del director y podemos cerrar el pedido esa misma semana", "address": "singular", "tags": ["numbers", "long"]}
+{"id": "b0592", "conv": "c126", "seq": 5, "src": "es-MX", "tgt": "en-US", "text": "perfecto, quedo al pendiente", "address": "none", "tags": ["idiom", "short"]}
+{"id": "b0593", "conv": "c126", "seq": 6, "src": "es-MX", "tgt": "en-US", "text": "que tenga buen día y saludos a su equipo", "address": "singular", "tags": []}
+{"id": "b0594", "conv": "c127", "seq": 1, "src": "es-ES", "tgt": "en-US", "text": "tío, ¿tú has visto lo de Jorge?", "address": "singular", "tags": ["names", "idiom"]}
+{"id": "b0595", "conv": "c127", "seq": 2, "src": "es-ES", "tgt": "en-US", "text": "flipas, se ha comprado una moto", "address": "none", "tags": ["idiom", "short"]}
+{"id": "b0596", "conv": "c127", "seq": 3, "src": "es-ES", "tgt": "en-US", "text": "¿Te vienes esta noche a tomar algo?", "address": "singular", "tags": []}
+{"id": "b0597", "conv": "c127", "seq": 4, "src": "es-ES", "tgt": "en-US", "text": "vale, pues quedamos a las diez en la plaza, y luego si eso vamos al bar de siempre o a donde diga la gente", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0598", "conv": "c127", "seq": 5, "src": "es-ES", "tgt": "en-US", "text": "no me dejes tirado como la última vez", "address": "singular", "tags": ["idiom"]}
+{"id": "b0599", "conv": "c128", "seq": 1, "src": "es-ES", "tgt": "en-US", "text": "¿vosotros tenéis planes para el puente?", "address": "plural", "tags": ["idiom", "short"]}
+{"id": "b0600", "conv": "c128", "seq": 2, "src": "es-ES", "tgt": "en-US", "text": "os venís a Asturias con nosotros", "address": "plural", "tags": ["names", "short"]}
+{"id": "b0601", "conv": "c128", "seq": 3, "src": "es-ES", "tgt": "en-US", "text": "la casa rural tiene sitio para ocho y está a diez minutos de la playa, y encima el dueño nos hace precio porque es amigo de mi padre", "address": "none", "tags": ["numbers", "long"]}
+{"id": "b0602", "conv": "c128", "seq": 4, "src": "es-ES", "tgt": "en-US", "text": "¿Habéis comprado ya los billetes del tren?", "address": "plural", "tags": []}
+{"id": "b0603", "conv": "c128", "seq": 5, "src": "es-ES", "tgt": "en-US", "text": "venga, decídmelo antes del jueves", "address": "plural", "tags": ["short"]}
+{"id": "b0604", "conv": "c129", "seq": 1, "src": "es-ES", "tgt": "en-US", "text": "oye, que no te oigo nada, ¿me oyes tú a mí?", "address": "singular", "tags": []}
+{"id": "b0605", "conv": "c129", "seq": 2, "src": "es-ES", "tgt": "en-US", "text": "¿Tienes el micro silenciado? te veo mover la boca pero no sale nada", "address": "singular", "tags": []}
+{"id": "b0606", "conv": "c129", "seq": 3, "src": "es-ES", "tgt": "en-US", "text": "vale, ahora sí", "address": "none", "tags": ["short"]}
+{"id": "b0607", "conv": "c129", "seq": 4, "src": "es-ES", "tgt": "en-US", "text": "es que se te ve fatal, igual es el wifi", "address": "singular", "tags": ["loanword"]}
+{"id": "b0608", "conv": "c129", "seq": 5, "src": "es-ES", "tgt": "en-US", "text": "me cambio al portátil un momento", "address": "none", "tags": ["short"]}
+{"id": "b0609", "conv": "c130", "seq": 1, "src": "es-ES", "tgt": "en-US", "text": "buenos días, ¿es usted el dueño del piso?", "address": "singular", "tags": []}
+{"id": "b0610", "conv": "c130", "seq": 2, "src": "es-ES", "tgt": "en-US", "text": "le llamo por el anuncio de Idealista", "address": "singular", "tags": ["names"]}
+{"id": "b0611", "conv": "c130", "seq": 3, "src": "es-ES", "tgt": "en-US", "text": "¿El alquiler son 900 euros con gastos incluidos? porque en el anuncio no lo ponía claro y la comunidad aquí suele ser bastante cara", "address": "singular", "tags": ["numbers", "long"]}
+{"id": "b0612", "conv": "c130", "seq": 4, "src": "es-ES", "tgt": "en-US", "text": "¿Podría enseñármelo mañana por la tarde?", "address": "singular", "tags": ["ambiguous", "short"]}
+{"id": "b0613", "conv": "c130", "seq": 5, "src": "es-ES", "tgt": "en-US", "text": "perfecto, muchas gracias, hasta mañana", "address": "none", "tags": ["short"]}
+{"id": "b0614", "conv": "c131", "seq": 1, "src": "es-ES", "tgt": "en-US", "text": "cariño, ¿qué tal el día?", "address": "singular", "tags": ["short"]}
+{"id": "b0615", "conv": "c131", "seq": 2, "src": "es-ES", "tgt": "en-US", "text": "yo estoy reventada, ha sido un día horrible", "address": "none", "tags": ["idiom"]}
+{"id": "b0616", "conv": "c131", "seq": 3, "src": "es-ES", "tgt": "en-US", "text": "¿has cenado ya? porque como sigas comiendo a las once de la noche luego no duermes y mañana estás hecha polvo", "address": "singular", "tags": ["long"]}
+{"id": "b0617", "conv": "c131", "seq": 4, "src": "es-ES", "tgt": "en-US", "text": "pues me hago una tortilla francesa y me meto en la cama, que mañana entro a las siete y encima tengo que llevar el coche al taller", "address": "none", "tags": ["numbers", "loanword", "long"]}
+{"id": "b0618", "conv": "c131", "seq": 5, "src": "es-ES", "tgt": "en-US", "text": "te echo muchísimo de menos", "address": "singular", "tags": ["idiom", "short"]}
+{"id": "b0619", "conv": "c131", "seq": 6, "src": "es-ES", "tgt": "en-US", "text": "¿cuándo vuelves, el viernes o el sábado?", "address": "singular", "tags": []}
+{"id": "b0620", "conv": "c132", "seq": 1, "src": "es-ES", "tgt": "en-US", "text": "hola, ¿qué tal estáis? ¿cómo ha ido la vuelta del pueblo?", "address": "plural", "tags": []}
+{"id": "b0621", "conv": "c132", "seq": 2, "src": "es-ES", "tgt": "en-US", "text": "¿Os ha llegado el paquete que os mandé?", "address": "plural", "tags": []}
+{"id": "b0622", "conv": "c132", "seq": 3, "src": "es-ES", "tgt": "en-US", "text": "ponía que llegaba en tres o cuatro días hábiles", "address": "none", "tags": ["numbers"]}
+{"id": "b0623", "conv": "c132", "seq": 4, "src": "es-ES", "tgt": "en-US", "text": "qué guapos estáis los dos, se nota que os ha sentado bien el verano en el pueblo, estáis morenísimos", "address": "plural", "tags": ["long"]}
+{"id": "b0624", "conv": "c132", "seq": 5, "src": "es-ES", "tgt": "en-US", "text": "abuela, ¿tú te acuerdas de mí?", "address": "singular", "tags": ["short"]}
+{"id": "b0625", "conv": "c132", "seq": 6, "src": "es-ES", "tgt": "en-US", "text": "mamá, se ha quedado congelada la pantalla otra vez", "address": "none", "tags": []}
