@@ -23,7 +23,7 @@ import {
   type TranslationFailureCode,
 } from "@translatv/shared";
 
-import type { RoomUserData } from "../account/service.js";
+import { contactIdFor, type RoomUserData } from "../account/service.js";
 import type { Config } from "../config.js";
 import { log } from "../log.js";
 import { GRACE_MS, MAX_MEMBERS, RoomManager, type Member } from "../rooms/RoomManager.js";
@@ -244,6 +244,7 @@ export class SignalingServer {
   /** memberId -> their open call history row. Empty when no RoomUserData was given. */
   private readonly calls = new Map<string, OpenCall>();
   private unsubscribeDeleted: (() => void) | null = null;
+  private unsubscribeBlocked: (() => void) | null = null;
 
   private sweepTimer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
@@ -284,6 +285,7 @@ export class SignalingServer {
     this.pingTimer.unref();
 
     this.unsubscribeDeleted = auth.onAccountDeleted?.((userId) => this.disconnectUser(userId)) ?? null;
+    this.unsubscribeBlocked = userData?.onBlocked((blockerId, blockedId) => this.separate(blockerId, blockedId)) ?? null;
   }
 
   /**
@@ -622,6 +624,22 @@ export class SignalingServer {
       return;
     }
 
+    // Two accounts with a block between them, in either direction, are never in one room. The
+    // refusal is the one a code with no live room behind it gets (HOST_NOT_PRESENT, fatal), word
+    // for word, so the person refused cannot tell a block from a call that is not available, and
+    // the host is told nothing. A FULL room is left to answer ROOM_FULL below, as it does for
+    // anyone, so the block does not show as a different answer there either.
+    const occupied = this.rooms.peek(message.code);
+    if (
+      occupied &&
+      occupied.members.length < MAX_MEMBERS &&
+      occupied.members.some((m) => m.userId !== userId && this.userData?.blockedBetween(userId, m.userId) === true)
+    ) {
+      log.info("room.join_refused", { room: roomHash(occupied.code), user: userId });
+      this.fail(connection.socket, "HOST_NOT_PRESENT", true);
+      return;
+    }
+
     const result = this.rooms.join(
       message.code,
       message.username,
@@ -651,9 +669,17 @@ export class SignalingServer {
       config: { graceMs: GRACE_MS, maxMembers: MAX_MEMBERS },
       iceServers: this.config.iceServers,
       snapshot: session.snapshot(),
+      ...this.contactField("peerContactId", userId, peer),
     });
 
-    this.broadcast(room.code, { t: "peer.joined", peer: toWire(member) }, member.id);
+    // One frame per reader rather than a broadcast, because each reader's contactId for the new
+    // arrival is their own.
+    for (const other of room.members) {
+      if (other.id === member.id) continue;
+      const socket = this.byMember.get(other.id);
+      if (!socket) continue;
+      this.send(socket, { t: "peer.joined", peer: toWire(member), ...this.contactField("contactId", other.userId, member) });
+    }
     log.info("room.joined", { room: roomHash(room.code), members: room.members.length });
 
     // The same account on both ends (two tabs, one person) is not a contact of itself.
@@ -721,6 +747,7 @@ export class SignalingServer {
       config: { graceMs: GRACE_MS, maxMembers: MAX_MEMBERS },
       iceServers: this.config.iceServers,
       snapshot: session.snapshot(),
+      ...this.contactField("peerContactId", member.userId, peer),
     });
 
     this.broadcast(
@@ -766,6 +793,30 @@ export class SignalingServer {
 
     const ender = this.rooms.peek(roomCode)?.members.find((m) => m.id === memberId);
     this.endRoom(roomCode, memberId, ender?.username ?? "someone", now);
+  }
+
+  /**
+   * `{ [key]: contactId }` naming `peer` as the reader `viewerId` refers to them, or nothing: with
+   * no peer, with one account on both ends, or with no account data behind the server (whose
+   * contactIds would resolve against no history).
+   */
+  private contactField<K extends string>(key: K, viewerId: string, peer: Member | null): Partial<Record<K, string>> {
+    if (!this.userData || !peer || !viewerId || !peer.userId || peer.userId === viewerId) return {};
+    return { [key]: contactIdFor(viewerId, peer.userId) } as Partial<Record<K, string>>;
+  }
+
+  /**
+   * A block was just made. Any call the two are in together ends for both, exactly as if the
+   * blocker had pressed End chat: the same room.ended frame, naming them, and nothing about why.
+   */
+  private separate(blockerId: string, blockedId: string): void {
+    const now = Date.now();
+    for (const room of this.rooms.roomsHolding(blockerId, blockedId)) {
+      const blocker = room.members.find((m) => m.userId === blockerId);
+      if (!blocker) continue;
+      this.endRoom(room.code, blocker.id, blocker.username, now);
+      log.info("room.ended_by_block", { room: roomHash(room.code) });
+    }
   }
 
   /**
@@ -1444,6 +1495,8 @@ export class SignalingServer {
     for (const memberId of [...this.calls.keys()]) this.closeCall(memberId, now);
     this.unsubscribeDeleted?.();
     this.unsubscribeDeleted = null;
+    this.unsubscribeBlocked?.();
+    this.unsubscribeBlocked = null;
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.sweepTimer = null;
     if (this.pingTimer) clearInterval(this.pingTimer);

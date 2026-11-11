@@ -80,6 +80,18 @@ plan of record for the multi-user server and the iOS app.
   downloads a transcript. `DELETE /api/account` re authenticates, deletes the user row and lets
   ON DELETE do the rest (CASCADE for what the user owns, SET NULL for what only mentions them, such as a
   peer's call history), then closes that user's live sockets. It never touches the spend ledger.
+- Safety (blocks and reports) lives beside it, in `server/src/account/service.ts`, schemas in
+  `shared/src/account.ts`. A person is named by their per viewer `contactId`, resolved only in the
+  caller's OWN call history, so nobody can block or report someone they have not been on a call
+  with, and no account id leaves the server (except to the owner's report list). A block, in
+  either direction, keeps two accounts out of one room (`handleJoin` refuses with
+  `HOST_NOT_PRESENT`, the answer a dead code gets, so it does not leak), ends a call they share as
+  End chat would, and hides the blocked person from the blocker's contacts (history rows stay).
+  Deleting EITHER account deletes the block (CASCADE). A report (fixed reason, optional details up
+  to 500 characters, optional block in the same transaction) is user content: never logged, never
+  shown to the person reported, and nothing from the call is attached. Reports SET NULL on both
+  accounts, so a report survives the reporter and the reported person deleting their accounts,
+  naming nobody once they are gone. Only the `OWNER_EMAIL` account lists and reviews them.
 
 ## Spend tracking
 

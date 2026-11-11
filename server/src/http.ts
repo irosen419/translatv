@@ -96,6 +96,9 @@ export function createApp(
       signup: config.signupMode,
       translation: brokenAtRuntime ? "failed" : configured ? "enabled" : "not_configured",
       ...(brokenAtRuntime && translation?.disabled ? { reason: translation.disabled } : {}),
+      // Where to write for help (SUPPORT_EMAIL). Public by design: the support page shows it to
+      // anyone, signed in or not.
+      supportEmail: config.supportEmail,
     };
     res.json(body);
   });

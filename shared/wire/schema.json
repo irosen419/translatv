@@ -655,6 +655,9 @@
                 }
               ]
             },
+            "peerContactId": {
+              "type": "string"
+            },
             "polite": {
               "type": "boolean"
             },
@@ -711,6 +714,9 @@
         {
           "additionalProperties": true,
           "properties": {
+            "contactId": {
+              "type": "string"
+            },
             "peer": {
               "$ref": "#/definitions/member"
             },

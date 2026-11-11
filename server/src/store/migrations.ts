@@ -108,4 +108,35 @@ export const MIGRATIONS: readonly string[] = [
    ) STRICT;
    CREATE INDEX call_history_user_started ON call_history (user_id, started_at DESC, id DESC);
    CREATE INDEX call_history_peer ON call_history (peer_user_id)`,
+  // 9. Blocks. One row per (blocker, blocked) pair, so blocking twice is one block. Both ends
+  //    CASCADE: a block is about two accounts, and with either one gone it protects nobody, so
+  //    deleting either account deletes the block. Enforced in both directions by the code that
+  //    reads it (two such accounts are never in one room), stored in the one the blocker chose.
+  `CREATE TABLE blocks (
+     blocker_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+     blocked_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (blocker_id, blocked_id),
+     CHECK (blocker_id <> blocked_id)
+   ) STRICT;
+   CREATE INDEX blocks_blocked ON blocks (blocked_id)`,
+  // 10. Reports, for the owner to review. Both accounts SET NULL rather than cascade: a report has
+  //     to outlive the reporter deleting their account (or the report would be a way to complain
+  //     and then erase the complaint), and outlive the reported account too (deleting yourself
+  //     must not erase what was said about you). What survives names nobody once the account row
+  //     is gone. details is the reporter's own words, up to REPORT_DETAILS_MAX, and nothing from
+  //     the call itself: nothing said on a call is stored anywhere to attach.
+  `CREATE TABLE reports (
+     id          TEXT PRIMARY KEY,
+     reporter_id TEXT REFERENCES users (id) ON DELETE SET NULL,
+     reported_id TEXT REFERENCES users (id) ON DELETE SET NULL,
+     reason      TEXT NOT NULL,
+     details     TEXT,
+     status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'reviewed')),
+     created_at  INTEGER NOT NULL,
+     reviewed_at INTEGER
+   ) STRICT;
+   CREATE INDEX reports_status_created ON reports (status, created_at DESC);
+   CREATE INDEX reports_reporter ON reports (reporter_id);
+   CREATE INDEX reports_reported ON reports (reported_id)`,
 ];

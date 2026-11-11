@@ -70,6 +70,7 @@ beforeEach(async () => {
     authSecret: null,
     signupMode: "open",
     ownerEmail: null,
+    supportEmail: null,
     dailyCapUsd: 10,
     roomCapUsd: 1.5,
     iceServers: [],

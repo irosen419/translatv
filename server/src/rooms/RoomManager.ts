@@ -169,6 +169,17 @@ export class RoomManager {
     return room?.members.some((m) => m.isHost) ?? false;
   }
 
+  /**
+   * Every live room with both of these accounts in a seat, reconnecting seats included. Reads, and
+   * does not sweep. A block between two people in one call ends it (ws/server.ts), so this is
+   * how the server finds that call.
+   */
+  roomsHolding(a: string, b: string): Room[] {
+    return [...this.rooms.values()].filter(
+      (room) => room.members.some((m) => m.userId === a) && room.members.some((m) => m.userId === b),
+    );
+  }
+
   /** Was this code ended (or destroyed) recently enough to still be refused as ROOM_ENDED? */
   hasEnded(code: string): boolean {
     return this.tombstones.has(normalizeCode(code));

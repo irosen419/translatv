@@ -161,7 +161,7 @@ describe("DATA_DIR", () => {
 });
 
 describe("accounts configuration", () => {
-  const NAMES = ["AUTH_SECRET", "SIGNUP_MODE", "OWNER_EMAIL"] as const;
+  const NAMES = ["AUTH_SECRET", "SIGNUP_MODE", "OWNER_EMAIL", "SUPPORT_EMAIL"] as const;
   let savedAccounts: Record<string, string | undefined>;
   beforeEach(() => {
     savedAccounts = {};
@@ -206,6 +206,24 @@ describe("accounts configuration", () => {
     const config = loadConfig(root);
     expect(config.authSecret).toBe(secret);
     expect(describeConfig(config).join("\n")).not.toContain(secret);
+  });
+
+  it("has no support contact unless SUPPORT_EMAIL is set, and says so", () => {
+    const config = loadConfig(root);
+    expect(config.supportEmail).toBe(null);
+    expect(describeConfig(config).join("\n")).toContain("SUPPORT_EMAIL is not set");
+  });
+
+  it("reads SUPPORT_EMAIL, normalized like any email", () => {
+    process.env["SUPPORT_EMAIL"] = "  Help@Example.TEST ";
+    const config = loadConfig(root);
+    expect(config.supportEmail).toBe("help@example.test");
+    expect(describeConfig(config).join("\n")).toContain("a support contact is configured");
+  });
+
+  it("refuses a SUPPORT_EMAIL that is not an address, rather than print a dead link", () => {
+    process.env["SUPPORT_EMAIL"] = "help at example";
+    expect(thrownMessage()).toContain("SUPPORT_EMAIL");
   });
 
   it("no longer reads ADMIN_PASSWORD at all", () => {

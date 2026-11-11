@@ -22,12 +22,19 @@ import {
   signupRequest,
 } from "./auth.js";
 import {
+  blocksResponse,
   callsPage,
   callsQuery,
+  contactRef,
   contactsResponse,
   deleteAccountRequest,
   glossaryDocument,
+  ownerReport,
   preferences,
+  reportReceipt,
+  reportRequest,
+  reportsResponse,
+  reviewReportRequest,
 } from "./account.js";
 
 /**
@@ -40,7 +47,8 @@ import {
  * The same bump rule as PROTOCOL_VERSION: bump it on any change a client already in the field
  * could not handle, such as a removed or renamed field, a new required request field, a changed
  * meaning, a changed status, or a removed route. Adding an optional request field, a response
- * field an old client can ignore, or a new route does not need a bump.
+ * field an old client can ignore, or a new route does not need a bump. Nor does a new error code
+ * that only a new route can answer with, since no client already in the field calls that route.
  */
 export const API_VERSION = 1;
 
@@ -57,6 +65,12 @@ export const healthResponse = z.object({
   translation: z.enum(["enabled", "not_configured", "failed"]),
   /** Why translation failed, for an operator. Present only with "failed", and not always then. */
   reason: z.string().optional(),
+  /**
+   * Where a person writes for help (SUPPORT_EMAIL), or null when the operator set none. Public on
+   * purpose: it is printed on the support page for anyone signed out. Always present, so a client
+   * never has to tell "no address" from "a server too old to say".
+   */
+  supportEmail: z.string().nullable(),
 });
 export type HealthResponse = z.infer<typeof healthResponse>;
 
@@ -77,6 +91,13 @@ export const HTTP_SCHEMAS = {
   callsQuery,
   callsPage,
   contactsResponse,
+  contactRef,
+  blocksResponse,
+  reportRequest,
+  reportReceipt,
+  reportsResponse,
+  reviewReportRequest,
+  ownerReport,
 } as const;
 export type HttpSchemaName = keyof typeof HTTP_SCHEMAS;
 
@@ -168,6 +189,39 @@ export const HTTP_ROUTES: readonly HttpRoute[] = [
     id: "me.contacts", method: "GET", path: "/api/me/contacts",
     bearer: true, request: null,
     status: 200, response: "contactsResponse",
+  },
+  // Safety. Blocking and unblocking answer the list as it now stands. DELETE carries a body, as
+  // DELETE /api/account does, so that no route here has a parameter in its path.
+  {
+    id: "me.blocks.get", method: "GET", path: "/api/me/blocks",
+    bearer: true, request: null,
+    status: 200, response: "blocksResponse",
+  },
+  {
+    id: "me.blocks.create", method: "POST", path: "/api/me/blocks",
+    bearer: true, request: body("contactRef"),
+    status: 200, response: "blocksResponse",
+  },
+  {
+    id: "me.blocks.delete", method: "DELETE", path: "/api/me/blocks",
+    bearer: true, request: body("contactRef"),
+    status: 200, response: "blocksResponse",
+  },
+  {
+    id: "me.reports.create", method: "POST", path: "/api/me/reports",
+    bearer: true, request: body("reportRequest"),
+    status: 201, response: "reportReceipt",
+  },
+  // The owner's alone (OWNER_EMAIL). Anyone else is answered FORBIDDEN.
+  {
+    id: "owner.reports.list", method: "GET", path: "/api/owner/reports",
+    bearer: true, request: null,
+    status: 200, response: "reportsResponse",
+  },
+  {
+    id: "owner.reports.review", method: "POST", path: "/api/owner/reports/review",
+    bearer: true, request: body("reviewReportRequest"),
+    status: 200, response: "ownerReport",
   },
 ];
 

@@ -28,6 +28,7 @@ function config(overrides: Partial<Config> = {}): Config {
     authSecret: null,
     signupMode: "invite",
     ownerEmail: null,
+    supportEmail: null,
     isProduction: false,
     trustProxy: false,
     dataDir: tmpdir(),
@@ -91,6 +92,20 @@ describe("GET /healthz", () => {
     expect(body.signup).toBe("invite");
     // The retired admin gate is not reported any more: every server now requires signing in.
     expect("adminRequired" in body).toBe(false);
+  });
+
+  it("serves the support contact as null when SUPPORT_EMAIL is unset", async () => {
+    const response = await fetch(`${base}/healthz`);
+    expect(((await response.clone().json()) as Record<string, unknown>).supportEmail).toBe(null);
+    expect((await expectContract("GET", `${base}/healthz`, response))?.id).toBe("healthz");
+  });
+
+  it("serves the support contact when it is set", async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await listen(createApp(config({ supportEmail: "help@example.test" }), join(tmpdir(), "translatv-no-such-dist")));
+    const response = await fetch(`${base}/healthz`);
+    expect(((await response.clone().json()) as Record<string, unknown>).supportEmail).toBe("help@example.test");
+    expect((await expectContract("GET", `${base}/healthz`, response))?.id).toBe("healthz");
   });
 
   it("still reports translation as not configured when there is no key", async () => {

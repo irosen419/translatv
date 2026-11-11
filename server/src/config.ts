@@ -7,7 +7,7 @@
 
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { signupMode as signupModeSchema, type RTCIceServerConfig, type SignupMode } from "@translatv/shared";
+import { email as emailSchema, signupMode as signupModeSchema, type RTCIceServerConfig, type SignupMode } from "@translatv/shared";
 
 function num(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -70,6 +70,12 @@ export interface Config {
   signupMode: SignupMode;
   /** The account with this email (normalized) is the owner, who mints invites. Null: no owner. */
   ownerEmail: string | null;
+  /**
+   * Where people write for help (SUPPORT_EMAIL), shown as a mailto link on the support page and
+   * wherever the site says to contact support. Not a secret: /healthz serves it to anyone. Null
+   * when unset, and then the site shows no address rather than a broken link.
+   */
+  supportEmail: string | null;
   dailyCapUsd: number;
   roomCapUsd: number;
   iceServers: RTCIceServerConfig[];
@@ -116,6 +122,14 @@ export function loadConfig(repoRoot: string): Config {
   // Normalized exactly as signup normalizes an email, or the owner would never match their own
   // account because of a capital letter.
   const ownerEmail = (process.env["OWNER_EMAIL"] ?? "").trim().toLowerCase();
+
+  // Normalized and checked like a sign up email. Refused rather than ignored when it is set to
+  // something that is not an address, since a typo here prints a dead mailto link on every page.
+  const supportRaw = (process.env["SUPPORT_EMAIL"] ?? "").trim();
+  const support = supportRaw === "" ? null : emailSchema.safeParse(supportRaw);
+  if (support && !support.success) {
+    throw new Error(`SUPPORT_EMAIL must be an email address, got ${JSON.stringify(process.env["SUPPORT_EMAIL"])}.`);
+  }
 
   const origins = (process.env["ORIGIN"] ?? "http://localhost:5173,http://localhost:8080")
     .split(",")
@@ -179,6 +193,7 @@ export function loadConfig(repoRoot: string): Config {
     authSecret: authSecret.length > 0 ? authSecret : null,
     signupMode: signup.data,
     ownerEmail: ownerEmail.length > 0 ? ownerEmail : null,
+    supportEmail: support && support.success ? support.data : null,
     dailyCapUsd: num("ANTHROPIC_DAILY_CAP_USD", 10),
     roomCapUsd: num("ROOM_CAP_USD", 1.5),
     iceServers,
@@ -214,6 +229,11 @@ export function describeConfig(config: Config): string[] {
     config.ownerEmail === null
       ? "OWNER_EMAIL is not set: no account is the owner, so only the invite CLI can mint invites"
       : "an owner account is configured (OWNER_EMAIL)",
+  );
+  lines.push(
+    config.supportEmail === null
+      ? "SUPPORT_EMAIL is not set: the support page shows no contact address"
+      : "a support contact is configured (SUPPORT_EMAIL)",
   );
 
   if (config.anthropicApiKey === null) {

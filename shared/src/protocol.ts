@@ -511,8 +511,19 @@ export const serverMessage = z.discriminatedUnion("t", [
     config: roomConfig,
     iceServers: z.array(rtcIceServerConfig),
     snapshot: z.object({ lines: z.array(renderedLine), glossary: z.array(serverGlossaryEntry) }),
+    /**
+     * The peer as THIS reader's contactId (the per viewer opaque id of /api/me/calls), so the
+     * client can report or block them from inside the call. Absent with no peer, with the same
+     * account on both ends, or on a server with no accounts behind it. Optional, so no bump.
+     */
+    peerContactId: z.string().optional(),
   }),
-  z.object({ t: z.literal("peer.joined"), peer: member }),
+  z.object({
+    t: z.literal("peer.joined"),
+    peer: member,
+    /** The new arrival as the reader's contactId. Absent as for room.joined's peerContactId. */
+    contactId: z.string().optional(),
+  }),
   z.object({
     t: z.literal("peer.left"),
     peerId: z.string(),
