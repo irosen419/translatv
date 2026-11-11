@@ -1580,3 +1580,35 @@ dialog p.hint.bad { color: var(--warn); margin-bottom: 12px; }
 .saved-target { color: var(--muted); margin-top: 2px; }
 .saved-item > button { flex: 0 0 auto; font-size: 12px; padding: 6px 10px; }
 .saved-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+
+/* Safety: the report or block dialog, and the account page's recent calls, blocked people and
+   (for the owner) reports. Nothing here has a fixed width or height: Spanish runs about a quarter
+   longer than English, so every button wraps rather than clips, and text keeps a line height
+   with room above an accented capital. */
+.safety-dialog { max-height: calc(100dvh - 40px); overflow-y: auto; }
+.safety-dialog h2 { line-height: 1.35; }
+.safety-section { margin: 0 0 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.safety-section h3 { margin: 0 0 6px; font-size: 15px; line-height: 1.35; }
+.safety-section > button { max-width: 100%; }
+.safety-reasons { border: 0; margin: 0 0 14px; padding: 0; min-width: 0; }
+.safety-reasons legend { padding: 0; margin-bottom: 6px; font-size: 13px; color: var(--muted); }
+.safety-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+.safety-choice input { width: auto; flex: 0 0 auto; margin-top: 3px; }
+.safety-choice span { min-width: 0; overflow-wrap: anywhere; }
+.safety-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.safety-actions > button { flex: 1 1 auto; }
+.safety-done { color: var(--text); }
+.account-panel { width: 100%; font-size: 13px; }
+.account-panel .saved-item > button { flex: 0 1 auto; max-width: 55%; white-space: normal; text-align: center; }
+.hint.good { color: var(--accent); }
+.hint.good:empty { display: none; }
+.report-details { margin-top: 6px; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }

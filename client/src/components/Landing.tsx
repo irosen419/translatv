@@ -6,6 +6,8 @@ import type { CopyRef } from "../i18n/copy.js";
 import type { AuthOutcome } from "../lib/session.js";
 import { DeleteAccount } from "./DeleteAccount.jsx";
 import { SavedCorrections, type SavedCorrectionsApi } from "./SavedCorrections.jsx";
+import { BlockedPeople, OwnerReports, RecentCalls } from "./AccountSafety.jsx";
+import type { SafetyApi } from "../lib/safety.js";
 
 /** Longest thing worth keeping as a typed code, once it is clear it is not a link. */
 const MAX_TYPED = 12;
@@ -29,6 +31,8 @@ interface Props {
   onDeleteAccount(password: string, userId: string): Promise<AuthOutcome>;
   /** An account's saved corrections, to list and delete. Acts only as that account. */
   savedCorrectionsFor(userId: string): SavedCorrectionsApi;
+  /** Recent calls, blocks and (for the owner) reports. Acts only as that account. */
+  safetyFor(userId: string): SafetyApi;
 }
 
 export function Landing({
@@ -41,6 +45,7 @@ export function Landing({
   onCreateInvite,
   onDeleteAccount,
   savedCorrectionsFor,
+  safetyFor,
 }: Props) {
   const [code, setCode] = useState(initialCode ?? "");
   const ready = isLikelyCode(code);
@@ -122,6 +127,10 @@ export function Landing({
           {/* Keyed by the account for the same reason as the deletion form below: a list opened
               for one account must never be shown, or deleted from, as another. */}
           {user && <SavedCorrections key={`saved:${user.id}`} api={savedCorrectionsFor(user.id)} />}
+          {/* Keyed by the account like the lists beside them, for the same reason. */}
+          {user && <RecentCalls key={`calls:${user.id}`} api={safetyFor(user.id)} />}
+          {user && <BlockedPeople key={`blocked:${user.id}`} api={safetyFor(user.id)} />}
+          {user?.isOwner && <OwnerReports key={`reports:${user.id}`} api={safetyFor(user.id)} />}
           {user && <DeleteAccount key={user.id} onDelete={(password) => onDeleteAccount(password, user.id)} />}
         </div>
       </div>

@@ -7,5 +7,7 @@
 
   "overlay.empty": "Todo lo que digáis los dos aparece aquí, traducido.",
 
-  "account.delete.changed": "Esta pestaña ahora usa otra cuenta. No se ha eliminado nada."
+  "account.delete.changed": "Esta pestaña ahora usa otra cuenta. No se ha eliminado nada.",
+
+  "safety.confirm.body": "Ninguno de los dos podrá entrar a una llamada en la que esté el otro. Si ahora estáis en una llamada, termina para los dos. A esa persona no se le avisa, y puedes desbloquearla más tarde."
 }

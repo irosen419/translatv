@@ -335,6 +335,11 @@ const server = startServer({
     ANTHROPIC_API_KEY: "",
     // Open signup and a throwaway database: see script/accounts.mjs.
     ...accountsEnv(root),
+    // An owner for the report review section. Gia's own sections never look for the owner's
+    // controls, and a new account for it would cross the per address signup limit this run is
+    // already at (ten an hour).
+    OWNER_EMAIL: emailFor("Gia"),
+    SUPPORT_EMAIL: "help@harness.test",
 });
 const serverLog = [];
 server.stdout.on("data", (d) => serverLog.push(String(d)));
@@ -1427,6 +1432,165 @@ try {
     "the host's call history names the person who joined",
     Array.isArray(history?.calls) && history.calls.some((call) => call.peer?.displayName === "Ben"),
     JSON.stringify(history)?.slice(0, 200),
+  );
+
+  // ---------------------------------------------------------------------
+  section("Report and block, from inside a call");
+  // Accounts made earlier in the run whose calls are all over, signed in afresh through the API:
+  // the server allows ten signups an hour from one address, and the run already makes ten.
+  /** Start a call on the account page and hand back its code. */
+  const hostCall = async (page, name) => {
+    await page.goto(BASE);
+    await page.getByRole("button", { name: en("landing.create") }).click();
+    await page.getByLabel(en("prejoin.name.label")).fill(name);
+    await page.getByLabel(en("prejoin.dialect.label")).selectOption("en-US");
+    await page.getByRole("button", { name: en("prejoin.submit.create") }).click();
+    return waitFor(async () => {
+      const text = await page.locator(".code-badge").textContent().catch(() => null);
+      return text && text.trim().length === 8 ? text.trim() : null;
+    }, `${name}'s room code`);
+  };
+  /** Join a call by its code, as far as the server lets them. */
+  const joinCall = async (page, code, name) => {
+    await page.goto(BASE);
+    await page.getByLabel(en("landing.codeLabel")).fill(code);
+    await page.getByRole("button", { name: en("landing.join") }).click();
+    await page.getByLabel(en("prejoin.name.label")).fill(name);
+    await page.getByLabel(en("prejoin.dialect.label")).selectOption("en-US");
+    await page.getByRole("button", { name: en("prejoin.submit.join") }).click();
+  };
+  const signedInAs = async (name, options = {}) =>
+    (await contextSignedInWith(BASE, (await apiSignIn(BASE, name)).refreshToken, options)).newPage();
+  const kit = await signedInAs("Cam", { permissions: ["microphone"] });
+  const lou = await signedInAs("Dee", { permissions: ["microphone"] });
+  for (const [name, page] of [["kit", kit], ["lou", lou]]) {
+    pages[name] = page;
+    page.on("pageerror", (e) => errors.push(`${name}: ${e.message}`));
+  }
+  const kitCode = await hostCall(kit, "Cam");
+  await joinCall(lou, kitCode, "Dee");
+  await waitFor(async () => (await kit.locator(".names").textContent()).includes("Dee"), "Cam to see Dee arrive");
+  await openSettings(lou);
+  await lou.getByRole("button", { name: en("safety.open") }).click();
+  const louDialog = lou.locator("dialog.safety-dialog");
+  check(
+    "the drawer offers to report or block the other person, by the name on screen",
+    await reached(louDialog.getByRole("heading", { name: en("safety.title", { name: "Cam" }) })),
+  );
+  check(
+    "the dialog opens with focus inside it",
+    await lou.evaluate(() => Boolean(document.activeElement?.closest("dialog"))),
+  );
+  await louDialog.getByRole("button", { name: en("safety.report.send") }).click();
+  check(
+    "a report with no reason is held back, with a sentence saying why",
+    await reached(louDialog.getByText(en("safety.report.pickReason"))),
+  );
+  await louDialog.getByLabel(en("safety.reason.harassment")).check();
+  await louDialog.getByLabel(en("safety.report.details")).fill("Kept insulting me after I asked them to stop.");
+  await louDialog.getByRole("button", { name: en("safety.report.send") }).click();
+  check("a report is sent from the call", await reached(louDialog.getByText(en("safety.done.reported"))));
+  await louDialog.getByRole("button", { name: en("safety.close") }).click();
+  check(
+    "a report on its own leaves the call going for both",
+    (await kit.locator(".room").isVisible()) && (await lou.locator(".room").isVisible()),
+  );
+  check("closing the dialog hands focus back out of it", await lou.evaluate(() => !document.activeElement?.closest("dialog")));
+
+  await openSettings(lou);
+  await lou.getByRole("button", { name: en("safety.open") }).click();
+  await louDialog.getByRole("button", { name: en("safety.block.button", { name: "Cam" }) }).click();
+  check(
+    "blocking asks first",
+    await reached(louDialog.getByRole("heading", { name: en("safety.confirm.title", { name: "Cam" }) })),
+  );
+  await louDialog.getByRole("button", { name: en("safety.confirm.block"), exact: true }).click();
+  check(
+    "blocking in a call ends it, and the blocker is told why",
+    await reached(lou.getByText(en("safety.ended.blocked", { name: "Cam" }))),
+  );
+  check(
+    "the other person sees an ordinary end of the call, and nothing about a block",
+    await reached(kit.getByText(en("app.ended.byPeer", { name: "Dee" }))) &&
+      !/blocked/i.test(await kit.locator("body").innerText()),
+  );
+  await kit.getByRole("button", { name: en("app.ended.back") }).click();
+  const kitSecond = await hostCall(kit, "Cam");
+  await joinCall(lou, kitSecond, "Dee");
+  check(
+    "the blocker cannot join the blocked person's next call, and is told only that it is not available",
+    await reached(lou.getByText(en("error.HOST_NOT_PRESENT"))),
+  );
+  const outsider = await signedInAs("Hal", { permissions: ["microphone"] });
+  await joinCall(outsider, kitSecond, "Hal");
+  check(
+    "while anyone else still joins that call",
+    await waitFor(async () => outsider.locator(".room").isVisible(), "Hal to join").then(() => true).catch(() => false),
+  );
+  check(
+    "and the host was told nothing about the refused join",
+    // "Report or block" is the drawer's own entry, there for the person who did join; what must
+    // not be anywhere is word of a block or of anyone turned away.
+    !/blocked|refused|not available/i.test(await kit.locator("body").innerText()) &&
+      (await kit.locator(".names").textContent()).includes("Hal"),
+  );
+  await openSettings(kit);
+  await kit.getByRole("button", { name: en("room.end") }).click();
+  await kit.getByRole("button", { name: en("room.end.confirm") }).click();
+  await kit.getByRole("button", { name: en("app.ended.back") }).click();
+
+  // ---------------------------------------------------------------------
+  section("Report and block, from call history");
+  await kit.getByRole("button", { name: en("history.open") }).click();
+  check(
+    "recent calls name the people this account was on a call with",
+    await reached(kit.locator(".recent-calls").getByText("Dee").first()),
+  );
+  await kit.getByRole("button", { name: en("safety.openLabel", { name: "Dee" }) }).first().click();
+  const kitDialog = kit.locator("dialog.safety-dialog");
+  await kitDialog.getByLabel(en("safety.reason.spam_or_scam")).check();
+  await kitDialog.getByLabel(en("safety.report.alsoBlock", { name: "Dee" })).check();
+  await kitDialog.getByRole("button", { name: en("safety.report.send") }).click();
+  check(
+    "a report with Also block ticked asks before blocking",
+    await reached(kitDialog.getByRole("heading", { name: en("safety.confirm.title", { name: "Dee" }) })),
+  );
+  await kitDialog.getByRole("button", { name: en("safety.confirm.reportAndBlock") }).click();
+  check(
+    "the report and the block land together",
+    await reached(kitDialog.getByText(en("safety.done.reportedAndBlocked", { name: "Dee" }))),
+  );
+  await kitDialog.getByRole("button", { name: en("safety.close") }).click();
+  check(
+    "the history row says the person is blocked",
+    await reached(kit.locator(".recent-calls").getByText(en("history.blocked")).first()),
+  );
+  await kit.getByRole("button", { name: en("blocked.open") }).click();
+  check("blocked people lists them", await reached(kit.locator(".blocked-people").getByText("Dee")));
+  await kit.getByRole("button", { name: en("blocked.unblockLabel", { name: "Dee" }) }).click();
+  check(
+    "and unblocking says so",
+    await reached(kit.locator(".blocked-people").getByText(en("blocked.unblocked", { name: "Dee" }))),
+  );
+  check(
+    "the account page shows no owner's report list to anyone but the owner",
+    (await kit.getByRole("button", { name: en("reports.open") }).count()) === 0,
+  );
+  const owen = await signedInAs("Gia");
+  pages.owen = owen;
+  await owen.goto(BASE);
+  await owen.getByRole("button", { name: en("reports.open") }).click();
+  const ownerList = owen.locator(".owner-reports");
+  check(
+    "the owner reads both reports, with their reasons and the reporter's words",
+    (await reached(ownerList.getByText(en("safety.reason.harassment"), { exact: false }).first())) &&
+      (await reached(ownerList.getByText("Kept insulting me after I asked them to stop."))) &&
+      (await ownerList.locator(".report-item").count()) === 2,
+  );
+  await ownerList.getByRole("button", { name: en("reports.markReviewed") }).first().click();
+  check(
+    "and marks one reviewed",
+    await reached(ownerList.getByText(en("reports.status.reviewed"), { exact: false }).first()),
   );
 
   // ---------------------------------------------------------------------

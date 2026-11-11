@@ -207,6 +207,8 @@ const PINNED_OVERRIDES: Record<string, string[]> = {
     "correct.body", "correct.notSaved", "correct.phrase.hint", "correct.problem.empty", "correct.problem.fixTooLong",
     "correct.problem.notInLine", "correct.problem.phraseTooLong", "saved.deleteFailed",
     "saved.empty", "saved.lead", "saved.loadFailed",
+    // Safety: report or block, recent calls, blocked people, the owner's reports.
+    "safety.block.lead", "safety.block.already", "safety.confirm.body", "safety.report.pickReason", "safety.error.RATE_LIMITED", "safety.error.failed", "safety.support.lead", "history.loadFailed", "blocked.loadFailed", "blocked.unblockFailed", "reports.loadFailed", "reports.reviewFailed",
   ],
   "es-CO": [
     "account.delete.expired", "account.delete.lead", "account.delete.password",
@@ -234,10 +236,12 @@ const PINNED_OVERRIDES: Record<string, string[]> = {
     "correct.notSaved", "correct.phrase.hint", "correct.problem.empty", "correct.problem.fixTooLong",
     "correct.problem.notInLine", "correct.problem.phraseTooLong", "saved.deleteFailed",
     "saved.empty", "saved.lead", "saved.loadFailed", "saved.title",
+    // Safety: report or block, recent calls, blocked people, the owner's reports.
+    "safety.block.lead", "safety.block.already", "safety.confirm.body", "safety.report.lead", "safety.report.pickReason", "safety.done.reported", "safety.done.blocked", "safety.done.reportedAndBlocked", "safety.error.CONTACT_NOT_FOUND", "safety.error.RATE_LIMITED", "safety.error.failed", "safety.support.lead", "safety.ended.blocked", "history.title", "history.loadFailed", "blocked.title", "blocked.lead", "blocked.empty", "blocked.unblocked", "blocked.loadFailed", "blocked.unblockFailed", "reports.loadFailed", "reports.reviewFailed",
   ],
   "es-ES": [
     "account.delete.changed", "landing.sub", "overlay.empty", "prejoin.stt.cloud",
-    "room.translation.mootTitle",
+    "room.translation.mootTitle", "safety.confirm.body",
   ],
 };
 const REGIONAL_FILES: Record<string, Record<string, string>> = { "es-AR": esAR, "es-CO": esCO, "es-ES": esES };

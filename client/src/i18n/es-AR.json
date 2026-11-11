@@ -71,5 +71,17 @@
   "account.invite.failed": "No se pudo crear la invitación. Volvé a intentarlo.",
   "account.delete.password": "Escribí tu contraseña para confirmar",
   "account.delete.expired": "Tu sesión había expirado. Volvé a intentarlo.",
-  "alert.noSubtitles.body": "La otra persona no puede ver tus palabras. Todavía te escucha, y vos seguís leyendo las suyas."
+  "alert.noSubtitles.body": "La otra persona no puede ver tus palabras. Todavía te escucha, y vos seguís leyendo las suyas.",
+  "safety.block.lead": "No vas a volver a coincidir en una llamada con {name}, la empiece quien la empiece. No se le avisa.",
+  "safety.block.already": "Ya bloqueaste a {name}. Podés desbloquear a esa persona desde Personas bloqueadas, en la página de tu cuenta.",
+  "safety.confirm.body": "Ninguno de los dos va a poder entrar a una llamada en la que esté el otro. Si ahora están en una llamada, termina para los dos. A esa persona no se le avisa, y podés desbloquearla más tarde.",
+  "safety.report.pickReason": "Primero elegí qué pasó.",
+  "safety.error.RATE_LIMITED": "Hoy enviaste muchos reportes. Intentalo de nuevo mañana o escribí a soporte.",
+  "safety.error.failed": "No se pudo completar. Revisá tu conexión e intentalo de nuevo.",
+  "safety.support.lead": "Para algo urgente, escribí a soporte:",
+  "history.loadFailed": "No se pudieron cargar tus llamadas. Intentalo de nuevo en un momento.",
+  "blocked.loadFailed": "No se pudo cargar la lista. Intentalo de nuevo en un momento.",
+  "blocked.unblockFailed": "No se pudo desbloquear. Intentalo de nuevo en un momento.",
+  "reports.loadFailed": "No se pudieron cargar los reportes. Intentalo de nuevo en un momento.",
+  "reports.reviewFailed": "No se pudo marcar ese reporte como revisado. Intentalo de nuevo en un momento."
 }

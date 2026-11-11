@@ -68,6 +68,12 @@ interface State {
    * server costs one ignored field, hiding it on an invite only one guarantees a refusal.
    */
   signupMode: SignupMode;
+  /**
+   * Where to write for help, from /healthz (SUPPORT_EMAIL), or null when the server has none or
+   * has not answered. Null shows no address at all, never a dead link. About the server, so it
+   * survives reset() like signupMode.
+   */
+  supportEmail: string | null;
   /** Prefilled from a /r/<code> link so a shared link lands straight on the join form. */
   pendingCode: string | null;
   /**
@@ -85,6 +91,12 @@ interface State {
   selfId: string | null;
   me: Member | null;
   peer: Member | null;
+  /**
+   * The peer as THIS reader's contactId (room.joined's peerContactId, peer.joined's contactId):
+   * what reporting or blocking them from the drawer names them by. Null with no peer, with one
+   * account on both ends, or when the server did not say.
+   */
+  peerContactId: string | null;
   polite: boolean;
   iceServers: RTCIceServer[];
 
@@ -129,6 +141,7 @@ interface State {
   setUiDialect(dialect: string): void;
   setSession(session: SessionState): void;
   setSignupMode(mode: SignupMode): void;
+  setSupportEmail(email: string | null): void;
   setPendingCode(code: string | null): void;
   /** Writing it down is the caller's job, through chooseTheme in theme/useTheme.ts. */
   setTheme(theme: ThemeChoice): void;
@@ -167,6 +180,7 @@ export const useStore = create<State>((set, get) => ({
   uiDialect: initialUiDialect(),
   session: { status: "signedOut", user: null },
   signupMode: "invite",
+  supportEmail: null,
   pendingCode: null,
   theme: loadTheme(browserStorage()),
 
@@ -174,6 +188,7 @@ export const useStore = create<State>((set, get) => ({
   selfId: null,
   me: null,
   peer: null,
+  peerContactId: null,
   polite: true,
   iceServers: [],
 
@@ -196,6 +211,7 @@ export const useStore = create<State>((set, get) => ({
   setUiDialect: (uiDialect) => set({ uiDialect }),
   setSession: (session) => set({ session }),
   setSignupMode: (signupMode) => set({ signupMode }),
+  setSupportEmail: (supportEmail) => set({ supportEmail }),
   setPendingCode: (pendingCode) => set({ pendingCode }),
   setTheme: (theme) => set({ theme }),
   setPeerState: (peerState) => set({ peerState }),
@@ -212,6 +228,7 @@ export const useStore = create<State>((set, get) => ({
       selfId: null,
       me: null,
       peer: null,
+      peerContactId: null,
       lines: [],
       peerState: "new",
       sttStatus: { kind: "idle" },
@@ -237,6 +254,7 @@ export const useStore = create<State>((set, get) => ({
           // rather than whatever this tab last guessed.
           uiDialect: message.you.dialect,
           peer: null,
+          peerContactId: null,
           polite: message.polite,
           iceServers: message.iceServers,
           error: null,
@@ -251,6 +269,7 @@ export const useStore = create<State>((set, get) => ({
           me: message.you,
           uiDialect: message.you.dialect,
           peer: message.peer,
+          peerContactId: message.peerContactId ?? null,
           polite: message.polite,
           iceServers: message.iceServers,
           lines: message.snapshot.lines,
@@ -259,11 +278,11 @@ export const useStore = create<State>((set, get) => ({
         return;
 
       case "peer.joined":
-        set({ peer: message.peer });
+        set({ peer: message.peer, peerContactId: message.contactId ?? null });
         return;
 
       case "peer.left":
-        set({ peer: null, peerState: "new" });
+        set({ peer: null, peerContactId: null, peerState: "new" });
         return;
 
       case "peer.updated":
