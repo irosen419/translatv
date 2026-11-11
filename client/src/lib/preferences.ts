@@ -10,9 +10,11 @@
 
 import { preferences, type Preferences } from "@translatv/shared";
 
+import { apiUrl } from "../net/apiBase.js";
+
 type Fetch = (path: string, init?: RequestInit) => Promise<Response>;
 
-const PATH = "/api/me/preferences";
+const PATH = apiUrl("/api/me/preferences");
 
 export class PreferenceSync {
   /** The dialect the server holds, as far as this tab knows. Undefined until loaded. */

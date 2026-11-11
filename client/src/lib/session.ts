@@ -19,6 +19,7 @@
 // URL, dropped from storage the moment the server says it is no longer good.
 
 import type { AuthErrorCode, AuthSession, PublicUser } from "@translatv/shared";
+import { apiUrl } from "../net/apiBase.js";
 import { browserStorage, type WebStorage } from "./browserStorage.js";
 
 /** Where the refresh token lives between page loads. */
@@ -166,11 +167,11 @@ export class SessionManager {
   }
 
   signIn(email: string, password: string): Promise<AuthOutcome> {
-    return this.obtain("/api/auth/login", { email, password });
+    return this.obtain(apiUrl("/api/auth/login"), { email, password });
   }
 
   signUp(input: { invite?: string; email: string; password: string; displayName: string }): Promise<AuthOutcome> {
-    return this.obtain("/api/auth/signup", input);
+    return this.obtain(apiUrl("/api/auth/signup"), input);
   }
 
   /**
@@ -187,7 +188,7 @@ export class SessionManager {
     this.drop();
     if (!token) return;
     try {
-      await this.deps.fetch("/api/auth/logout", {
+      await this.deps.fetch(apiUrl("/api/auth/logout"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ refreshToken: token }),
@@ -228,7 +229,7 @@ export class SessionManager {
       const token = await this.accessToken();
       if (token === null) return { ok: false, error: "UNAUTHENTICATED" };
       if (this.user?.id !== userId) return { ok: false, error: "ACCOUNT_MISMATCH" };
-      response = await this.deps.fetch("/api/account", {
+      response = await this.deps.fetch(apiUrl("/api/account"), {
         method: "DELETE",
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
         body: JSON.stringify({ password, userId }),
@@ -382,7 +383,7 @@ export class SessionManager {
       }
       let response: Response;
       try {
-        response = await this.deps.fetch("/api/auth/refresh", {
+        response = await this.deps.fetch(apiUrl("/api/auth/refresh"), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ refreshToken: token }),

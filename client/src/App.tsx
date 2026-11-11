@@ -8,6 +8,7 @@ import { codeFromPath } from "./lib/code.js";
 import { adoptCameraTrack } from "./rtc/cameraHandoff.js";
 import { acquireCameraTrack, acquireMedia, LevelMeter } from "./rtc/media.js";
 import { PeerConnection } from "./rtc/PeerConnection.js";
+import { apiUrl } from "./net/apiBase.js";
 import { SignalingSocket, socketUrl } from "./net/socket.js";
 import { useStore } from "./state/store.js";
 import { AuthScreen } from "./components/AuthScreen.jsx";
@@ -67,7 +68,7 @@ const savedCorrectionsFor = savedCorrectionsRegistry(session);
  * Null for any refusal, which the landing page turns into one sentence.
  */
 async function createInvite(): Promise<string | null> {
-  const response = await session.authorizedFetch("/api/invites", { method: "POST" });
+  const response = await session.authorizedFetch(apiUrl("/api/invites"), { method: "POST" });
   if (!response.ok) return null;
   const body: unknown = await response.json();
   const code = typeof body === "object" && body !== null ? (body as { code?: unknown }).code : undefined;
@@ -88,7 +89,7 @@ export function App() {
     void session.restore();
 
     let cancelled = false;
-    void fetch("/healthz")
+    void fetch(apiUrl("/healthz"))
       .then((r) => (r.ok ? r.json() : null))
       .then((body: unknown) => {
         if (cancelled || typeof body !== "object" || body === null) return;

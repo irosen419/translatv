@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
+import { parseApiOrigin } from "./src/net/apiOrigin.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -27,8 +28,29 @@ function localTls(): { key: Buffer; cert: Buffer } | undefined {
 
 const https = localTls();
 
+/**
+ * Refuse a bad VITE_API_ORIGIN before anything is built.
+ *
+ * Set, it points the bundle at a translatv server on another origin (net/apiBase.ts, DEPLOY.md
+ * "Two services"); unset, the client talks to its own origin as it always has. A malformed value
+ * (a path, credentials, a missing scheme) would otherwise build fine and ship a client whose every
+ * request goes somewhere unintended. The browser checks again at load, with the same parser, for
+ * a bundle produced some other way.
+ *
+ * Read from Vite's resolved env, which is what gets inlined, so the two cannot disagree. The value
+ * is public by design; a secret never goes behind VITE_ (CLAUDE.md, `npm run check:secrets`).
+ */
+function apiOriginCheck(): Plugin {
+  return {
+    name: "translatv:api-origin",
+    configResolved(config) {
+      parseApiOrigin(config.env["VITE_API_ORIGIN"] as string | undefined);
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), apiOriginCheck()],
   server: {
     port: 5173,
     // Every interface only in LAN mode. Without certs the dev server stays local, which is both

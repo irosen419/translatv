@@ -13,7 +13,10 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const DIST = "client/dist";
+// client/dist by default. `--dist <dir>` checks another build, such as the split deploy's
+// (DEPLOY.md, "Two services"), which the end to end run builds into a directory of its own.
+const flag = process.argv.indexOf("--dist");
+const DIST = flag !== -1 && process.argv[flag + 1] ? process.argv[flag + 1] : "client/dist";
 
 // Prefixes that identify a real credential in built output. Kept narrow on purpose: a broad
 // pattern like /key/ would match minified variable names on every build and train everyone

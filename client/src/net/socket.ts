@@ -9,7 +9,9 @@
 //   close code 4001         another tab took this seat. Do not fight it.
 
 import type { ClientMessage, ServerMessage } from "@translatv/shared";
-import { CLOSE, WS_BEARER_PREFIX, WS_PATH, WS_SUBPROTOCOL } from "@translatv/shared";
+import { CLOSE, WS_BEARER_PREFIX, WS_SUBPROTOCOL } from "@translatv/shared";
+
+import { API_ORIGIN, wsUrlFor } from "./apiBase.js";
 
 const BASE_RECONNECT_MS = 250;
 const MAX_RECONNECT_MS = 8_000;
@@ -242,7 +244,8 @@ export class SignalingSocket {
 }
 
 /**
- * The WebSocket URL for this origin, honoring https.
+ * The WebSocket URL: the API origin's (VITE_API_ORIGIN, net/apiBase.ts) when the client is a
+ * static site on its own origin, otherwise this page's, honoring https either way.
  *
  * The path is not optional decoration. Omitting it still connects when the client is served by
  * the app server itself, because there is nothing else on that origin to answer, which is why
@@ -251,6 +254,5 @@ export class SignalingSocket {
  * socket dies somewhere no log records.
  */
 export function socketUrl(): string {
-  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${location.host}${WS_PATH}`;
+  return wsUrlFor(API_ORIGIN, location);
 }
