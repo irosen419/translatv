@@ -334,6 +334,11 @@ export class AuthService {
     return user ? toPublic(user) : null;
   }
 
+  /** Whether this account is the owner's, for the spend ledger's owner_call (ws/server.ts). */
+  isOwner(userId: string): boolean {
+    return this.userFor(userId)?.isOwner === true;
+  }
+
   // -------------------------------------------------------------------------
   // Deleting an account
   // -------------------------------------------------------------------------

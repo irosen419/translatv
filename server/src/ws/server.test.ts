@@ -16,6 +16,7 @@ import { CLOSE, LIMITS, WS_PATH, type ServerMessage } from "@translatv/shared";
 import { GRACE_MS } from "../rooms/RoomManager.js";
 import type { Config } from "../config.js";
 import { roomHash, SpendGate } from "../spend/caps.js";
+import { spendTagKey, userTag } from "../spend/attribution.js";
 import { load } from "../spend/ledger.js";
 import { MAX_CONNECTIONS_PER_IP } from "../security/rateLimit.js";
 import { TranslationService, type LlmClient } from "../translate/TranslationService.js";
@@ -1836,5 +1837,85 @@ describe("accounts on the socket", () => {
       expect((await other.next("room.created")).t).toBe("room.created");
       other.close();
     });
+  });
+});
+
+describe("spend attribution over the wire", () => {
+  // Each paid call's ledger row says where it ran, whether the owner was on the call, and whose
+  // line it was (as a keyed tag). Checked end to end, because the facts come from the room (who is
+  // in it) and the account behind each socket, which no unit of TranslationService can see.
+  const OWNER = "user-owner";
+  const tagKey = spendTagKey("a test secret that is long enough to be a real one");
+  let ownServer: Server;
+  let ownSignaling: SignalingServer;
+  let ownPort: number;
+  let ownRoot: string;
+
+  beforeEach(async () => {
+    ownRoot = mkdtempSync(join(tmpdir(), "ws-attribution-"));
+    mkdirSync(join(ownRoot, "out", "translatv"), { recursive: true });
+    writeFileSync(join(ownRoot, "out", "translatv", "spend_log.jsonl"), "", "utf8");
+    const cfg = { ...config(), repoRoot: ownRoot };
+    const gate = new SpendGate(ownRoot, { dailyCapUsd: cfg.dailyCapUsd, roomCapUsd: cfg.roomCapUsd });
+    const translation = new TranslationService(echoClient, gate, ownRoot, undefined, { env: "pi", tagKey });
+    const ownerAware: AccessVerifier = { ...verifier, isOwner: (userId) => userId === OWNER };
+    ownServer = createServer();
+    ownSignaling = new SignalingServer(ownServer, cfg, translation, ownerAware);
+    await new Promise<void>((resolve) => ownServer.listen(0, "127.0.0.1", resolve));
+    ownPort = (ownServer.address() as { port: number }).port;
+  });
+
+  afterEach(async () => {
+    ownSignaling.close();
+    await new Promise<void>((resolve) => ownServer.close(() => resolve()));
+    rmSync(ownRoot, { recursive: true, force: true });
+  });
+
+  async function call(hostUser: string, guestUser: string): Promise<{ host: Client; guest: Client }> {
+    const host = await Client.connect(ORIGIN, { port: ownPort, user: hostUser });
+    const created = await createRoom(host);
+    const guest = await Client.connect(ORIGIN, { port: ownPort, user: guestUser });
+    guest.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
+    await guest.next("room.joined");
+    return { host, guest };
+  }
+
+  it("marks a call with the owner on it, and tags whoever spoke the line", async () => {
+    const { host, guest } = await call(OWNER, "user-ben");
+
+    host.send({ t: "stt.final", text: "do you have time", seq: 1 });
+    await guest.next("translation.result");
+    guest.send({ t: "stt.final", text: "si, tengo tiempo", seq: 1 });
+    // Both people receive every translation.result, so wait for the ledger rather than a message.
+    for (let i = 0; i < 50 && load({ root: ownRoot }).length < 2; i += 1) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+
+    const rows = load({ root: ownRoot });
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.env)).toEqual(["pi", "pi"]);
+    expect(rows.map((r) => r.owner_call)).toEqual([true, true]);
+    expect(rows.map((r) => r.user_tag)).toEqual([userTag(tagKey, OWNER), userTag(tagKey, "user-ben")]);
+    // The ledger is public: no account id may appear on any row.
+    const text = JSON.stringify(rows);
+    expect(text).not.toContain(OWNER);
+    expect(text).not.toContain("user-ben");
+
+    host.close();
+    guest.close();
+  });
+
+  it("marks a call between two other people as not the owner's", async () => {
+    const { host, guest } = await call("user-cam", "user-dee");
+
+    host.send({ t: "stt.final", text: "do you have time", seq: 1 });
+    await guest.next("translation.result");
+
+    const [row] = load({ root: ownRoot });
+    expect(row?.owner_call).toBe(false);
+    expect(row?.user_tag).toBe(userTag(tagKey, "user-cam"));
+
+    host.close();
+    guest.close();
   });
 });

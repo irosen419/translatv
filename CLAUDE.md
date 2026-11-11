@@ -111,6 +111,12 @@ plan of record for the multi-user server and the iOS app.
     not stored. The harmful direction is under-logging.
   - Only prices documented in this repo appear in `pricing.ts`, each with a source comment. An
     unpriced model yields null, which renders as "cost unknown". Never interpolate a price.
+- Every runtime row says WHERE and WHOSE (owner decision, 2026-11-11): `env` (SPEND_ENV, "local"
+  by default outside production), `owner_call` (whether the `OWNER_EMAIL` account was on the call)
+  and `user_tag` (the speaker, as an HMAC under a key derived from AUTH_SECRET, in
+  `server/src/spend/attribution.ts`). The ledger is in a PUBLIC repo, so a raw account id, an email
+  or a name never goes on a row, and `entry()` refuses a user_tag that is not a tag. A row without
+  a label is "unrecorded" in every total, never guessed into a bucket.
 - Money is rounded to 6 decimals everywhere, matching the dashboard's Ruby reader and awws's
   `spend_log.py`, so a figure on the cockpit and one from the CLI cannot differ in the tail.
 

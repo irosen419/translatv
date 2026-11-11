@@ -8,6 +8,7 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { email as emailSchema, signupMode as signupModeSchema, type RTCIceServerConfig, type SignupMode } from "@translatv/shared";
+import { resolveSpendEnv } from "./spend/attribution.js";
 
 function num(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -107,6 +108,12 @@ export interface Config {
    * which is what both CORS and the socket's Origin check read.
    */
   serveClient: boolean;
+  /**
+   * Which environment this server's spend is labeled with on the ledger (SPEND_ENV): "local" by
+   * default outside production, "production" by default in it, or a name such as "pi". See
+   * spend/attribution.ts.
+   */
+  spendEnv: string;
 }
 
 /** The database file's name inside DATA_DIR. */
@@ -203,6 +210,8 @@ export function loadConfig(repoRoot: string): Config {
     );
   }
 
+  const isProduction = process.env["NODE_ENV"] === "production";
+
   // Relative paths resolve against the repo root, not the working directory, so `npm start` from
   // the root and `npm start --workspace=server` agree on which database they open.
   const dataDirRaw = (process.env["DATA_DIR"] ?? "").trim();
@@ -220,11 +229,12 @@ export function loadConfig(repoRoot: string): Config {
     dailyCapUsd: num("ANTHROPIC_DAILY_CAP_USD", 10),
     roomCapUsd: num("ROOM_CAP_USD", 1.5),
     iceServers,
-    isProduction: process.env["NODE_ENV"] === "production",
+    isProduction,
     trustProxy: (process.env["TRUST_PROXY"] ?? "").trim() === "1",
     dataDir,
     databasePath: join(dataDir, DATABASE_FILE),
     serveClient,
+    spendEnv: resolveSpendEnv(process.env["SPEND_ENV"], isProduction),
   };
 }
 
@@ -236,6 +246,7 @@ export function describeConfig(config: Config): string[] {
     config.serveClient
       ? "serving the web client from this server (SERVE_CLIENT on)"
       : "API only (SERVE_CLIENT off): the web client is served elsewhere, and its origin must be in ORIGIN",
+    `spend is labeled "${config.spendEnv}" on the ledger (SPEND_ENV)`,
     `ICE servers: ${config.iceServers.length} (${config.iceServers.length > 1 ? "STUN and TURN" : "STUN only"})`,
   ];
 

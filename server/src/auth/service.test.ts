@@ -195,6 +195,15 @@ describe("the owner", () => {
     const moved = service({ ownerEmail: "someone.else@example.test" });
     expect(moved.userFor(before.user.id)?.isOwner).toBe(false);
   });
+
+  it("answers isOwner by account id, for the spend ledger's owner_call", async () => {
+    const auth = service({ ownerEmail: "owner@example.test" });
+    const owner = await signedUp(auth, "owner@example.test");
+    const other = await signedUp(auth, "ben@example.test");
+    expect(auth.isOwner(owner.user.id)).toBe(true);
+    expect(auth.isOwner(other.user.id)).toBe(false);
+    expect(auth.isOwner("no-such-account")).toBe(false);
+  });
 });
 
 describe("login", () => {

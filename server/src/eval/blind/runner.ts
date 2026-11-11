@@ -92,6 +92,12 @@ export interface RunConfig {
   judgeBudgetUsd: number;
   judge: boolean;
   dryRun: boolean;
+  /**
+   * The environment label for every row this run writes (SPEND_ENV, spend/attribution.ts), so a
+   * blind test's spend is told apart from live calls by where it ran as well as by its program.
+   * Absent writes no label, as rows did before attribution existed.
+   */
+  env?: string;
 }
 
 export interface RunDeps {
@@ -499,6 +505,7 @@ export class BlindRun {
         outputTokens,
         capUsd: this.config.budgetUsd,
         note: running.note,
+        ...(this.config.env !== undefined ? { env: this.config.env } : {}),
       });
     } catch (error) {
       // The ledger refused the row (its cost contradicted its own arithmetic). The call still cost
@@ -526,6 +533,7 @@ export class BlindRun {
         worstCaseUsd: running.worstCaseUsd,
         capUsd: this.config.budgetUsd,
         note: `${running.note}, cost unknown, logged at its worst case`,
+        ...(this.config.env !== undefined ? { env: this.config.env } : {}),
       }),
     );
   }

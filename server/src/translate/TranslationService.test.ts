@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dialectByCode, type Dialect } from "@translatv/shared";
 
 import { PROGRAMS, SpendGate } from "../spend/caps.js";
+import { spendTagKey, userTag } from "../spend/attribution.js";
 import { load } from "../spend/ledger.js";
 import { DEFAULT_MODEL, priceFor } from "../spend/pricing.js";
 import {
@@ -106,6 +107,40 @@ describe("TranslationService", () => {
     expect(records[0]?.program).toBe(PROGRAMS.runtimeTranslation);
     expect(records[0]?.cost_usd).toBeCloseTo(0.00095, 9);
     expect(records[0]?.room).toBe(ROOM);
+  });
+
+  it("labels its row with where it ran and whose call it was", async () => {
+    const tagKey = spendTagKey("a test secret that is long enough to be a real one");
+    const service = new TranslationService(fakeClient(), gate, root, undefined, { env: "pi", tagKey });
+    await service.translate(request({ speakerUserId: "user-1", ownerOnCall: true }));
+
+    const [record] = load({ root });
+    expect(record?.env).toBe("pi");
+    expect(record?.owner_call).toBe(true);
+    expect(record?.user_tag).toBe(userTag(tagKey, "user-1"));
+    // The ledger is public: the account id itself must appear nowhere on the row.
+    expect(JSON.stringify(record)).not.toContain("user-1");
+  });
+
+  it("records a call without the owner as false, not as missing", async () => {
+    const service = new TranslationService(fakeClient(), gate, root, undefined, { env: "local", tagKey: null });
+    await service.translate(request({ speakerUserId: "user-2", ownerOnCall: false }));
+
+    const [record] = load({ root });
+    expect(record?.env).toBe("local");
+    expect(record?.owner_call).toBe(false);
+    // No key, no tag: a tag is only ever a keyed hash, never a fallback to something weaker.
+    expect(record?.user_tag).toBeUndefined();
+  });
+
+  it("writes no labels when it was given none, so rows stay as they were", async () => {
+    const service = new TranslationService(fakeClient(), gate, root);
+    await service.translate(request({ speakerUserId: "user-1", ownerOnCall: true }));
+
+    const [record] = load({ root });
+    expect(record).not.toHaveProperty("env");
+    expect(record).not.toHaveProperty("owner_call");
+    expect(record).not.toHaveProperty("user_tag");
   });
 
   it("books verification spend under its own program, not runtime translation", async () => {

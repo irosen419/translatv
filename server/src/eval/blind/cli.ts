@@ -32,6 +32,7 @@ import {
   type OutputRecord,
   type RunDeps,
 } from "./runner.js";
+import { resolveSpendEnv } from "../../spend/attribution.js";
 
 export interface CliOptions {
   dryRun: boolean;
@@ -155,6 +156,8 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv, io: 
       judgeBudgetUsd: options.judgeBudgetUsd,
       judge: options.judge,
       dryRun: options.dryRun,
+      // Where this run spends, labeled like a server's rows: "local" unless SPEND_ENV says otherwise.
+      env: resolveSpendEnv(env["SPEND_ENV"], false),
     },
     { clientFor, log: io.log },
   );

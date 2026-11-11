@@ -660,3 +660,107 @@ describe("parity with the Python renderer", () => {
     expect(python.stdout).toBe(`${tsOutput}\n`);
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Attribution: where a call ran (env) and whose call it was (owner_call, user_tag).
+// ---------------------------------------------------------------------------------------------
+
+const ATTRIBUTION_PROJECT = "fixture-attribution";
+
+// The shared contract for the attribution fixture. Mirrored in test_spend_log.py.
+const EXPECTED_ENVS = {
+  local: { env: "local", spent_usd: 0.001, entries: 1 },
+  pi: { env: "pi", spent_usd: 0.0025, entries: 2 },
+  production: { env: "production", spent_usd: 0, entries: 1 },
+  unrecorded: { env: "unrecorded", spent_usd: 0.004, entries: 1 },
+};
+const EXPECTED_BY_OWNER = {
+  owner: { spent_usd: 0.0015, entries: 2 },
+  others: { spent_usd: 0.002, entries: 2 },
+  unrecorded: { spent_usd: 0.004, entries: 1 },
+};
+
+describe("attribution on a ledger row", () => {
+  const base = {
+    program: "runtime-translation",
+    kind: "translation" as const,
+    model: "claude-haiku-4-5",
+    inputTokens: 500,
+    outputTokens: 100,
+    ts: "2026-11-11T19:00:00.000Z",
+  };
+
+  it("writes env, owner_call and user_tag when given", () => {
+    const record = entry({ ...base, env: "pi", ownerCall: true, userTag: "0123456789abcdef" });
+    expect(record.env).toBe("pi");
+    expect(record.owner_call).toBe(true);
+    expect(record.user_tag).toBe("0123456789abcdef");
+  });
+
+  it("writes an explicit false owner_call, which is a fact, not an absence", () => {
+    const record = entry({ ...base, ownerCall: false });
+    expect(record.owner_call).toBe(false);
+  });
+
+  it("leaves every ordinary row byte for byte as before when none is given", () => {
+    const record = entry(base);
+    expect(Object.keys(record)).not.toContain("env");
+    expect(Object.keys(record)).not.toContain("owner_call");
+    expect(Object.keys(record)).not.toContain("user_tag");
+  });
+
+  it("refuses an environment name that would split one environment into several", () => {
+    expect(() => entry({ ...base, env: "Pi" })).toThrow(RangeError);
+    expect(() => entry({ ...base, env: "my laptop" })).toThrow(RangeError);
+  });
+
+  it("refuses a user tag that is not a tag, such as a raw account id or an email", () => {
+    expect(() => entry({ ...base, userTag: "user-1" })).toThrow(RangeError);
+    expect(() => entry({ ...base, userTag: "someone@example.test" })).toThrow(RangeError);
+  });
+});
+
+describe("attribution totals", () => {
+  const records = (): SpendRecord[] => load({ root: FIXTURE_ROOT, project: ATTRIBUTION_PROJECT });
+
+  it("buckets spend by environment, with rows written before attribution as unrecorded", () => {
+    expect(totals(records()).envs).toEqual(EXPECTED_ENVS);
+  });
+
+  it("splits the owner's calls from other people's, with older rows as unrecorded", () => {
+    expect(totals(records()).by_owner).toEqual(EXPECTED_BY_OWNER);
+  });
+
+  it("counts a row with no recoverable cost as an entry that adds nothing", () => {
+    expect(totals(records()).envs["production"]).toEqual({ env: "production", spent_usd: 0, entries: 1 });
+  });
+
+  it("says nothing about attribution in the view when no row carries it", () => {
+    const text = renderMarkdown({ root: FIXTURE_ROOT, project: FIXTURE_PROJECT });
+    expect(text).not.toContain("By environment");
+    expect(text).not.toContain("Owner's calls");
+  });
+
+  it("summarizes environment and owner spend in the view when rows carry them", () => {
+    const text = renderMarkdown({ root: FIXTURE_ROOT, project: ATTRIBUTION_PROJECT });
+    expect(text).toContain(
+      "By environment: local $0.0010 (calls: 1), pi $0.0025 (calls: 2), " +
+        "production $0.0000 (calls: 1), unrecorded $0.0040 (calls: 1).",
+    );
+    expect(text).toContain(
+      "Owner's calls $0.0015 (calls: 2), other people's $0.0020 (calls: 2), " +
+        "unrecorded $0.0040 (calls: 1).",
+    );
+  });
+
+  it("renders the attribution fixture byte identical to spend_log.py", () => {
+    const tsOutput = renderMarkdown({ root: FIXTURE_ROOT, project: ATTRIBUTION_PROJECT });
+    const python = spawnSync(
+      "python3",
+      [join(REPO_ROOT, "spend_log.py"), "render", ATTRIBUTION_PROJECT, "--root", FIXTURE_ROOT],
+      { encoding: "utf8" },
+    );
+    expect(python.status).toBe(0);
+    expect(python.stdout).toBe(`${tsOutput}\n`);
+  });
+});

@@ -318,7 +318,7 @@
   "privacy.logs.h": "What the server records",
   "privacy.logs.p1": "The server's logs record events with counts, durations and opaque identifiers: a random account id (never an email address) and a hash of the room code. They never contain what was said or typed, names, email addresses, passwords, tokens or the details of a report. When a connection is cut off for sending too much too fast, its IP address is logged. Logs are kept for [OWNER: log retention period].",
   "privacy.logs.p2": "To enforce those limits the server also keeps IP addresses in memory, never on disk. Failed sign ins are counted against a keyed hash of the email address for 15 minutes, to stop password guessing.",
-  "privacy.logs.p3": "Each translation request adds a line to a spending ledger: the time, the model, the number of tokens, the cost, and the hash of the room code. It holds no account id, name, email address, or anything said.",
+  "privacy.logs.p3": "Each translation request adds a line to a spending ledger: the time, the model, the number of tokens, the cost, the hash of the room code, which server made it, whether the person who runs this app was on the call, and a tag for whoever spoke the line. The tag is made with a key only the server holds, so the ledger cannot be matched to an account without it. It holds no account id, name, email address, or anything said.",
   "privacy.browser.h": "In your browser",
   "privacy.browser.p": "Your browser keeps your sign in, your chosen theme, language and speech engine, and a short lived token that lets a reloaded tab get its seat back in a call. They stay on your device. There are no advertising or analytics cookies, and the page loads nothing from other sites.",
   "privacy.delete.h": "Deleting your account",

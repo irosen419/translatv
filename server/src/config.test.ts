@@ -272,3 +272,37 @@ describe("SERVE_CLIENT", () => {
     expect(describeConfig(loadConfig(root)).join("\n")).toContain("API only");
   });
 });
+
+describe("SPEND_ENV", () => {
+  let saved: { spend: string | undefined; node: string | undefined };
+  beforeEach(() => {
+    saved = { spend: process.env["SPEND_ENV"], node: process.env["NODE_ENV"] };
+    delete process.env["SPEND_ENV"];
+  });
+  afterEach(() => {
+    if (saved.spend === undefined) delete process.env["SPEND_ENV"];
+    else process.env["SPEND_ENV"] = saved.spend;
+    if (saved.node === undefined) delete process.env["NODE_ENV"];
+    else process.env["NODE_ENV"] = saved.node;
+  });
+
+  it("labels a developer's machine local without anyone setting it", () => {
+    process.env["NODE_ENV"] = "development";
+    expect(loadConfig(root).spendEnv).toBe("local");
+  });
+
+  it("reads a named environment, such as the Pi", () => {
+    process.env["SPEND_ENV"] = "Pi";
+    expect(loadConfig(root).spendEnv).toBe("pi");
+  });
+
+  it("refuses a name that would become a messy ledger column", () => {
+    process.env["SPEND_ENV"] = "my laptop";
+    expect(thrownMessage()).toContain("SPEND_ENV");
+  });
+
+  it("names the environment in the boot report", () => {
+    process.env["SPEND_ENV"] = "pi";
+    expect(describeConfig(loadConfig(root)).join("\n")).toContain('spend is labeled "pi"');
+  });
+});

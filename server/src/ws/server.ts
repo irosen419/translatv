@@ -207,6 +207,12 @@ export interface AccessVerifier {
    * the wiring cannot be forgotten in index.ts.
    */
   onAccountDeleted?(listener: (userId: string) => void): () => void;
+  /**
+   * Whether this account is the owner's (OWNER_EMAIL), so each paid call's ledger row can say
+   * whether the owner was on it. Optional like onAccountDeleted: without it rows make no claim
+   * either way, which is the honest answer when nobody can tell.
+   */
+  isOwner?(userId: string): boolean;
 }
 
 /** A member's open call history row, and who it names on the other end so far. */
@@ -1007,7 +1013,19 @@ export class SignalingServer {
     }
 
     this.broadcastAll(roomCode, { t: "translation.pending", lineId: line.lineId });
-    await this.runTranslation(roomCode, line.lineId, text, speaker.dialect, targetDialect, peer?.id);
+    await this.runTranslation(roomCode, line.lineId, text, speaker.dialect, targetDialect, peer?.id, speaker.userId);
+  }
+
+  /**
+   * Whether the owner's account is in this room, for the ledger. Asked at the moment of the call,
+   * so a call the owner joined late is marked from then on. Says nothing (an empty object) when
+   * this server cannot tell who the owner is.
+   */
+  private ownerOnCall(roomCode: string): { ownerOnCall?: boolean } {
+    const isOwner = this.auth.isOwner?.bind(this.auth);
+    if (!isOwner) return {};
+    const room = this.rooms.peek(roomCode);
+    return { ownerOnCall: room?.members.some((m) => m.userId !== "" && isOwner(m.userId)) ?? false };
   }
 
   private async runTranslation(
@@ -1018,6 +1036,8 @@ export class SignalingServer {
     targetDialect: string,
     /** The member who reads this translation, whose saved terms join its prompt. */
     readerId: string | undefined,
+    /** The account whose line this is, for the ledger row's spend tag (never written raw). */
+    speakerUserId: string | null,
   ): Promise<void> {
     const session = this.sessions.get(roomCode);
     if (!session) return;
@@ -1034,6 +1054,8 @@ export class SignalingServer {
         glossary: session.glossaryFor(readerId),
         roomHash: roomHash(roomCode),
         kind: "translation",
+        speakerUserId,
+        ...this.ownerOnCall(roomCode),
       });
     } catch (error) {
       // No answer at all, from an unreadable ledger for one (see runDetached). This call stops
@@ -1166,6 +1188,8 @@ export class SignalingServer {
       line.srcDialect,
       targetDialect,
       peer?.id,
+      // The line's author, for its spend tag. Null when they have left and nobody can say.
+      speaker?.userId ?? null,
     );
   }
 

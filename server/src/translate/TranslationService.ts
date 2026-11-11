@@ -14,6 +14,7 @@ import {
   type TranslationFailureCode,
 } from "@translatv/shared";
 import { append, entry as ledgerEntry, type SpendKind } from "../spend/ledger.js";
+import { userTag, type SpendAttribution } from "../spend/attribution.js";
 import { PROGRAMS, type SpendGate } from "../spend/caps.js";
 import { costUsd, DEFAULT_MODEL } from "../spend/pricing.js";
 import { log } from "../log.js";
@@ -79,6 +80,13 @@ export interface TranslateRequest {
   glossary: readonly GlossaryEntry[];
   roomHash: string;
   kind: SpendKind;
+  /**
+   * The account whose line this is. Used ONLY to make the ledger row's user_tag, a keyed hash
+   * (spend/attribution.ts): the id itself never reaches the ledger, a log line or the provider.
+   */
+  speakerUserId?: string | null;
+  /** Whether the owner's account is on this call, for the ledger row's owner_call. */
+  ownerOnCall?: boolean;
 }
 
 export interface TranslateOk {
@@ -240,6 +248,12 @@ export class TranslationService {
      * chmods one does not run as root, which is exactly where nobody would notice it skipping.
      */
     private readonly appendRecord: typeof append = append,
+    /**
+     * Where this process spends and how to tag a person, for the labels on each row. Null writes
+     * no labels, which is every row from before attribution existed and every test that does not
+     * ask for them.
+     */
+    private readonly attribution: SpendAttribution | null = null,
   ) {}
 
   get enabled(): boolean {
@@ -567,6 +581,21 @@ export class TranslationService {
   }
 
   /**
+   * The attribution labels for one request's row: where it ran, whether the owner was on the
+   * call, and the speaker's tag. Each is written only when known, so a row never claims a label
+   * it does not have.
+   */
+  private labelsFor(request: TranslateRequest): { env?: string; ownerCall?: boolean; userTag?: string } {
+    if (this.attribution === null) return {};
+    const { env, tagKey } = this.attribution;
+    return {
+      env,
+      ...(request.ownerOnCall !== undefined ? { ownerCall: request.ownerOnCall } : {}),
+      ...(tagKey !== null && request.speakerUserId ? { userTag: userTag(tagKey, request.speakerUserId) } : {}),
+    };
+  }
+
+  /**
    * Append one request's spend. `spent` is its usage, or, when nobody can know what it was billed,
    * its worst case. `unbilled` names why no user may be charged for it (it reached nobody); an
    * answer delivered in time leaves it out and is billable like every ordinary row.
@@ -596,6 +625,7 @@ export class TranslationService {
             ? { worstCaseUsd: spent.worstCaseUsd }
             : { inputTokens: spent.inputTokens, outputTokens: spent.outputTokens }),
           capUsd: this.gate.capFor(program),
+          ...this.labelsFor(request),
           // "not charged to a user": the provider may well have billed it, and the house pays.
           note: unbilled === undefined ? request.kind : `${request.kind}, ${unbilled}, not charged to a user`,
           billable: unbilled === undefined,

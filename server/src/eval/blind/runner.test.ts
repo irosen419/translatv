@@ -173,6 +173,17 @@ describe("a run", () => {
 });
 
 describe("spend", () => {
+  it("labels every row with the environment it ran in, when given one", async () => {
+    const root = ledgerRoot();
+    const run = new BlindRun(config(root, { limit: 1, judge: true, env: "local" }), { ...counting(), log: quiet });
+    await run.execute();
+    const rows = runRows(root, run);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.env === "local")).toBe(true);
+    // A test run is nobody's call, so it makes no claim about the owner or a person.
+    expect(rows.some((r) => "owner_call" in r || "user_tag" in r)).toBe(false);
+  });
+
   it("logs a request lost in flight at its worst case, the moment it is reported, and retries it", async () => {
     const root = ledgerRoot();
     let failed = false;
