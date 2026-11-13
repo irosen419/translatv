@@ -1152,10 +1152,22 @@ dialog p.hint.bad { color: var(--warn); margin-bottom: 12px; }
   color: rgba(255, 255, 255, 0.62);
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
 }
-/* The speaker label is one word in English ("you", "them") and up to three in Spanish. Capped
-   rather than fixed, so a longer label cannot take the log's width away from the thing people
-   are actually reading. */
-.past-line .who { color: var(--muted); flex: 0 1 auto; max-width: 42%; overflow-wrap: anywhere; }
+/* The speaker label is a name (up to 24 characters) or, for a speaker this tab never saw, "them"
+   or "otra persona". One line, never broken inside a word: overflow-wrap: anywhere used to split
+   "otra persona" into "otra / perso / na" on a phone. Capped so a long name takes an ellipsis
+   rather than the width people are reading. */
+.past-line .who {
+  color: var(--muted);
+  flex: 0 0 auto;
+  max-width: 34%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* A little room above and below for an accented capital (Á, Ñ), which overflow: hidden would
+     otherwise shave, given back as margin so the label stays on the sentence's line. */
+  padding: 0.12em 0;
+  margin: -0.12em 0;
+}
 .past-line .said { min-width: 0; overflow-wrap: anywhere; }
 
 .current-line .translated {
@@ -1166,6 +1178,12 @@ dialog p.hint.bad { color: var(--warn); margin-bottom: 12px; }
   text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
 }
 .current-line .translated .who {
+  display: inline-block;
+  max-width: 40%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.5;
   font-size: 12px;
   font-weight: 400;
   color: var(--muted);

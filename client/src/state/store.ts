@@ -97,6 +97,12 @@ interface State {
    * account on both ends, or when the server did not say.
    */
   peerContactId: string | null;
+  /**
+   * The name of everyone who has been the peer in THIS room, by member id, kept after they leave.
+   * A line outlives its speaker's seat, and without this the panel could only call a departed
+   * speaker "Someone". Cleared with the room.
+   */
+  peerNames: Record<string, string>;
   polite: boolean;
   iceServers: RTCIceServer[];
 
@@ -189,6 +195,7 @@ export const useStore = create<State>((set, get) => ({
   me: null,
   peer: null,
   peerContactId: null,
+  peerNames: {},
   polite: true,
   iceServers: [],
 
@@ -229,6 +236,7 @@ export const useStore = create<State>((set, get) => ({
       me: null,
       peer: null,
       peerContactId: null,
+      peerNames: {},
       lines: [],
       peerState: "new",
       sttStatus: { kind: "idle" },
@@ -255,6 +263,7 @@ export const useStore = create<State>((set, get) => ({
           uiDialect: message.you.dialect,
           peer: null,
           peerContactId: null,
+          peerNames: {},
           polite: message.polite,
           iceServers: message.iceServers,
           error: null,
@@ -270,6 +279,7 @@ export const useStore = create<State>((set, get) => ({
           uiDialect: message.you.dialect,
           peer: message.peer,
           peerContactId: message.peerContactId ?? null,
+          peerNames: message.peer ? { [message.peer.id]: message.peer.username } : {},
           polite: message.polite,
           iceServers: message.iceServers,
           lines: message.snapshot.lines,
@@ -278,7 +288,11 @@ export const useStore = create<State>((set, get) => ({
         return;
 
       case "peer.joined":
-        set({ peer: message.peer, peerContactId: message.contactId ?? null });
+        set((s) => ({
+          peer: message.peer,
+          peerContactId: message.contactId ?? null,
+          peerNames: { ...s.peerNames, [message.peer.id]: message.peer.username },
+        }));
         return;
 
       case "peer.left":
@@ -301,6 +315,9 @@ export const useStore = create<State>((set, get) => ({
                     ? { wantsTranslation: message.wantsTranslation }
                     : {}),
                 },
+                ...(message.username !== undefined
+                  ? { peerNames: { ...s.peerNames, [message.peerId]: message.username } }
+                  : {}),
               }
             : {},
         );

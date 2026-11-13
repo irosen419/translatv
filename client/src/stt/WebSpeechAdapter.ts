@@ -19,6 +19,7 @@
 
 import type { CopyRef } from "../i18n/copy.js";
 import type { SttAdapter, SttCapabilities, SttEvents, SttStatus } from "./types.js";
+import { cleanRecognizerText } from "./recognizerText.js";
 
 /** Base restart delay. Doubles per consecutive rapid failure. */
 const BASE_RESTART_MS = 250;
@@ -286,7 +287,8 @@ export class WebSpeechAdapter implements SttAdapter {
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const result = event.results[i];
         if (!result) continue;
-        const text = result[0].transcript.trim();
+        // Without the recognizer's own markers ("</s>"), which are not words anyone said.
+        const text = cleanRecognizerText(result[0].transcript);
         if (!text) continue;
         if (result.isFinal) {
           if (firedFinals.has(i)) continue;

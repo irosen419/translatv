@@ -138,7 +138,7 @@ export function SubtitleBlock({ view, copy, failureTitle, interimRef }: Subtitle
           )}
           {/* A note, not a marker. Nothing failed here, so it must not borrow the warning colour
               that means something did. */}
-          {caption.noteKey && <span className="note">{copy.t(caption.noteKey)}</span>}
+          {caption.noteKey && <> <span className="note">{copy.t(caption.noteKey)}</span></>}
         </p>
         <p className="original">{caption.secondary}</p>
       </div>

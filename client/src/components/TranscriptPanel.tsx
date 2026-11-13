@@ -14,6 +14,7 @@ import { canCorrect, correctionDraft, correctionMessage, correctionProblem, will
 import { failureCopyKey } from "../i18n/codes.js";
 import { useCopy } from "../i18n/useCopy.js";
 import { useStickToBottom } from "../lib/useStickToBottom.js";
+import { useStore } from "../state/store.js";
 
 interface Props {
   lines: readonly RenderedLine[];
@@ -36,6 +37,8 @@ export function TranscriptPanel(props: Props) {
   const { lines, selfId, me, peer } = props;
   // Follows new lines while the reader is at the bottom (lib/useStickToBottom.ts).
   const follow = useStickToBottom<HTMLDivElement>(lines);
+  // Everyone who has been the peer in this room, so a line keeps its speaker's name after they leave.
+  const peerNames = useStore((state) => state.peerNames);
   const [draft, setDraft] = useState("");
   const [correcting, setCorrecting] = useState<RenderedLine | null>(null);
   const copy = useCopy();
@@ -177,7 +180,7 @@ export function TranscriptPanel(props: Props) {
   function nameFor(memberId: string): string {
     if (memberId === selfId) return me?.username ?? copy.t("room.you");
     if (memberId === peer?.id) return peer.username;
-    return copy.t("panel.someone");
+    return peerNames[memberId] ?? copy.t("panel.someone");
   }
 
   return (
@@ -222,7 +225,9 @@ export function TranscriptPanel(props: Props) {
                 {/* Same quiet aside the overlays show. The panel is where someone scrolls back
                     to work out why a line reads the way it does, so leaving it out here would
                     hide the explanation in the one place it is most likely to be looked for. */}
-                {caption.noteKey && <span className="note">{copy.t(caption.noteKey)}</span>}
+                {/* The space is real text, not margin: copied out of the page, the note would
+                    otherwise run straight into the sentence ("racingnobody else is here"). */}
+                {caption.noteKey && <> <span className="note">{copy.t(caption.noteKey)}</span></>}
               </div>
 
               {/* The small italic row exists to keep the OTHER language visible beside the one

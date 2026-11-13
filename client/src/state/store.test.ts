@@ -437,3 +437,43 @@ describe("the support contact", () => {
     useStore.getState().setSupportEmail(null);
   });
 });
+
+describe("the names of people who were in the room", () => {
+  const joined = {
+    t: "room.joined" as const,
+    code: "ABCD1234",
+    selfId: "M1",
+    resumeToken: "t",
+    you: { ...PEER, id: "M1", username: "Ana", isHost: true },
+    peer: PEER,
+    polite: true,
+    config: { graceMs: 1, maxMembers: 2 },
+    iceServers: [],
+    snapshot: { lines: [], glossary: [] },
+  };
+
+  beforeEach(() => useStore.getState().reset());
+
+  it("keeps the peer's name after they leave, so their lines still say who said them", () => {
+    useStore.getState().apply({ t: "peer.joined", peer: PEER });
+    useStore.getState().apply({ t: "peer.left", peerId: PEER.id, reason: "left" });
+    expect(useStore.getState().peer).toBeNull();
+    expect(useStore.getState().peerNames).toEqual({ M2: "Ben" });
+  });
+
+  it("follows a rename, and learns the peer a room.joined arrives with", () => {
+    useStore.getState().apply(joined);
+    expect(useStore.getState().peerNames).toEqual({ M2: "Ben" });
+    useStore.getState().apply({ t: "peer.updated", peerId: "M2", username: "Benja" });
+    expect(useStore.getState().peerNames).toEqual({ M2: "Benja" });
+  });
+
+  it("starts empty in each new room, and is cleared by reset", () => {
+    useStore.getState().apply({ t: "peer.joined", peer: PEER });
+    useStore.getState().apply({ ...joined, peer: null });
+    expect(useStore.getState().peerNames).toEqual({});
+    useStore.getState().apply({ t: "peer.joined", peer: PEER });
+    useStore.getState().reset();
+    expect(useStore.getState().peerNames).toEqual({});
+  });
+});
