@@ -274,6 +274,58 @@ and coding runs in cloud sessions wherever possible. Those are not reopened here
   convention. Never on red or pending, and never one that touches `server/`, `shared/` or the spend
   files: those go back to the owner.
 
+### D15. Friends: mutual, no search, one id per person
+
+Added 2026-11-13. The full scope, with the reasoning, is
+[`FRIENDS-AND-PRESENCE.md`](FRIENDS-AND-PRESENCE.md); this and D16 to D17 are its decisions.
+
+- **Choice.** A friendship is a request and an accept, never a one sided follow. People are added
+  from Recent calls ("Add friend" beside Block and Report) or by a personal friend link the owner
+  of the link can reset. There is no search by email or name.
+- **Identity.** Friends reuse the per viewer `contactId`, so a person has one opaque id across
+  Recent calls, Friends, requests and Blocked people. Resolution widens from call history to call
+  history plus friends plus pending requests. No account id leaves the server.
+- **Blocking wins, silently.** A block ends the friendship and every pending request in both
+  directions; a request from a blocked person is dropped while the sender sees "Request sent";
+  unblocking restores nothing. Block and Report sit on every friend row and request (App Review
+  1.2). Decline is silent too.
+- **A friend link is not a signup invite.** Signup stays owner minted (D9), because the shared
+  spend cap is what invite only protects.
+- **Deletion.** Every friends table CASCADEs on either account.
+- **What would change it.** Open signup at scale, where people need to find each other without
+  having met: then a username, discoverable only by exact match, is the next step, not search.
+
+### D16. Presence: friends only, appear offline still rings, undetectable
+
+- **Choice.** Three states, Online, In a call and Offline, shown only to accepted friends, never
+  across a block. No "last seen". A synced "Show when I'm online" setting, on by default; off shows
+  you Offline to everyone.
+- **Appear offline still receives rings.** Not wanting rings is Do not disturb, a separate
+  setting. A ring to a hidden person who does not answer is indistinguishable from one to an
+  offline person: the server holds every ring for the full timeout and answers "No answer" either
+  way. Busy and decline also read as "No answer" to a caller who should not learn more.
+- **How.** The client keeps the WebSocket open whenever someone is signed in (a home connection),
+  not only in a room. Presence is in memory only, like rooms, with a 20 second grace before
+  Offline so reloads and blips do not flicker. Visibility is applied at the source: a hidden
+  person is never fanned out.
+- **Foreground only (D13).** On iOS, Online means the app is in the foreground, because until push
+  exists that is the only time a ring can reach it.
+- **What would change it.** Push (M30) makes Offline reachable; the setting's meaning does not
+  change, which is why it was defined this way.
+
+### D17. Calling a friend directly: a ring is a room for two named people
+
+- **Choice.** `call.ring { contactId }` checks the friendship, blocks and caps, creates a room as
+  `room.create` does, and sends `call.incoming` to every online socket of the callee. Answer joins
+  as `room.join` does; Decline or a 30 second timeout closes the room. No code is shown, and no one
+  else can join a ring's room.
+- **Missed calls.** `call_history` gains an `outcome` column (`answered`, `missed`, `declined`,
+  `cancelled`); a decline is stored as missed on the caller's side.
+- **Money.** A ring spends nothing. An answered ring is an ordinary call under the same ledger and
+  caps. Nothing here touches `server/src/spend/` or `pricing.ts`.
+- **Dialects.** Ringing a friend fills in both sides of the pre join screen from their saved
+  dialect.
+
 ---
 
 ## 2. Architecture
@@ -586,6 +638,22 @@ repository. On a private one, roughly 3,400 billed minutes (D12).
 | M29 | O | Deploy the server with accounts. Mint invites. |
 | M30 | C2 | CallKit, push invites and universal links, after the MVP holds on devices. |
 
+### Friends and presence (after the MVP, added 2026-11-13)
+
+Scoped in [`FRIENDS-AND-PRESENCE.md`](FRIENDS-AND-PRESENCE.md), decided in D15 to D17. Not in
+the one-shot and not in the MVP. The server and web milestones need no device, so they can run in
+cloud sessions at any time; the iOS one follows the MVP screens. Each is a server change, so each
+pull request goes to the owner (D14), and none touches the spend files.
+
+| # | Lane | Work | Check |
+|---|---|---|---|
+| M31 | C1 | **Home connection and presence.** The WebSocket opens whenever someone is signed in; an in memory presence registry with the 20 second grace; `presence.snapshot` and `presence.update`; the "Show when I'm online" preference (append only migration); `PROTOCOL_VERSION` and `API_VERSION` bumps and regenerated fixtures. | `npm run check`, with tests that a hidden or blocked person is never fanned out and that a reload inside the grace sends no Offline |
+| M32 | C1 | **Friends.** `friendships`, `friend_requests` and `friend_links` (append only); request, accept, decline, cancel, unfriend, nickname, link reset and redeem; widened `contactId` resolution; the block hooks of D15; limits as named constants in `shared/src/friends.ts`. | `npm run check`, with tests that a blocked sender sees the same response as anyone, that unblocking restores nothing, and that deleting either account leaves no friends row |
+| M33 | C1 | **Direct calling.** `call.ring`, `call.incoming`, `call.answer`, `call.decline`, `call.cancel`, the 30 second timeout, busy, and the `outcome` column on `call_history`. | `npm run check`, with a test that "no answer" for a hidden callee arrives at the same moment as for an offline one |
+| M34 | C1 | **Web client.** Friends page (requests, list, presence, nickname, dialect, local time), add from Recent calls, friend link and QR, incoming call banner, missed calls, the visibility toggle, every string in all five catalogs. | `npm run check && npm run e2e`, with e2e covering request, accept, ring, answer and a hidden friend |
+| M35 | C2 | **iOS.** The same screens in SwiftUI, held to Appendix C (Spanish length, diacritics, Dynamic Type, VoiceOver). | macOS CI green, fit tests in the longest locale |
+| M36 | C2 | **Rings with the app closed.** When M30 lands, `call.ring` also sends a VoIP push and rings through CallKit. The wire messages do not change. | Device test with the app closed (D lane) |
+
 ---
 
 ## 4. The one-shot
@@ -693,6 +761,8 @@ In order. "Who" is the owner unless stated.
 | Truncated Spanish labels or clipped diacritics at large sizes | Audit, fit tests, snapshots reviewed | C2, O | M18 |
 | TURN missing on cellular | TURN service, cellular call | O, D | M25, M26 |
 | Invite only signup feels closed | `SIGNUP_MODE=open` is one variable, once per user caps are proven | O | after M29 |
+| Presence or a ring reveals that someone is hiding, declining or has blocked you | Every such case answers "No answer" at the full timeout, proved by tests | C1 | M31, M33 |
+| Friend requests used for spam or harassment | Request limits, silent decline, block on every request, report | C1 | M32 |
 
 ---
 
