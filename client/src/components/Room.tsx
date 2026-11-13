@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { DIALECTS, translationNeed, type ClientMessage } from "@translatv/shared";
 import { useStore } from "../state/store.js";
@@ -17,6 +17,8 @@ import { useCopy } from "../i18n/useCopy.js";
 import { useTheme, useVideoWellStyle } from "../theme/useTheme.js";
 import type { ThemeChoice } from "../theme/theme.js";
 import type { Copy, CopyRef } from "../i18n/copy.js";
+import { attachStream } from "../lib/attachStream.js";
+import { speakingOtherLanguage } from "../lib/languageMismatch.js";
 
 /** The conventional two overlapping documents. Inline so the app takes no icon dependency. */
 function CopyIcon() {
@@ -421,8 +423,8 @@ export function Room(props: Props) {
     peerContactId,
   } = useStore();
 
-  const localVideo = useRef<HTMLVideoElement>(null);
-  const remoteVideo = useRef<HTMLVideoElement>(null);
+  const localVideo = useRef<HTMLVideoElement | null>(null);
+  const remoteVideo = useRef<HTMLVideoElement | null>(null);
   const [showPanel, setShowPanel] = useState(true);
   // Narrow screens merge subtitles and chat into one overlay over the video. Wide screens keep
   // the side panel, which shows far more of the conversation than a bottom strip can.
@@ -454,17 +456,33 @@ export function Room(props: Props) {
   // elements are mounted conditionally. Without that, turning a camera off and back on remounts
   // a fresh element whose srcObject is never set, and the video stays black forever with no
   // error anywhere. The self view had this bug already.
+  //
+  // The callback refs below cover any remount these dependency lists did not foresee: whatever
+  // element mounts gets the stream the moment it exists. attachStream also plays a paused one.
   useEffect(() => {
-    if (localVideo.current && props.localStream) {
-      localVideo.current.srcObject = props.localStream;
-    }
+    attachStream(localVideo.current, props.localStream);
   }, [props.localStream, hasVideo, cameraEnabled]);
 
   useEffect(() => {
-    if (remoteVideo.current && props.remoteStream) {
-      remoteVideo.current.srcObject = props.remoteStream;
-    }
+    attachStream(remoteVideo.current, props.remoteStream);
   }, [props.remoteStream, peerCameraOn]);
+
+  const localStreamNow = props.localStream;
+  const remoteStreamNow = props.remoteStream;
+  const attachLocal = useCallback(
+    (el: HTMLVideoElement | null) => {
+      localVideo.current = el;
+      attachStream(el, localStreamNow);
+    },
+    [localStreamNow],
+  );
+  const attachRemote = useCallback(
+    (el: HTMLVideoElement | null) => {
+      remoteVideo.current = el;
+      attachStream(el, remoteStreamNow);
+    },
+    [remoteStreamNow],
+  );
 
   /** The peer's newest line, and the newest one with a translation settled, drive the overlay. */
   const peerLines = useMemo(() => peerLinesFor(lines, selfId), [lines, selfId]);
@@ -496,6 +514,7 @@ export function Room(props: Props) {
     peerMicEnabled: peer?.micEnabled ?? true,
     peerWantsTranslation: peer?.wantsTranslation ?? true,
     translationUnavailable,
+    speakingOtherLanguage: speakingOtherLanguage(lines, selfId),
     onToggleSttEngine: props.onToggleSttEngine,
   });
   // On a narrow screen only problems earn space over the video; everything else rides down into
@@ -598,7 +617,7 @@ export function Room(props: Props) {
             than rule by rule is what keeps that true for anything added inside later. */}
         <div className="video-area" style={wellStyle}>
           {peerCameraOn ? (
-            <video ref={remoteVideo} autoPlay playsInline />
+            <video ref={attachRemote} autoPlay playsInline />
           ) : (
             <div className="placeholder">
               <div className="avatar">{initial(peer?.username)}</div>
@@ -661,7 +680,7 @@ export function Room(props: Props) {
           <div className="self-stack">
             <div className="self-view">
               {hasVideo && cameraEnabled ? (
-                <video ref={localVideo} autoPlay playsInline muted />
+                <video ref={attachLocal} autoPlay playsInline muted />
               ) : (
                 <div className="placeholder">
                   <div className="avatar">{initial(me?.username)}</div>

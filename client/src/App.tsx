@@ -7,7 +7,7 @@ import { Room } from "./components/Room.jsx";
 import { codeFromPath } from "./lib/code.js";
 import { pageFromPath, PRIVACY_IS_DRAFT } from "./lib/pages.js";
 import { InfoPage } from "./components/InfoPage.jsx";
-import { adoptCameraTrack } from "./rtc/cameraHandoff.js";
+import { adoptCameraTrack, dropEndedCamera } from "./rtc/cameraHandoff.js";
 import { acquireCameraTrack, acquireMedia, LevelMeter } from "./rtc/media.js";
 import { PeerConnection } from "./rtc/PeerConnection.js";
 import { apiUrl } from "./net/apiBase.js";
@@ -558,6 +558,24 @@ export function App() {
     },
     [localStream, announce],
   );
+
+  // A camera can end underneath the call (another app takes it, it is unplugged). The track's
+  // "ended" event is the only signal, so listen for it on whatever camera the stream holds, take
+  // the dead track out (rtc/cameraHandoff.ts), and say so: the button goes back to "turn your
+  // camera on", which reacquires one, and the peer is told the camera is off.
+  useEffect(() => {
+    const stream = localStream;
+    const tracks = stream?.getVideoTracks() ?? [];
+    if (!stream || tracks.length === 0) return;
+    const onEnded = () => {
+      if (!dropEndedCamera(stream)) return;
+      useStore.getState().setMedia({ hasVideo: false, cameraEnabled: false });
+      setCameraError({ key: "room.camera.stopped" });
+      announce({ cameraEnabled: false });
+    };
+    tracks.forEach((track) => track.addEventListener("ended", onEnded));
+    return () => tracks.forEach((track) => track.removeEventListener("ended", onEnded));
+  }, [localStream, store.hasVideo, announce]);
 
   const toggleCamera = useCallback(
     (enabled: boolean) => {

@@ -268,6 +268,19 @@ describe("call history from a room's lifecycle", () => {
     expect(dump).not.toContain(code);
   });
 
+  it("keeps no row for a call nobody joined, once it ends", async () => {
+    // A host who opened a room and left alone had a call in their history named "Nobody joined",
+    // one per attempt (owner report, 2026-11-13). It was never a call with anyone.
+    const session = await signup("Ana");
+    const host = await Client.connect(session);
+    host.send({ t: "room.create", username: "Ana", dialect: "en-US", wantsVideo: false });
+    await host.next("room.created");
+    expect(rowsFor(session.user.id)).toHaveLength(1); // open while they wait
+    host.send({ t: "room.end" });
+    await host.closed();
+    await until(() => rowsFor(session.user.id).length === 0);
+  });
+
   it("closes the guest's row when they leave, and the host's when the room ends", async () => {
     const { anaSession, benSession, ana, ben } = await pair();
     ben.send({ t: "room.leave" });

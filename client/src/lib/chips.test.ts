@@ -174,3 +174,13 @@ describe("sttAlert", () => {
     expect(sttAlert(blocked)).not.toBeNull();
   });
 });
+
+describe("the wrong language warning", () => {
+  it("is a problem, so it floats over the video on a phone", () => {
+    expect(problems(quiet({ speakingOtherLanguage: true }))).toContain("chips.wrongLanguage");
+  });
+
+  it("is absent when your lines are translating normally", () => {
+    expect(buildChips(quiet()).map((c) => c.text)).not.toContain("chips.wrongLanguage");
+  });
+});

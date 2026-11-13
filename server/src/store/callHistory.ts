@@ -37,6 +37,15 @@ export function setCallPeer(store: Store, id: string, peerUserId: string): void 
   store.db.prepare("UPDATE call_history SET peer_user_id = ? WHERE id = ? AND peer_user_id IS NULL").run(peerUserId, id);
 }
 
+/**
+ * Remove a row that never had anyone on the other end, when that call ends. Guarded on the peer
+ * still being unset, so a row that DID name someone (whose account was deleted since, which also
+ * leaves the peer unset) is never taken by a stale call to this.
+ */
+export function deleteUnansweredCall(store: Store, id: string): void {
+  store.db.prepare("DELETE FROM call_history WHERE id = ? AND peer_user_id IS NULL AND ended_at IS NULL").run(id);
+}
+
 /** Close a row. Only the first close counts, so a late sweep cannot stretch a finished call. */
 export function endCall(store: Store, id: string, now: number): void {
   store.db.prepare("UPDATE call_history SET ended_at = ? WHERE id = ? AND ended_at IS NULL").run(now, id);

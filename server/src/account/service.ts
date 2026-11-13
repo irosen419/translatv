@@ -37,7 +37,7 @@ import type { AuthResult } from "../auth/service.js";
 import { mergeNewestFirst, screenCorrection, type ScreenReason } from "./corrections.js";
 import { log } from "../log.js";
 import { blockedEitherWay, deleteBlock, insertBlock, listBlocks } from "../store/blocks.js";
-import { endCall, insertCall, listCalls, listContacts, listPeerIds, setCallPeer } from "../store/callHistory.js";
+import { deleteUnansweredCall, endCall, insertCall, listCalls, listContacts, listPeerIds, setCallPeer } from "../store/callHistory.js";
 import { findReport, insertReport, listReports, markReviewed, type ReportRow } from "../store/reports.js";
 import { findGlossary, replaceGlossary } from "../store/glossaries.js";
 import { findPreferences, savePreferences } from "../store/preferences.js";
@@ -53,6 +53,13 @@ export interface RoomUserData {
   callPeered(callId: string, peerUserId: string): void;
   /** The user left, timed out, or the room ended. */
   callEnded(callId: string, now: number): void;
+  /**
+   * The user's call ended with nobody ever on the other end: drop its row instead of closing it.
+   * A room opened and left alone is not a call with anyone, and listing it as "Nobody joined"
+   * filled the history with noise (owner report, 2026-11-13). Optional so a stand in without
+   * call history need not implement it.
+   */
+  callUnanswered?(callId: string): void;
   /**
    * The corrections this user made in a call that just closed, oldest first. Screened, and the
    * survivors saved to THIS user's stored glossary. The caller hands over only the corrections the
@@ -354,6 +361,14 @@ export class AccountService implements RoomUserData {
       // Most likely the account was deleted during the call, and the foreign key refuses rows for
       // it. The transaction rolled back, so nothing is half saved.
       log.warn("account.corrections_save_failed", { error: error instanceof Error ? error.message : "unknown" });
+    }
+  }
+
+  callUnanswered(callId: string): void {
+    try {
+      deleteUnansweredCall(this.store, callId);
+    } catch (error) {
+      log.warn("account.call_record_failed", { error: error instanceof Error ? error.message : "unknown" });
     }
   }
 

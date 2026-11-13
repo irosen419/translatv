@@ -47,3 +47,18 @@ export function adoptCameraTrack(
   call.stream.addTrack(track);
   return call.stream;
 }
+
+/**
+ * Take any ENDED camera track out of the call's stream. True when one was removed.
+ *
+ * A track ends when the camera goes away underneath the call: another app takes it, it is
+ * unplugged, the OS revokes it. The track stays in the stream, so the self view went black under
+ * a button that still said the camera was on, and turning it on again did nothing, because
+ * turnOnCamera refuses while the stream already holds a video track. Removing it puts the call
+ * back in the "no camera" state the button knows how to leave.
+ */
+export function dropEndedCamera(stream: MediaStream): boolean {
+  const ended = stream.getVideoTracks().filter((track) => track.readyState === "ended");
+  for (const track of ended) stream.removeTrack(track);
+  return ended.length > 0;
+}

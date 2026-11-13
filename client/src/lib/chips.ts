@@ -45,6 +45,11 @@ export interface ChipState {
    * it went onto the screen of whoever was in the call whatever language they had picked.
    */
   translationUnavailable: TranslationFailureCode | null;
+  /**
+   * Your own lines keep coming back from translation nearly unchanged, which means you are
+   * speaking the other person's language under your own setting (lib/languageMismatch.ts).
+   */
+  speakingOtherLanguage?: boolean;
   onToggleSttEngine(): void;
 }
 
@@ -96,9 +101,17 @@ export function buildChips(state: ChipState): Chip[] {
     peerMicEnabled,
     peerWantsTranslation,
     translationUnavailable,
+    speakingOtherLanguage = false,
     onToggleSttEngine,
   } = state;
   const chips: Chip[] = [];
+
+  // Yours to fix, and invisible otherwise: the other person reads your words "translated" into
+  // the language they were already in, and you see nothing wrong at all. A warning, so it floats
+  // over the video on a phone, where the dialect picker is one tap away in the drawer.
+  if (speakingOtherLanguage) {
+    chips.push({ text: "chips.wrongLanguage", tone: "warn", title: { key: "chips.wrongLanguage.title" } });
+  }
 
   // First in the list, and tone "bad" so it counts as a problem and floats over the video on a
   // phone rather than hiding in the drawer. Translation IS the product: a call where it has

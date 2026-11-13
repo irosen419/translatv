@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { detectCapabilities, PROBE_TIMEOUT_MS, WebSpeechAdapter } from "./WebSpeechAdapter.js";
+import { detectCapabilities, PROBE_TIMEOUT_MS, SETTLE_MS, WebSpeechAdapter } from "./WebSpeechAdapter.js";
 import type { SttEvents } from "./types.js";
+
+/** A settle stop restarts within the ordinary restart jitter, never after a backoff. */
+const BASE_SETTLE_RESTART_CEILING_MS = 600;
 
 /**
  * Minimal stand in for the browser's SpeechRecognition.
@@ -398,5 +401,83 @@ describe("an engine that answers slowly but does answer", () => {
 
     expect(FakeRecognition.instances).toHaveLength(1);
     expect(FakeRecognition.instances[0]?.processLocally).toBeUndefined();
+  });
+});
+
+describe("WebSpeechAdapter on an engine that is slow to finalize", () => {
+  // iPhone Safari keeps a whole monologue as one growing interim and finalizes only after a long
+  // silence or the session's end, so the other person got a paragraph at once, late (owner test,
+  // 2026-11-13). A pause in the results is treated as the end of a sentence instead.
+
+  it("finalizes an interim that has stopped changing, by stopping the session so the engine settles it", async () => {
+    vi.useFakeTimers();
+    installEngine("available");
+    const finals: string[] = [];
+    const stops: number[] = [];
+    const adapter = new WebSpeechAdapter({ ...noopEvents, onFinal: (t) => finals.push(t) }, false);
+    try {
+      await adapter.start(null, "en-US");
+      const recognition = FakeRecognition.instances.at(-1)!;
+      recognition.stop = () => {
+        stops.push(Date.now());
+        // A real engine settles the pending result as a final, then ends.
+        recognition.onresult?.(resultEvent(0, [result("so maybe on the security side", true)]));
+        recognition.onend?.();
+      };
+      await vi.advanceTimersByTimeAsync(2_000);
+      recognition.onresult?.(resultEvent(0, [result("so maybe on the security", false)]));
+      await vi.advanceTimersByTimeAsync(SETTLE_MS - 100);
+      recognition.onresult?.(resultEvent(0, [result("so maybe on the security side", false)]));
+      await vi.advanceTimersByTimeAsync(SETTLE_MS - 100);
+      expect(stops).toHaveLength(0); // still talking: every new result restarts the wait
+
+      await vi.advanceTimersByTimeAsync(200);
+      expect(stops).toHaveLength(1);
+      expect(finals).toEqual(["so maybe on the security side"]);
+
+      // And listening resumes promptly, without counting the stop as a failure.
+      await vi.advanceTimersByTimeAsync(BASE_SETTLE_RESTART_CEILING_MS);
+      expect(FakeRecognition.instances.length).toBe(2);
+    } finally {
+      adapter.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("commits the interim itself when the engine ends without settling it, exactly once", async () => {
+    vi.useFakeTimers();
+    installEngine("available");
+    const finals: string[] = [];
+    const adapter = new WebSpeechAdapter({ ...noopEvents, onFinal: (t) => finals.push(t) }, false);
+    try {
+      await adapter.start(null, "en-US");
+      const recognition = FakeRecognition.instances.at(-1)!;
+      recognition.stop = () => recognition.onend?.();
+      recognition.onresult?.(resultEvent(0, [result("adding", false)]));
+      await vi.advanceTimersByTimeAsync(SETTLE_MS + 50);
+      expect(finals).toEqual(["adding"]);
+    } finally {
+      adapter.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does nothing after an interim that was finalized normally", async () => {
+    vi.useFakeTimers();
+    installEngine("available");
+    const adapter = new WebSpeechAdapter(noopEvents, false);
+    try {
+      await adapter.start(null, "en-US");
+      const recognition = FakeRecognition.instances.at(-1)!;
+      const stop = vi.fn();
+      recognition.stop = stop;
+      recognition.onresult?.(resultEvent(0, [result("hello", false)]));
+      recognition.onresult?.(resultEvent(0, [result("hello", true)]));
+      await vi.advanceTimersByTimeAsync(SETTLE_MS * 2);
+      expect(stop).not.toHaveBeenCalled();
+    } finally {
+      adapter.stop();
+      vi.useRealTimers();
+    }
   });
 });

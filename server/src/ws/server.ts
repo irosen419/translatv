@@ -1336,7 +1336,9 @@ export class SignalingServer {
     const open = this.calls.get(memberId);
     if (!open) return;
     this.calls.delete(memberId);
-    this.userData?.callEnded(open.callId, now);
+    // Nobody ever joined: there was no call to remember, so the row goes rather than closing.
+    if (open.peerUserId === null && this.userData?.callUnanswered) this.userData.callUnanswered(open.callId);
+    else this.userData?.callEnded(open.callId, now);
     const session = this.sessions.get(open.roomCode);
     const made = session?.takeCorrections(memberId) ?? [];
     session?.dropSaved(memberId);
