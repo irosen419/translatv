@@ -211,7 +211,7 @@ try {
   );
   await ana.getByLabel(en("auth.displayName"), { exact: true }).fill("Ana");
   await ana.getByLabel(en("auth.email")).fill(emailFor("Ana"));
-  await ana.getByLabel(en("auth.password")).fill(PASSWORD);
+  await ana.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await ana.getByRole("button", { name: en("auth.submit.signUp") }).click();
   check(
     "signing up through the screen works across origins",
@@ -229,7 +229,7 @@ try {
   await signUpViaApi(API, "Ben");
   await ben.goto(STATIC);
   await ben.getByLabel(en("auth.email")).fill(emailFor("Ben"));
-  await ben.getByLabel(en("auth.password")).fill(PASSWORD);
+  await ben.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await ben.getByRole("button", { name: en("auth.submit.signIn") }).click();
   check(
     "signing in through the screen works across origins",

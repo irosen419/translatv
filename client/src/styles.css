@@ -267,6 +267,68 @@ label, .label { display: block; font-size: 13px; color: var(--muted); margin-bot
 .hint { margin: 6px 0 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
 .hint.bad { color: var(--warn); }
 
+/*
+ * The signup form's password and invite fields.
+ *
+ * The eye sits inside the password box, so the input keeps room for it on the right. It is a
+ * full 36px target on a phone, and only its glyph shows: the box around it is the input's.
+ */
+.password-shell { position: relative; }
+.password-shell input { padding-right: 44px; }
+.password-eye {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+}
+.password-eye:hover:not(:disabled) { color: var(--text); background: transparent; }
+.password-eye:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.password-eye[aria-pressed="true"] { color: var(--accent); }
+
+/*
+ * The rules, ticked off as they are met. A wrapping row rather than a column, so five short rules
+ * take two lines, not five, and a longer Spanish rule ("Un símbolo, como ! o #") wraps whole
+ * instead of clipping. Line height leaves room for accents above capitals.
+ */
+.password-rules ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.password-rules li { display: inline-flex; align-items: center; gap: 6px; }
+.password-rules .rule-mark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+.password-rules li.met { color: var(--text); }
+.password-rules li.met .rule-mark { background: var(--accent); border-color: var(--accent); transform: scale(1.15); }
+@media (prefers-reduced-motion: reduce) {
+  .password-rules .rule-mark { transition: none; }
+}
+
+/* An invite code reads in groups, in a monospace face, so 0 and the letters line up. */
+.invite-input { font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.08em; }
+.invite-input::placeholder { letter-spacing: 0.08em; opacity: 0.5; }
+
 /* Who is signed in, and the way out. Deliberately the quietest thing on the card: everyone has
    to read past it to get to what they came for. Wraps rather than truncates, because "Sesión
    iniciada como" plus a name is a good deal longer than its English. */

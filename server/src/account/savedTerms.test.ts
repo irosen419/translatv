@@ -28,7 +28,7 @@ import { SignalingServer } from "../ws/server.js";
 import { AccountService } from "./service.js";
 
 const ORIGIN = "http://localhost:5173";
-const PASSWORD = randomBytes(12).toString("hex");
+const PASSWORD = `Aa1!${randomBytes(12).toString("hex")}`;
 
 /** Every prompt the stub was asked, in order. */
 const prompts: string[] = [];

@@ -120,7 +120,7 @@ async function signUpViaScreen(page, name) {
   await page.getByRole("button", { name: en("auth.switch.toSignUp") }).click();
   await page.getByLabel(en("auth.displayName"), { exact: true }).fill(name);
   await page.getByLabel(en("auth.email")).fill(emailFor(name));
-  await page.getByLabel(en("auth.password")).fill(PASSWORD);
+  await page.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await page.getByRole("button", { name: en("auth.submit.signUp") }).click();
   await page.getByRole("button", { name: "Start a new chat" }).waitFor();
 }
@@ -135,7 +135,7 @@ async function openSignUp(page, base) {
 async function submitSignUp(page, name, invite) {
   await page.getByLabel(en("auth.displayName"), { exact: true }).fill(name);
   await page.getByLabel(en("auth.email")).fill(emailFor(name));
-  await page.getByLabel(en("auth.password")).fill(PASSWORD);
+  await page.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await page.getByLabel(en("auth.invite")).fill(invite);
   await page.getByRole("button", { name: en("auth.submit.signUp") }).click();
 }
@@ -450,7 +450,7 @@ try {
     (await ben.evaluate(() => localStorage.getItem("translatv.refresh"))) === null,
   );
   await ben.getByLabel(en("auth.email")).fill(emailFor("Ben"));
-  await ben.getByLabel(en("auth.password")).fill("not the password");
+  await ben.getByLabel(en("auth.password"), { exact: true }).fill("not the password");
   expectRefusal = "ben";
   await ben.getByRole("button", { name: en("auth.submit.signIn") }).click();
   check(
@@ -461,7 +461,7 @@ try {
       .then(() => true)
       .catch(() => false),
   );
-  await ben.getByLabel(en("auth.password")).fill(PASSWORD);
+  await ben.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await ben.getByRole("button", { name: en("auth.submit.signIn") }).click();
   await ben.getByRole("button", { name: "Start a new chat" }).waitFor();
   expectRefusal = null;
@@ -1719,7 +1719,7 @@ try {
       .catch(() => false),
   );
   await eve.getByLabel(en("auth.email")).fill(emailFor("Eve"));
-  await eve.getByLabel(en("auth.password")).fill(PASSWORD);
+  await eve.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await eve.getByRole("button", { name: en("auth.submit.signIn") }).click();
   check(
     "and the deleted account can no longer sign in",
@@ -1894,7 +1894,7 @@ try {
   await otherTab.locator(".account-state", { hasText: "Ivy" }).waitFor();
   await otherTab.getByRole("button", { name: en("account.signOut") }).click();
   await otherTab.getByLabel(en("auth.email")).fill(emailFor("Jon"));
-  await otherTab.getByLabel(en("auth.password")).fill(PASSWORD);
+  await otherTab.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await otherTab.getByRole("button", { name: en("auth.submit.signIn") }).click();
   await otherTab.locator(".account-state", { hasText: "Jon" }).waitFor();
   check(
@@ -1980,7 +1980,7 @@ try {
   await tabB.locator(".account-state", { hasText: "Olga" }).waitFor();
   await tabB.getByRole("button", { name: en("account.signOut") }).click();
   await tabB.getByLabel(en("auth.email")).fill(emailFor("Gus"));
-  await tabB.getByLabel(en("auth.password")).fill(PASSWORD);
+  await tabB.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await tabB.getByRole("button", { name: en("auth.submit.signIn") }).click();
   await tabB.locator(".account-state", { hasText: "Gus" }).waitFor();
   const olgaGone = await apiDeleteAccount(INVITE_BASE, await apiSignIn(INVITE_BASE, "Olga"));

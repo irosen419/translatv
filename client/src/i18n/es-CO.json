@@ -75,7 +75,7 @@
   "auth.switch.toSignUp": "¿Todavía no tiene cuenta? Cree una",
   "auth.switch.toSignIn": "¿Ya tiene cuenta? Inicie sesión",
   "auth.error.INVALID_INPUT": "Revise el correo electrónico y complete todos los campos.",
-  "auth.error.WEAK_PASSWORD": "Esa contraseña es demasiado corta. Use al menos {min} caracteres.",
+  "auth.error.WEAK_PASSWORD": "Elija una contraseña que cumpla cada regla que aparece debajo del campo de contraseña.",
   "auth.error.EMAIL_TAKEN": "Ya existe una cuenta con ese correo. Inicie sesión.",
   "auth.error.LOCKED": "Demasiados intentos para esta cuenta. Espere 15 minutos y vuelva a intentarlo.",
   "auth.error.RATE_LIMITED": "Demasiados intentos desde aquí. Espere un minuto y vuelva a intentarlo.",

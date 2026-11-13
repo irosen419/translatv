@@ -1,5 +1,16 @@
 import { useState } from "react";
-import { MIN_PASSWORD_LENGTH, type SignupMode } from "@translatv/shared";
+import {
+  canonicalInvite,
+  formatInviteInput,
+  INVITE_ALPHABET,
+  INVITE_CODE_LENGTH,
+  INVITE_GROUP_LENGTH,
+  INVITE_GROUPS,
+  MIN_PASSWORD_LENGTH,
+  PASSWORD_RULES,
+  unmetPasswordRules,
+  type SignupMode,
+} from "@translatv/shared";
 import { useCopy } from "../i18n/useCopy.js";
 import { SiteLinks } from "./InfoPage.jsx";
 import type { CopyKey, CopyRef } from "../i18n/copy.js";
@@ -53,12 +64,17 @@ export function AuthScreen({ signupMode, error, onSignIn, onSignUp }: Props) {
   const [invite, setInvite] = useState("");
   const [failure, setFailure] = useState<AuthFailure | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const needsInvite = signupMode === "invite";
+  // The rules are checked on sign up only. Sign in never asks, so an account made under an older
+  // rule still gets in.
+  const unmet = new Set(unmetPasswordRules(password));
   const ready =
     email.trim().length > 0 &&
     password.length > 0 &&
-    (mode === "signIn" || (displayName.trim().length > 0 && (!needsInvite || invite.trim().length > 0)));
+    (mode === "signIn" ||
+      (displayName.trim().length > 0 && unmet.size === 0 && (!needsInvite || canonicalInvite(invite) !== null)));
 
   function submit(): void {
     if (!ready || submitting) return;
@@ -89,6 +105,7 @@ export function AuthScreen({ signupMode, error, onSignIn, onSignUp }: Props) {
     setMode(next);
     setFailure(null);
     setPassword("");
+    setShowPassword(false);
   }
 
   return (
@@ -115,13 +132,22 @@ export function AuthScreen({ signupMode, error, onSignIn, onSignUp }: Props) {
           {mode === "signUp" && needsInvite && (
             <div className="field">
               <label htmlFor="auth-invite">{copy.t("auth.invite")}</label>
+              {/* Masked to the code's own shape (shared/src/auth.ts): typed lowercase shows as
+                  uppercase, a lookalike (O, I, L, U) as the character codes really have, the
+                  dashes are added, and anything else is dropped. The server sanitizes again. */}
               <input
                 id="auth-invite"
+                className="invite-input"
                 value={invite}
-                onChange={(event) => setInvite(event.target.value)}
+                onChange={(event) => setInvite(formatInviteInput(event.target.value))}
                 autoComplete="off"
+                autoCapitalize="characters"
+                autoCorrect="off"
                 spellCheck={false}
-                style={{ fontFamily: "ui-monospace, monospace", letterSpacing: "0.08em" }}
+                inputMode="text"
+                maxLength={INVITE_CODE_LENGTH + INVITE_GROUPS - 1}
+                placeholder={Array.from({ length: INVITE_GROUPS }, () => "X".repeat(INVITE_GROUP_LENGTH)).join("-")}
+                pattern={`[${INVITE_ALPHABET}]{${INVITE_GROUP_LENGTH}}(-[${INVITE_ALPHABET}]{${INVITE_GROUP_LENGTH}}){${INVITE_GROUPS - 1}}`}
               />
               <p className="hint">{copy.t("auth.invite.hint")}</p>
             </div>
@@ -155,21 +181,53 @@ export function AuthScreen({ signupMode, error, onSignIn, onSignUp }: Props) {
 
           <div className="field">
             <label htmlFor="auth-password">{copy.t("auth.password")}</label>
-            <input
-              id="auth-password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete={mode === "signIn" ? "current-password" : "new-password"}
-            />
+            <div className="password-shell">
+              <input
+                id="auth-password"
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete={mode === "signIn" ? "current-password" : "new-password"}
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+                aria-describedby={mode === "signUp" ? "auth-password-rules" : undefined}
+              />
+              <button
+                type="button"
+                className="password-eye"
+                aria-pressed={showPassword}
+                aria-label={copy.t(showPassword ? "auth.password.hide" : "auth.password.show")}
+                title={copy.t(showPassword ? "auth.password.hide" : "auth.password.show")}
+                onClick={() => setShowPassword((shown) => !shown)}
+              >
+                <EyeIcon open={!showPassword} />
+              </button>
+            </div>
             {mode === "signUp" && (
-              <p className="hint">{copy.t("auth.password.hint", { min: MIN_PASSWORD_LENGTH })}</p>
+              <div id="auth-password-rules" className="password-rules">
+                <p className="hint">{copy.t("auth.password.rules")}</p>
+                <ul>
+                  {PASSWORD_RULES.map((rule) => {
+                    const met = !unmet.has(rule);
+                    return (
+                      <li key={rule} data-rule={rule} className={met ? "met" : undefined}>
+                        <span className="rule-mark" aria-hidden="true" />
+                        <span className="visually-hidden">
+                          {copy.t(met ? "auth.password.rule.met" : "auth.password.rule.unmet")}
+                        </span>
+                        {copy.t(`auth.password.rule.${rule}`, { min: MIN_PASSWORD_LENGTH })}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             )}
           </div>
 
           {failure && (
             <div className="notice bad" role="alert">
-              {copy.t(failureKey(failure), { min: MIN_PASSWORD_LENGTH })}
+              {copy.t(failureKey(failure))}
             </div>
           )}
 
@@ -190,5 +248,20 @@ export function AuthScreen({ signupMode, error, onSignIn, onSignUp }: Props) {
         <SiteLinks />
       </div>
     </div>
+  );
+}
+
+/**
+ * The show and hide glyph: an eye while the password is hidden (press to see it), and the same eye
+ * struck through while it is shown. currentColor, so it follows the theme.
+ */
+function EyeIcon({ open }: { open: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" />
+      {!open && <path d="M4 4l16 16" />}
+    </svg>
   );
 }

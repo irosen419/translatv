@@ -61,11 +61,19 @@ describe("the dummy hash a login for a missing account verifies against", () => 
 
 describe("password policy", () => {
   it(`requires at least ${MIN_PASSWORD_LENGTH} characters`, () => {
-    expect(passwordIsAcceptable("a".repeat(MIN_PASSWORD_LENGTH - 1))).toBe(false);
-    expect(passwordIsAcceptable("a".repeat(MIN_PASSWORD_LENGTH))).toBe(true);
+    expect(passwordIsAcceptable(`Aa1!${"a".repeat(MIN_PASSWORD_LENGTH - 5)}`)).toBe(false);
+    expect(passwordIsAcceptable(`Aa1!${"a".repeat(MIN_PASSWORD_LENGTH - 4)}`)).toBe(true);
+  });
+
+  it("requires a lowercase letter, an uppercase letter, a number and a symbol", () => {
+    expect(passwordIsAcceptable("Abcdefg1!")).toBe(true);
+    expect(passwordIsAcceptable("abcdefg1!")).toBe(false);
+    expect(passwordIsAcceptable("ABCDEFG1!")).toBe(false);
+    expect(passwordIsAcceptable("Abcdefgh!")).toBe(false);
+    expect(passwordIsAcceptable("Abcdefgh1")).toBe(false);
   });
 
   it("caps the length, so a megabyte password cannot be used to burn CPU", () => {
-    expect(passwordIsAcceptable("a".repeat(1025))).toBe(false);
+    expect(passwordIsAcceptable(`Aa1!${"a".repeat(1021)}`)).toBe(false);
   });
 });

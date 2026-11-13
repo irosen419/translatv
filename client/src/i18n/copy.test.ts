@@ -378,7 +378,7 @@ describe("the account screens speak each dialect's register", () => {
 
   it("keeps the password minimum as a placeholder in every language", () => {
     for (const dialect of ["en-US", "es", "es-AR", "es-CO", "es-ES"]) {
-      expect(copyFor(dialect).t("auth.error.WEAK_PASSWORD", { min: 10 })).toContain("10");
+      expect(copyFor(dialect).t("auth.password.rule.length", { min: 8 })).toContain("8");
     }
   });
 });

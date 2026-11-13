@@ -25,7 +25,7 @@ import { SignalingServer } from "../ws/server.js";
 import { AccountService, contactIdFor } from "./service.js";
 
 const ORIGIN = "http://localhost:5173";
-const PASSWORD = randomBytes(12).toString("hex");
+const PASSWORD = `Aa1!${randomBytes(12).toString("hex")}`;
 
 let root: string;
 let store: Store;

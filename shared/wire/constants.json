@@ -236,6 +236,9 @@
       "status": 200
     }
   ],
+  "INVITE_ALPHABET": "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
+  "INVITE_GROUPS": 3,
+  "INVITE_GROUP_LENGTH": 4,
   "LIMITS": {
     "chat": 2000,
     "glossaryEntries": 40,
@@ -247,7 +250,14 @@
   },
   "MAX_EMAIL_LENGTH": 254,
   "MAX_PASSWORD_LENGTH": 1024,
-  "MIN_PASSWORD_LENGTH": 10,
+  "MIN_PASSWORD_LENGTH": 8,
+  "PASSWORD_RULES": [
+    "length",
+    "lowercase",
+    "uppercase",
+    "digit",
+    "symbol"
+  ],
   "PROTOCOL_VERSION": 2,
   "ROOM_CODE_PATTERN": "^[0-9A-HJKMNP-TV-Z]{8}$",
   "WS_BEARER_PREFIX": "bearer.",

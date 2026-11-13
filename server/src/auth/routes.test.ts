@@ -69,7 +69,7 @@ async function fetch(input: string, init?: RequestInit): Promise<Response> {
   return response;
 }
 
-const PASSWORD = randomBytes(12).toString("hex");
+const PASSWORD = `Aa1!${randomBytes(12).toString("hex")}`;
 
 let server: Server;
 let base: string;

@@ -18,7 +18,7 @@ import { openStore } from "../store/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const OWNER = "owner@example.test";
-const PASSWORD = "a long enough password";
+const PASSWORD = "A long enough password, 1";
 const dirs: string[] = [];
 
 afterEach(() => {

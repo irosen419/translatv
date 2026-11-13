@@ -20,7 +20,7 @@ import { createApp } from "./http.js";
 import { openStore, type Store } from "./store/index.js";
 
 const STATIC = "https://app.example.com";
-const PASSWORD = randomBytes(12).toString("hex");
+const PASSWORD = `Aa1!${randomBytes(12).toString("hex")}`;
 const NO_DIST = join(tmpdir(), "translatv-no-such-dist");
 
 let server: Server | null = null;
