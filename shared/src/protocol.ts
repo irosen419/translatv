@@ -46,7 +46,9 @@ export const WS_BEARER_PREFIX = "bearer.";
  * field, a new required field, or a changed meaning. Adding an optional field or a new message
  * type an old client can ignore does not need a bump.
  */
-export const PROTOCOL_VERSION = 2;
+// 3 (2026-11-13): the SAME_ACCOUNT error code, which a version 2 client's strict parse of an
+// error frame would reject.
+export const PROTOCOL_VERSION = 3;
 
 /** Room codes are 8 Crockford base32 characters. The alphabet excludes I, L, O, and U. */
 export const ROOM_CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{8}$/;
@@ -293,6 +295,12 @@ export const errorCode = z.enum([
    * arrive at create or join without an account, the refusal would say so rather than guess.
    */
   "UNAUTHENTICATED",
+  /**
+   * This account is already in the room, from another device or tab. One account is one side of
+   * a call, so a second person needs a second account. Fatal for the joining socket only; the
+   * seat already in the room is untouched. Added in PROTOCOL_VERSION 3.
+   */
+  "SAME_ACCOUNT",
 ]);
 export const ERROR_CODES = errorCode.options;
 export type ErrorCode = z.infer<typeof errorCode>;

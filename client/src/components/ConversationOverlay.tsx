@@ -3,6 +3,7 @@ import type { RenderedLine } from "@translatv/shared";
 import { captionFor } from "../lib/caption.js";
 import { failureCopyKey } from "../i18n/codes.js";
 import { useCopy } from "../i18n/useCopy.js";
+import { useStickToBottom } from "../lib/useStickToBottom.js";
 
 interface Props {
   lines: readonly RenderedLine[];
@@ -39,7 +40,8 @@ export function ConversationOverlay({
   onSendChat,
 }: Props) {
   const interimRef = useRef<HTMLParagraphElement>(null);
-  const scroller = useRef<HTMLDivElement>(null);
+  // Follows new lines while the reader is at the bottom (lib/useStickToBottom.ts).
+  const follow = useStickToBottom<HTMLDivElement>(lines, interimText);
   const [draft, setDraft] = useState("");
   const copy = useCopy();
 
@@ -50,22 +52,13 @@ export function ConversationOverlay({
     node.textContent = interimText;
   }, [interimText]);
 
-  // Stick to the bottom, but only when the reader is already there. Yanking someone back down
-  // while they are reading scrollback is worse than a slightly stale view.
-  useEffect(() => {
-    const node = scroller.current;
-    if (!node) return;
-    const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
-    if (nearBottom) node.scrollTop = node.scrollHeight;
-  }, [lines, interimText]);
-
   const newest = lines.length > 0 ? lines[lines.length - 1]! : null;
   const older = lines.slice(0, -1);
   const caption = captionFor(newest, viewerDialect);
 
   return (
     <div className="conversation">
-      <div className="conversation-log" ref={scroller}>
+      <div className="conversation-log" ref={follow.ref} onScroll={follow.onScroll}>
         {older.map((line) => {
           const past = captionFor(line, viewerDialect);
           return (
@@ -140,6 +133,7 @@ export function ConversationOverlay({
           const text = draft.trim();
           if (!text) return;
           onSendChat(text);
+          follow.pin(true);
           setDraft("");
         }}
       >

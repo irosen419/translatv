@@ -265,7 +265,7 @@ describe("room lifecycle over the wire", () => {
     const ana = await Client.connect();
     const created = await createRoom(ana);
 
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
 
     const joined = await ben.next("room.joined");
@@ -282,11 +282,11 @@ describe("room lifecycle over the wire", () => {
   it("refuses a third person", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana);
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
-    const cam = await Client.connect();
+    const cam = await Client.connect(ORIGIN, { user: "user-cam" });
     cam.send({ t: "room.join", code: created.code, username: "Cam", dialect: "en-US" });
     const error = await cam.next("error");
     expect(error.code).toBe("ROOM_FULL");
@@ -300,7 +300,7 @@ describe("room lifecycle over the wire", () => {
   it("frees the seat on an explicit leave and lets someone new take it", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana);
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -308,7 +308,7 @@ describe("room lifecycle over the wire", () => {
     const left = await ana.next("peer.left");
     expect(left.reason).toBe("left");
 
-    const cam = await Client.connect();
+    const cam = await Client.connect(ORIGIN, { user: "user-cam" });
     cam.send({ t: "room.join", code: created.code, username: "Cam", dialect: "es-MX" });
     const joined = await cam.next("room.joined");
     expect(joined.peer?.username).toBe("Ana");
@@ -322,7 +322,7 @@ describe("room lifecycle over the wire", () => {
     // resume, and to freeze the transcript and offer a download instead.
     const ana = await Client.connect();
     const created = await createRoom(ana);
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -332,7 +332,7 @@ describe("room lifecycle over the wire", () => {
     expect(ended.byUsername).toBe("Ana");
     expect(await ben.closed()).toBe(CLOSE.roomEnded);
 
-    const cam = await Client.connect();
+    const cam = await Client.connect(ORIGIN, { user: "user-cam" });
     cam.send({ t: "room.join", code: created.code, username: "Cam", dialect: "en-US" });
     const error = await cam.next("error");
     expect(error.code).toBe("ROOM_ENDED");
@@ -374,7 +374,7 @@ describe("signaling relay", () => {
   it("relays an offer to the peer and nobody else", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana);
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -396,7 +396,7 @@ describe("transcripts and translation", () => {
     // The decoupling that means a translation failure never costs the user the original line.
     const ana = await Client.connect();
     const created = await createRoom(ana, "Ana", "en-US");
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -417,7 +417,7 @@ describe("transcripts and translation", () => {
   it("relays interim results without storing or translating them", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana);
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -437,7 +437,7 @@ describe("transcripts and translation", () => {
   it("applies a correction immediately and puts it in the glossary", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana, "Ana", "en-US");
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -465,7 +465,7 @@ describe("transcripts and translation", () => {
     async function lineFromAna(text: string) {
       const ana = await Client.connect();
       const created = await createRoom(ana, "Ana", "en-US");
-      const ben = await Client.connect();
+      const ben = await Client.connect(ORIGIN, { user: "user-ben" });
       ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
       const joined = await ben.next("room.joined");
       ana.send({ t: "stt.final", text, seq: 1 });
@@ -568,7 +568,7 @@ describe("transcripts and translation", () => {
   it("routes chat through the same pipeline as speech", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana, "Ana", "en-US");
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -686,7 +686,7 @@ async function settle(ms = 250): Promise<void> {
 async function pair(anaDialect: string, benDialect: string) {
   const ana = await Client.connect();
   const created = await createRoom(ana, "Ana", anaDialect);
-  const ben = await Client.connect();
+  const ben = await Client.connect(ORIGIN, { user: "user-ben" });
   ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: benDialect });
   await ben.next("room.joined");
   await ana.next("peer.joined");
@@ -789,7 +789,7 @@ describe("lines that need no translation", () => {
 
     const ana = await Client.connect();
     const created = await createRoom(ana, "Ana", "en-US");
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "en-GB" });
     await ben.next("room.joined");
 
@@ -989,7 +989,7 @@ describe("media state reaches the peer", () => {
     ana.send({ t: "member.update", micEnabled: false, cameraEnabled: true });
     await settle(100);
 
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     const joined = await ben.next("room.joined");
 
@@ -1212,7 +1212,7 @@ describe("a resume that evicts a live socket", () => {
   it("does not report the reclaimed seat as reconnecting when the old socket closes", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana, "Ana", "en-US");
-    const cam = await Client.connect();
+    const cam = await Client.connect(ORIGIN, { user: "user-cam" });
     cam.send({ t: "room.join", code: created.code, username: "Cam", dialect: "es-AR" });
     await cam.next("room.joined");
 
@@ -1247,7 +1247,7 @@ describe("a resume that evicts a live socket", () => {
     // the state a half open TCP socket produces on its own.
     const ana = await Client.connect();
     const created = await createRoom(ana, "Ana", "en-US");
-    const cam = await Client.connect();
+    const cam = await Client.connect(ORIGIN, { user: "user-cam" });
     cam.send({ t: "room.join", code: created.code, username: "Cam", dialect: "es-AR" });
     await cam.next("room.joined");
 
@@ -1297,7 +1297,7 @@ describe("a connection that is already in a room", () => {
 
   it("cannot join a second room", async () => {
     const ana = await Client.connect();
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     const first = await createRoom(ana);
     const second = await createRoom(ben, "Ben", "es-AR");
 
@@ -1318,8 +1318,8 @@ describe("the per connection message limit", () => {
     // It was keyed on connection.ip while documenting itself as per connection, so two users on
     // one NAT split a single 120 token burst and a breach closed whichever socket happened to
     // send the frame that tripped it.
-    const heavy = await Client.connect();
-    const quiet = await Client.connect();
+    const heavy = await Client.connect(ORIGIN, { user: "user-heavy" });
+    const quiet = await Client.connect(ORIGIN, { user: "user-quiet" });
 
     for (let i = 0; i < 200; i += 1) heavy.send({ t: "ping" });
 
@@ -1400,7 +1400,7 @@ describe("the liveness heartbeat", () => {
     // The other half, and the reason it has to be here: a reaper that terminated unconditionally
     // would satisfy the test above and disconnect every healthy person on the server every
     // thirty seconds.
-    const healthy = await Client.connect();
+    const healthy = await Client.connect(ORIGIN, { user: "user-healthy" });
     const created = await createRoom(healthy, "Ana", "en-US");
 
     signaling.pingRound();
@@ -1451,7 +1451,7 @@ describe("an async handler that rejects", () => {
     try {
       const ana = await Client.connect();
       const created = await createRoom(ana, "Ana", "en-US");
-      const ben = await Client.connect();
+      const ben = await Client.connect(ORIGIN, { user: "user-ben" });
       ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
       await ben.next("room.joined");
 
@@ -1701,6 +1701,23 @@ describe("accounts on the socket", () => {
       expect(joined.peer?.isHost).toBe(true);
       // The peer is described by its opaque member id, never by the account behind it.
       expect(JSON.stringify(joined)).not.toContain("user-ana");
+      ana.close();
+      ben.close();
+    });
+
+    it("refuses the host's own account joining from a second device, with SAME_ACCOUNT", async () => {
+      const { ana, code } = await hostsRoom("user-ana");
+      const phone = await connect(ORIGIN, { user: "user-ana" });
+      phone.send({ t: "room.join", code, username: "Ana", dialect: "es-AR" });
+      const error = await phone.next("error");
+      expect(error.code).toBe("SAME_ACCOUNT");
+      expect(error.fatal).toBe(true);
+      // The host's seat and the room are untouched, and a different account still gets in.
+      expect(ana.received.some((m) => m.t === "peer.joined")).toBe(false);
+      const ben = await connect(ORIGIN, { user: "user-ben" });
+      ben.send({ t: "room.join", code, username: "Ben", dialect: "es-AR" });
+      expect((await ben.next("room.joined")).you.isHost).toBe(false);
+      phone.close();
       ana.close();
       ben.close();
     });

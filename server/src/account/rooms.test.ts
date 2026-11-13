@@ -597,15 +597,18 @@ describe("the peer's contactId in a call", () => {
     expect(history.ok && history.value.calls[0]?.peer?.contactId).toBe(joined.peerContactId);
   });
 
-  it("is absent when one account is on both ends", async () => {
+  it("never arises for one account on both ends, which is refused with SAME_ACCOUNT", async () => {
+    // It used to be a call with yourself, with no contactId either way. Now the second device is
+    // turned away, so the account's saved dialect and history are never written by two seats.
     const session = await signup("Ana");
     const host = await Client.connect(session);
     host.send({ t: "room.create", username: "Ana", dialect: "es-AR", wantsVideo: false });
     const created = await host.next("room.created");
     const tab = await Client.connect(session);
     tab.send({ t: "room.join", code: created.code, username: "Ana 2", dialect: "en-US" });
-    expect((await tab.next("room.joined")).peerContactId).toBeUndefined();
-    expect((await host.next("peer.joined")).contactId).toBeUndefined();
+    expect((await tab.next("error")).code).toBe("SAME_ACCOUNT");
+    expect(host.received.some((m) => m.t === "peer.joined")).toBe(false);
+    expect(account.callsFor(session.user.id, {}).ok).toBe(true);
   });
 });
 

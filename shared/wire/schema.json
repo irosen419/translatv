@@ -359,7 +359,8 @@
         "NOT_IN_ROOM",
         "ALREADY_IN_ROOM",
         "HOST_NOT_PRESENT",
-        "UNAUTHENTICATED"
+        "UNAUTHENTICATED",
+        "SAME_ACCOUNT"
       ],
       "type": "string"
     },
@@ -436,7 +437,7 @@
       "type": "object"
     },
     "protocolVersion": {
-      "const": 2,
+      "const": 3,
       "description": "PROTOCOL_VERSION: the wire format this schema describes. /healthz serves the server's as protocolVersion.",
       "type": "integer"
     },

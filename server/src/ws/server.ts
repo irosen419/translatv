@@ -643,6 +643,18 @@ export class SignalingServer {
       return;
     }
 
+    // One account is one side of a call. The same account joining its own room from a second
+    // device (signed in on a laptop and a phone at once) would be a call with yourself: both
+    // seats would read and write the one account's saved dialect and glossary, and its call
+    // history would name itself as the peer. Refused with its own code, since the person refused
+    // already knows the room exists (they are in it) and is owed the real reason. Checked after
+    // the host and block checks, so it says nothing to anyone those would refuse.
+    if (occupied?.members.some((m) => m.userId !== "" && m.userId === userId)) {
+      log.info("room.join_refused", { room: roomHash(occupied.code), user: userId, reason: "same_account" });
+      this.fail(connection.socket, "SAME_ACCOUNT", true);
+      return;
+    }
+
     const result = this.rooms.join(
       message.code,
       message.username,

@@ -258,7 +258,7 @@
     "digit",
     "symbol"
   ],
-  "PROTOCOL_VERSION": 2,
+  "PROTOCOL_VERSION": 3,
   "ROOM_CODE_PATTERN": "^[0-9A-HJKMNP-TV-Z]{8}$",
   "WS_BEARER_PREFIX": "bearer.",
   "WS_PATH": "/ws",
