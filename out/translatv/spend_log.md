@@ -3,7 +3,9 @@
 Generated from spend_log.jsonl. Do not edit by hand: append through the ledger module and
 regenerate this view.
 
-Known spend $2.6419 across 2533 calls, 1884276 input and 104841 output tokens.
+Known spend $2.7127 across 2644 calls, 1943987 input and 107070 output tokens.
+By environment: local $0.0709 (calls: 111), unrecorded $2.6419 (calls: 2533).
+Owner's calls $0.0709 (calls: 111), other people's $0.0000 (calls: 0), unrecorded $2.6419 (calls: 2533).
 
 | ts | program | kind | model | in | out | cost | cap | note |
 |----|---------|------|-------|----|-----|------|-----|------|
@@ -2540,3 +2542,114 @@ Known spend $2.6419 across 2533 calls, 1884276 input and 104841 output tokens.
 | 2026-11-11T14:29:23.141Z | blind-test | eval | claude-sonnet-5-5 | 1281 | 69 | $0.003252 | $5.98 | blind 20261111T141905 judge b0375 |
 | 2026-11-11T14:29:23.401Z | blind-test | eval | claude-sonnet-5-5 | 1349 | 69 | $0.003388 | $5.98 | blind 20261111T141905 judge b0500 |
 | 2026-11-11T14:29:23.972Z | blind-test | eval | claude-sonnet-5-5 | 1315 | 69 | $0.003320 | $5.98 | blind 20261111T141905 judge b0625 |
+| 2026-11-13T16:53:29.754Z | runtime-translation | translation | claude-haiku-4-5 | 579 | 17 | $0.000664 | $1.50 | translation |
+| 2026-11-13T16:53:37.171Z | runtime-translation | translation | claude-haiku-4-5 | 570 | 24 | $0.000690 | $1.50 | translation |
+| 2026-11-13T16:53:49.469Z | runtime-translation | translation | claude-haiku-4-5 | 583 | 93 | $0.001048 | $1.50 | translation |
+| 2026-11-13T16:53:55.648Z | runtime-translation | translation | claude-haiku-4-5 | 586 | 33 | $0.000751 | $1.50 | translation |
+| 2026-11-13T16:53:59.839Z | runtime-translation | translation | claude-haiku-4-5 | 580 | 15 | $0.000655 | $1.50 | translation |
+| 2026-11-13T16:54:08.078Z | runtime-translation | translation | claude-haiku-4-5 | 605 | 41 | $0.000810 | $1.50 | translation |
+| 2026-11-13T16:54:30.637Z | runtime-translation | translation | claude-haiku-4-5 | 662 | 96 | $0.001142 | $1.50 | translation |
+| 2026-11-13T16:54:32.670Z | runtime-translation | translation | claude-haiku-4-5 | 632 | 15 | $0.000707 | $1.50 | translation |
+| 2026-11-13T16:54:43.731Z | runtime-translation | translation | claude-haiku-4-5 | 603 | 30 | $0.000753 | $1.50 | translation |
+| 2026-11-13T16:54:49.925Z | runtime-translation | translation | claude-haiku-4-5 | 593 | 22 | $0.000703 | $1.50 | translation |
+| 2026-11-13T16:54:57.927Z | runtime-translation | translation | claude-haiku-4-5 | 599 | 21 | $0.000704 | $1.50 | translation |
+| 2026-11-13T16:55:01.894Z | runtime-translation | translation | claude-haiku-4-5 | 570 | 7 | $0.000605 | $1.50 | translation |
+| 2026-11-13T16:55:08.124Z | runtime-translation | translation | claude-haiku-4-5 | 540 | 27 | $0.000675 | $1.50 | translation |
+| 2026-11-13T16:55:13.865Z | runtime-translation | translation | claude-haiku-4-5 | 539 | 14 | $0.000609 | $1.50 | translation |
+| 2026-11-13T16:55:20.638Z | runtime-translation | translation | claude-haiku-4-5 | 530 | 20 | $0.000630 | $1.50 | translation |
+| 2026-11-13T16:55:22.633Z | runtime-translation | translation | claude-haiku-4-5 | 524 | 8 | $0.000564 | $1.50 | translation |
+| 2026-11-13T16:55:23.508Z | runtime-translation | translation | claude-haiku-4-5 | 521 | 21 | $0.000626 | $1.50 | translation |
+| 2026-11-13T16:55:25.844Z | runtime-translation | translation | claude-haiku-4-5 | 523 | 8 | $0.000563 | $1.50 | translation |
+| 2026-11-13T16:55:28.011Z | runtime-translation | translation | claude-haiku-4-5 | 513 | 9 | $0.000558 | $1.50 | translation |
+| 2026-11-13T16:55:35.773Z | runtime-translation | translation | claude-haiku-4-5 | 521 | 22 | $0.000631 | $1.50 | translation |
+| 2026-11-13T16:55:44.810Z | runtime-translation | translation | claude-haiku-4-5 | 531 | 35 | $0.000706 | $1.50 | translation |
+| 2026-11-13T16:55:45.145Z | runtime-translation | translation | claude-haiku-4-5 | 528 | 4 | $0.000548 | $1.50 | translation |
+| 2026-11-13T16:55:50.344Z | runtime-translation | translation | claude-haiku-4-5 | 527 | 19 | $0.000622 | $1.50 | translation |
+| 2026-11-13T16:55:51.111Z | runtime-translation | translation | claude-haiku-4-5 | 524 | 4 | $0.000544 | $1.50 | translation |
+| 2026-11-13T16:56:05.617Z | runtime-translation | translation | claude-haiku-4-5 | 536 | 26 | $0.000666 | $1.50 | translation |
+| 2026-11-13T16:56:10.029Z | runtime-translation | translation | claude-haiku-4-5 | 537 | 29 | $0.000682 | $1.50 | translation |
+| 2026-11-13T16:56:12.340Z | runtime-translation | translation | claude-haiku-4-5 | 524 | 11 | $0.000579 | $1.50 | translation |
+| 2026-11-13T16:56:19.277Z | runtime-translation | translation | claude-haiku-4-5 | 539 | 35 | $0.000714 | $1.50 | translation |
+| 2026-11-13T16:56:21.858Z | runtime-translation | translation | claude-haiku-4-5 | 535 | 17 | $0.000620 | $1.50 | translation |
+| 2026-11-13T16:56:29.910Z | runtime-translation | translation | claude-haiku-4-5 | 536 | 7 | $0.000571 | $1.50 | translation |
+| 2026-11-13T16:56:34.454Z | runtime-translation | translation | claude-haiku-4-5 | 524 | 10 | $0.000574 | $1.50 | translation |
+| 2026-11-13T16:56:36.986Z | runtime-translation | translation | claude-haiku-4-5 | 513 | 15 | $0.000588 | $1.50 | translation |
+| 2026-11-13T16:56:42.855Z | runtime-translation | translation | claude-haiku-4-5 | 516 | 15 | $0.000591 | $1.50 | translation |
+| 2026-11-13T16:56:47.785Z | runtime-translation | translation | claude-haiku-4-5 | 512 | 17 | $0.000597 | $1.50 | translation |
+| 2026-11-13T16:56:56.815Z | runtime-translation | translation | claude-haiku-4-5 | 513 | 15 | $0.000588 | $1.50 | translation |
+| 2026-11-13T16:57:03.070Z | runtime-translation | translation | claude-haiku-4-5 | 526 | 20 | $0.000626 | $1.50 | translation |
+| 2026-11-13T16:57:07.370Z | runtime-translation | translation | claude-haiku-4-5 | 534 | 25 | $0.000659 | $1.50 | translation |
+| 2026-11-13T16:57:11.888Z | runtime-translation | translation | claude-haiku-4-5 | 537 | 20 | $0.000637 | $1.50 | translation |
+| 2026-11-13T16:57:17.087Z | runtime-translation | translation | claude-haiku-4-5 | 533 | 13 | $0.000598 | $1.50 | translation |
+| 2026-11-13T16:57:26.618Z | runtime-translation | translation | claude-haiku-4-5 | 529 | 15 | $0.000604 | $1.50 | translation |
+| 2026-11-13T16:57:31.810Z | runtime-translation | translation | claude-haiku-4-5 | 532 | 17 | $0.000617 | $1.50 | translation |
+| 2026-11-13T16:57:38.133Z | runtime-translation | translation | claude-haiku-4-5 | 521 | 7 | $0.000556 | $1.50 | translation |
+| 2026-11-13T16:59:13.664Z | runtime-translation | translation | claude-haiku-4-5 | 522 | 17 | $0.000607 | $1.50 | translation |
+| 2026-11-13T16:59:19.405Z | runtime-translation | translation | claude-haiku-4-5 | 518 | 9 | $0.000563 | $1.50 | translation |
+| 2026-11-13T16:59:24.255Z | runtime-translation | translation | claude-haiku-4-5 | 519 | 9 | $0.000564 | $1.50 | translation |
+| 2026-11-13T16:59:29.792Z | runtime-translation | translation | claude-haiku-4-5 | 519 | 20 | $0.000619 | $1.50 | translation |
+| 2026-11-13T16:59:32.607Z | runtime-translation | translation | claude-haiku-4-5 | 512 | 7 | $0.000547 | $1.50 | translation |
+| 2026-11-13T16:59:38.456Z | runtime-translation | translation | claude-haiku-4-5 | 513 | 12 | $0.000573 | $1.50 | translation |
+| 2026-11-13T16:59:44.160Z | runtime-translation | translation | claude-haiku-4-5 | 508 | 21 | $0.000613 | $1.50 | translation |
+| 2026-11-13T16:59:48.445Z | runtime-translation | translation | claude-haiku-4-5 | 512 | 13 | $0.000577 | $1.50 | translation |
+| 2026-11-13T16:59:55.613Z | runtime-translation | translation | claude-haiku-4-5 | 516 | 11 | $0.000571 | $1.50 | translation |
+| 2026-11-13T17:00:02.684Z | runtime-translation | translation | claude-haiku-4-5 | 522 | 18 | $0.000612 | $1.50 | translation |
+| 2026-11-13T17:00:10.797Z | runtime-translation | translation | claude-haiku-4-5 | 524 | 11 | $0.000579 | $1.50 | translation |
+| 2026-11-13T17:00:15.796Z | runtime-translation | translation | claude-haiku-4-5 | 525 | 11 | $0.000580 | $1.50 | translation |
+| 2026-11-13T17:00:19.808Z | runtime-translation | translation | claude-haiku-4-5 | 522 | 11 | $0.000577 | $1.50 | translation |
+| 2026-11-13T17:00:24.408Z | runtime-translation | translation | claude-haiku-4-5 | 523 | 12 | $0.000583 | $1.50 | translation |
+| 2026-11-13T17:00:32.588Z | runtime-translation | translation | claude-haiku-4-5 | 515 | 9 | $0.000560 | $1.50 | translation |
+| 2026-11-13T17:00:40.146Z | runtime-translation | translation | claude-haiku-4-5 | 512 | 22 | $0.000622 | $1.50 | translation |
+| 2026-11-13T17:00:55.446Z | runtime-translation | translation | claude-haiku-4-5 | 517 | 24 | $0.000637 | $1.50 | translation |
+| 2026-11-13T17:00:57.822Z | runtime-translation | translation | claude-haiku-4-5 | 517 | 15 | $0.000592 | $1.50 | translation |
+| 2026-11-13T17:01:03.325Z | runtime-translation | translation | claude-haiku-4-5 | 519 | 16 | $0.000599 | $1.50 | translation |
+| 2026-11-13T17:01:14.088Z | runtime-translation | translation | claude-haiku-4-5 | 519 | 13 | $0.000584 | $1.50 | translation |
+| 2026-11-13T17:01:36.576Z | runtime-translation | translation | claude-haiku-4-5 | 531 | 28 | $0.000671 | $1.50 | translation |
+| 2026-11-13T17:01:45.555Z | runtime-translation | translation | claude-haiku-4-5 | 539 | 32 | $0.000699 | $1.50 | translation |
+| 2026-11-13T17:01:54.459Z | runtime-translation | translation | claude-haiku-4-5 | 548 | 25 | $0.000673 | $1.50 | translation |
+| 2026-11-13T17:02:01.636Z | runtime-translation | translation | claude-haiku-4-5 | 552 | 16 | $0.000632 | $1.50 | translation |
+| 2026-11-13T17:02:19.482Z | runtime-translation | translation | claude-haiku-4-5 | 552 | 12 | $0.000612 | $1.50 | translation |
+| 2026-11-13T17:02:22.820Z | runtime-translation | translation | claude-haiku-4-5 | 549 | 10 | $0.000599 | $1.50 | translation |
+| 2026-11-13T17:02:27.389Z | runtime-translation | translation | claude-haiku-4-5 | 543 | 15 | $0.000618 | $1.50 | translation |
+| 2026-11-13T17:02:31.916Z | runtime-translation | translation | claude-haiku-4-5 | 531 | 12 | $0.000591 | $1.50 | translation |
+| 2026-11-13T17:02:34.071Z | runtime-translation | translation | claude-haiku-4-5 | 520 | 13 | $0.000585 | $1.50 | translation |
+| 2026-11-13T17:02:39.740Z | runtime-translation | translation | claude-haiku-4-5 | 518 | 16 | $0.000598 | $1.50 | translation |
+| 2026-11-13T17:02:44.474Z | runtime-translation | translation | claude-haiku-4-5 | 516 | 13 | $0.000581 | $1.50 | translation |
+| 2026-11-13T17:02:56.074Z | runtime-translation | translation | claude-haiku-4-5 | 516 | 12 | $0.000576 | $1.50 | translation |
+| 2026-11-13T17:03:10.946Z | runtime-translation | translation | claude-haiku-4-5 | 515 | 18 | $0.000605 | $1.50 | translation |
+| 2026-11-13T17:03:24.524Z | runtime-translation | translation | claude-haiku-4-5 | 509 | 6 | $0.000539 | $1.50 | translation |
+| 2026-11-13T17:03:29.929Z | runtime-translation | translation | claude-haiku-4-5 | 508 | 10 | $0.000558 | $1.50 | translation |
+| 2026-11-13T17:03:38.823Z | runtime-translation | translation | claude-haiku-4-5 | 502 | 5 | $0.000527 | $1.50 | translation |
+| 2026-11-13T17:03:43.209Z | runtime-translation | translation | claude-haiku-4-5 | 500 | 14 | $0.000570 | $1.50 | translation |
+| 2026-11-13T17:03:51.347Z | runtime-translation | translation | claude-haiku-4-5 | 497 | 6 | $0.000527 | $1.50 | translation |
+| 2026-11-13T17:03:52.610Z | runtime-translation | translation | claude-haiku-4-5 | 492 | 6 | $0.000522 | $1.50 | translation |
+| 2026-11-13T17:03:55.570Z | runtime-translation | translation | claude-haiku-4-5 | 500 | 15 | $0.000575 | $1.50 | translation |
+| 2026-11-13T17:03:59.469Z | runtime-translation | translation | claude-haiku-4-5 | 500 | 10 | $0.000550 | $1.50 | translation |
+| 2026-11-13T17:04:09.508Z | runtime-translation | translation | claude-haiku-4-5 | 529 | 49 | $0.000774 | $1.50 | translation |
+| 2026-11-13T17:04:16.099Z | runtime-translation | translation | claude-haiku-4-5 | 536 | 17 | $0.000621 | $1.50 | translation |
+| 2026-11-13T17:04:19.340Z | runtime-translation | translation | claude-haiku-4-5 | 541 | 14 | $0.000611 | $1.50 | translation |
+| 2026-11-13T17:04:29.306Z | runtime-translation | translation | claude-haiku-4-5 | 524 | 77 | $0.000909 | $1.50 | translation |
+| 2026-11-13T17:04:37.466Z | runtime-translation | translation | claude-haiku-4-5 | 489 | 4 | $0.000509 | $1.50 | translation |
+| 2026-11-13T17:05:25.795Z | runtime-translation | translation | claude-haiku-4-5 | 591 | 34 | $0.000761 | $1.50 | translation |
+| 2026-11-13T17:05:35.712Z | runtime-translation | translation | claude-haiku-4-5 | 593 | 45 | $0.000818 | $1.50 | translation |
+| 2026-11-13T17:05:41.463Z | runtime-translation | translation | claude-haiku-4-5 | 553 | 61 | $0.000858 | $1.50 | translation |
+| 2026-11-13T17:05:44.373Z | runtime-translation | translation | claude-haiku-4-5 | 631 | 23 | $0.000746 | $1.50 | translation |
+| 2026-11-13T17:05:46.975Z | runtime-translation | translation | claude-haiku-4-5 | 591 | 9 | $0.000636 | $1.50 | translation |
+| 2026-11-13T17:05:50.296Z | runtime-translation | translation | claude-haiku-4-5 | 592 | 12 | $0.000652 | $1.50 | translation |
+| 2026-11-13T17:06:00.659Z | runtime-translation | translation | claude-haiku-4-5 | 603 | 51 | $0.000858 | $1.50 | translation |
+| 2026-11-13T17:06:02.945Z | runtime-translation | translation | claude-haiku-4-5 | 575 | 11 | $0.000630 | $1.50 | translation |
+| 2026-11-13T17:06:07.022Z | runtime-translation | translation | claude-haiku-4-5 | 533 | 7 | $0.000568 | $1.50 | translation |
+| 2026-11-13T17:06:14.000Z | runtime-translation | translation | claude-haiku-4-5 | 533 | 18 | $0.000623 | $1.50 | translation |
+| 2026-11-13T17:06:20.228Z | runtime-translation | translation | claude-haiku-4-5 | 505 | 66 | $0.000835 | $1.50 | translation |
+| 2026-11-13T17:06:25.819Z | runtime-translation | translation | claude-haiku-4-5 | 571 | 6 | $0.000601 | $1.50 | translation |
+| 2026-11-13T17:06:27.401Z | runtime-translation | translation | claude-haiku-4-5 | 539 | 6 | $0.000569 | $1.50 | translation |
+| 2026-11-13T17:06:41.525Z | runtime-translation | translation | claude-haiku-4-5 | 553 | 32 | $0.000713 | $1.50 | translation |
+| 2026-11-13T17:06:49.913Z | runtime-translation | translation | claude-haiku-4-5 | 566 | 28 | $0.000706 | $1.50 | translation |
+| 2026-11-13T17:06:57.147Z | runtime-translation | translation | claude-haiku-4-5 | 578 | 41 | $0.000783 | $1.50 | translation |
+| 2026-11-13T17:06:58.539Z | runtime-translation | translation | claude-haiku-4-5 | 535 | 6 | $0.000565 | $1.50 | translation |
+| 2026-11-13T17:07:06.892Z | runtime-translation | translation | claude-haiku-4-5 | 542 | 22 | $0.000652 | $1.50 | translation |
+| 2026-11-13T17:07:16.416Z | runtime-translation | translation | claude-haiku-4-5 | 495 | 44 | $0.000715 | $1.50 | translation |
+| 2026-11-13T17:07:23.052Z | runtime-translation | translation | claude-haiku-4-5 | 565 | 4 | $0.000585 | $1.50 | translation |
+| 2026-11-13T17:07:26.963Z | runtime-translation | translation | claude-haiku-4-5 | 560 | 16 | $0.000640 | $1.50 | translation |
+| 2026-11-13T17:07:38.518Z | runtime-translation | translation | claude-haiku-4-5 | 460 | 13 | $0.000525 | $1.50 | translation |
+| 2026-11-13T17:07:43.860Z | runtime-translation | translation | claude-haiku-4-5 | 556 | 19 | $0.000651 | $1.50 | translation |
