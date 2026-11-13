@@ -7,7 +7,8 @@
 
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { signupMode as signupModeSchema, type RTCIceServerConfig, type SignupMode } from "@translatv/shared";
+import { email as emailSchema, signupMode as signupModeSchema, type RTCIceServerConfig, type SignupMode } from "@translatv/shared";
+import { resolveSpendEnv } from "./spend/attribution.js";
 
 function num(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -70,6 +71,12 @@ export interface Config {
   signupMode: SignupMode;
   /** The account with this email (normalized) is the owner, who mints invites. Null: no owner. */
   ownerEmail: string | null;
+  /**
+   * Where people write for help (SUPPORT_EMAIL), shown as a mailto link on the support page and
+   * wherever the site says to contact support. Not a secret: /healthz serves it to anyone. Null
+   * when unset, and then the site shows no address rather than a broken link.
+   */
+  supportEmail: string | null;
   dailyCapUsd: number;
   roomCapUsd: number;
   iceServers: RTCIceServerConfig[];
@@ -91,6 +98,22 @@ export interface Config {
   dataDir: string;
   /** The database file inside dataDir. */
   databasePath: string;
+  /**
+   * Whether this server also serves the built web client (SERVE_CLIENT, default on).
+   *
+   * On is the one image deploy: one origin serves the page, the API and the socket. Off is the
+   * API half of a split deploy, where the client is a static site on its own origin (DEPLOY.md,
+   * "Two services") and this server answers 404 JSON for anything that is not /api, /healthz or
+   * the socket. Off does not loosen anything: the static site's origin must still be in ORIGIN,
+   * which is what both CORS and the socket's Origin check read.
+   */
+  serveClient: boolean;
+  /**
+   * Which environment this server's spend is labeled with on the ledger (SPEND_ENV): "local" by
+   * default outside production, "production" by default in it, or a name such as "pi". See
+   * spend/attribution.ts.
+   */
+  spendEnv: string;
 }
 
 /** The database file's name inside DATA_DIR. */
@@ -116,6 +139,14 @@ export function loadConfig(repoRoot: string): Config {
   // Normalized exactly as signup normalizes an email, or the owner would never match their own
   // account because of a capital letter.
   const ownerEmail = (process.env["OWNER_EMAIL"] ?? "").trim().toLowerCase();
+
+  // Normalized and checked like a sign up email. Refused rather than ignored when it is set to
+  // something that is not an address, since a typo here prints a dead mailto link on every page.
+  const supportRaw = (process.env["SUPPORT_EMAIL"] ?? "").trim();
+  const support = supportRaw === "" ? null : emailSchema.safeParse(supportRaw);
+  if (support && !support.success) {
+    throw new Error(`SUPPORT_EMAIL must be an email address, got ${JSON.stringify(process.env["SUPPORT_EMAIL"])}.`);
+  }
 
   const origins = (process.env["ORIGIN"] ?? "http://localhost:5173,http://localhost:8080")
     .split(",")
@@ -166,6 +197,21 @@ export function loadConfig(repoRoot: string): Config {
     iceServers.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
   }
 
+  // Refused rather than defaulted when it is set to something unknown, like SIGNUP_MODE. Either
+  // wrong guess is a confusing deploy: a typo read as "on" serves a stale bundle from the API
+  // host, and one read as "off" takes the one image deploy's whole site down to 404s.
+  const serveRaw = (process.env["SERVE_CLIENT"] ?? "").trim().toLowerCase();
+  let serveClient: boolean;
+  if (serveRaw === "" || serveRaw === "1" || serveRaw === "true" || serveRaw === "on") serveClient = true;
+  else if (serveRaw === "0" || serveRaw === "false" || serveRaw === "off") serveClient = false;
+  else {
+    throw new Error(
+      `SERVE_CLIENT must be on (1, true, on) or off (0, false, off), got ${JSON.stringify(process.env["SERVE_CLIENT"])}.`,
+    );
+  }
+
+  const isProduction = process.env["NODE_ENV"] === "production";
+
   // Relative paths resolve against the repo root, not the working directory, so `npm start` from
   // the root and `npm start --workspace=server` agree on which database they open.
   const dataDirRaw = (process.env["DATA_DIR"] ?? "").trim();
@@ -179,13 +225,16 @@ export function loadConfig(repoRoot: string): Config {
     authSecret: authSecret.length > 0 ? authSecret : null,
     signupMode: signup.data,
     ownerEmail: ownerEmail.length > 0 ? ownerEmail : null,
+    supportEmail: support && support.success ? support.data : null,
     dailyCapUsd: num("ANTHROPIC_DAILY_CAP_USD", 10),
     roomCapUsd: num("ROOM_CAP_USD", 1.5),
     iceServers,
-    isProduction: process.env["NODE_ENV"] === "production",
+    isProduction,
     trustProxy: (process.env["TRUST_PROXY"] ?? "").trim() === "1",
     dataDir,
     databasePath: join(dataDir, DATABASE_FILE),
+    serveClient,
+    spendEnv: resolveSpendEnv(process.env["SPEND_ENV"], isProduction),
   };
 }
 
@@ -194,6 +243,10 @@ export function describeConfig(config: Config): string[] {
   const lines = [
     `listening on port ${config.port}`,
     `allowed origins: ${config.allowedOrigins.join(", ")}`,
+    config.serveClient
+      ? "serving the web client from this server (SERVE_CLIENT on)"
+      : "API only (SERVE_CLIENT off): the web client is served elsewhere, and its origin must be in ORIGIN",
+    `spend is labeled "${config.spendEnv}" on the ledger (SPEND_ENV)`,
     `ICE servers: ${config.iceServers.length} (${config.iceServers.length > 1 ? "STUN and TURN" : "STUN only"})`,
   ];
 
@@ -214,6 +267,11 @@ export function describeConfig(config: Config): string[] {
     config.ownerEmail === null
       ? "OWNER_EMAIL is not set: no account is the owner, so only the invite CLI can mint invites"
       : "an owner account is configured (OWNER_EMAIL)",
+  );
+  lines.push(
+    config.supportEmail === null
+      ? "SUPPORT_EMAIL is not set: the support page shows no contact address"
+      : "a support contact is configured (SUPPORT_EMAIL)",
   );
 
   if (config.anthropicApiKey === null) {

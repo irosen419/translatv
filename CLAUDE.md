@@ -18,9 +18,15 @@ plan of record for the multi-user server and the iOS app.
   audiences and the length rule only applies to one.
 - NO em dashes or en dashes anywhere, including comments, strings, prompts, and docs. Use commas,
   periods, colons, or parentheses only. Enforced by `npm run check:dashes`, which must report zero.
-- Never spend against the Anthropic API without the spend going through the ledger first. Every call
-  that costs money appends to `out/translatv/spend_log.jsonl` before the next one is issued.
-  Untracked spend is the specific failure this repo was set up to avoid.
+- Never spend against the Anthropic API without the spend going through the ledger. Every call
+  that costs money appends to `out/translatv/spend_log.jsonl`, and a call that returned is
+  recorded before its result is used. Untracked spend is the specific failure this repo was set up
+  to avoid. Calls MAY run concurrently, in one room or across rooms (owner decision, 2026-10-22),
+  bounded by `MAX_CONCURRENT` in `TranslationService.ts`. The spend gate is checked before each
+  call, so calls in flight together can each pass a cap check before any is recorded, and the cap
+  can be overshot by up to `MAX_CONCURRENT` calls. That bounded overshoot is accepted. Unbounded or
+  unrecorded spend is not: any new path that spends must have a bound like `MAX_CONCURRENT` and
+  must record every call that returns.
 - There is no autopilot in this repo yet. If one is added, arming a step that spends is owner only,
   always, and no automation ever flips an `"armed"` flag.
 - Never log transcript text, chat text, usernames, or glossary content, and never emails,
@@ -74,6 +80,18 @@ plan of record for the multi-user server and the iOS app.
   downloads a transcript. `DELETE /api/account` re authenticates, deletes the user row and lets
   ON DELETE do the rest (CASCADE for what the user owns, SET NULL for what only mentions them, such as a
   peer's call history), then closes that user's live sockets. It never touches the spend ledger.
+- Safety (blocks and reports) lives beside it, in `server/src/account/service.ts`, schemas in
+  `shared/src/account.ts`. A person is named by their per viewer `contactId`, resolved only in the
+  caller's OWN call history, so nobody can block or report someone they have not been on a call
+  with, and no account id leaves the server (except to the owner's report list). A block, in
+  either direction, keeps two accounts out of one room (`handleJoin` refuses with
+  `HOST_NOT_PRESENT`, the answer a dead code gets, so it does not leak), ends a call they share as
+  End chat would, and hides the blocked person from the blocker's contacts (history rows stay).
+  Deleting EITHER account deletes the block (CASCADE). A report (fixed reason, optional details up
+  to 500 characters, optional block in the same transaction) is user content: never logged, never
+  shown to the person reported, and nothing from the call is attached. Reports SET NULL on both
+  accounts, so a report survives the reporter and the reported person deleting their accounts,
+  naming nobody once they are gone. Only the `OWNER_EMAIL` account lists and reviews them.
 
 ## Spend tracking
 
@@ -93,6 +111,12 @@ plan of record for the multi-user server and the iOS app.
     not stored. The harmful direction is under-logging.
   - Only prices documented in this repo appear in `pricing.ts`, each with a source comment. An
     unpriced model yields null, which renders as "cost unknown". Never interpolate a price.
+- Every runtime row says WHERE and WHOSE (owner decision, 2026-11-11): `env` (SPEND_ENV, "local"
+  by default outside production), `owner_call` (whether the `OWNER_EMAIL` account was on the call)
+  and `user_tag` (the speaker, as an HMAC under a key derived from AUTH_SECRET, in
+  `server/src/spend/attribution.ts`). The ledger is in a PUBLIC repo, so a raw account id, an email
+  or a name never goes on a row, and `entry()` refuses a user_tag that is not a tag. A row without
+  a label is "unrecorded" in every total, never guessed into a bucket.
 - Money is rounded to 6 decimals everywhere, matching the dashboard's Ruby reader and awws's
   `spend_log.py`, so a figure on the cockpit and one from the CLI cannot differ in the tail.
 

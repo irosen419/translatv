@@ -38,6 +38,9 @@ const FORBIDDEN_KEYS = new Set([
   "invite",
   "displayName",
   "authorization",
+  // A report's free text is the reporter's own words about another person: for the owner to read
+  // in the report, never for a log.
+  "details",
 ]);
 
 export type LogFields = Record<string, unknown>;

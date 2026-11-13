@@ -120,7 +120,7 @@ async function signUpViaScreen(page, name) {
   await page.getByRole("button", { name: en("auth.switch.toSignUp") }).click();
   await page.getByLabel(en("auth.displayName"), { exact: true }).fill(name);
   await page.getByLabel(en("auth.email")).fill(emailFor(name));
-  await page.getByLabel(en("auth.password")).fill(PASSWORD);
+  await page.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await page.getByRole("button", { name: en("auth.submit.signUp") }).click();
   await page.getByRole("button", { name: "Start a new chat" }).waitFor();
 }
@@ -135,7 +135,7 @@ async function openSignUp(page, base) {
 async function submitSignUp(page, name, invite) {
   await page.getByLabel(en("auth.displayName"), { exact: true }).fill(name);
   await page.getByLabel(en("auth.email")).fill(emailFor(name));
-  await page.getByLabel(en("auth.password")).fill(PASSWORD);
+  await page.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await page.getByLabel(en("auth.invite")).fill(invite);
   await page.getByRole("button", { name: en("auth.submit.signUp") }).click();
 }
@@ -335,6 +335,11 @@ const server = startServer({
     ANTHROPIC_API_KEY: "",
     // Open signup and a throwaway database: see script/accounts.mjs.
     ...accountsEnv(root),
+    // An owner for the report review section. Gia's own sections never look for the owner's
+    // controls, and a new account for it would cross the per address signup limit this run is
+    // already at (ten an hour).
+    OWNER_EMAIL: emailFor("Gia"),
+    SUPPORT_EMAIL: "help@harness.test",
 });
 const serverLog = [];
 server.stdout.on("data", (d) => serverLog.push(String(d)));
@@ -445,7 +450,7 @@ try {
     (await ben.evaluate(() => localStorage.getItem("translatv.refresh"))) === null,
   );
   await ben.getByLabel(en("auth.email")).fill(emailFor("Ben"));
-  await ben.getByLabel(en("auth.password")).fill("not the password");
+  await ben.getByLabel(en("auth.password"), { exact: true }).fill("not the password");
   expectRefusal = "ben";
   await ben.getByRole("button", { name: en("auth.submit.signIn") }).click();
   check(
@@ -456,7 +461,7 @@ try {
       .then(() => true)
       .catch(() => false),
   );
-  await ben.getByLabel(en("auth.password")).fill(PASSWORD);
+  await ben.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await ben.getByRole("button", { name: en("auth.submit.signIn") }).click();
   await ben.getByRole("button", { name: "Start a new chat" }).waitFor();
   expectRefusal = null;
@@ -1213,6 +1218,180 @@ try {
   await smallContext.close();
 
   // ---------------------------------------------------------------------
+  // The theme, measured in a browser rather than reasoned about in a unit suite.
+  //
+  // This section exists because the unit suite cannot see any of what it checks. The client
+  // tests run headless by deliberate design, so every fact about the theme REACHING the screen
+  // is a wiring fact they are structurally blind to. Review demonstrated that six separate
+  // mutations leave all 499 of them green with typecheck clean, and two of the six leave the
+  // whole feature inert: dropping useApplyTheme paints nothing at all, and handing the picker a
+  // no-op onChoose renders a control that changes nothing. Both shipped a working test suite
+  // over a dead feature.
+  //
+  // The rule is asserted rather than the values. A list of expected hexes would restate the
+  // palette table, would need editing whenever a colour is nudged, and would not have caught
+  // the bug this all comes from, which was the well taking the wrong palette rather than a
+  // wrong value in the right one. What is checked is what a reader would notice: the page
+  // follows the stored theme, the well stays dark whatever the page does, and the words on the
+  // well remain legible against it.
+  section("The theme reaches the screen");
+  {
+    const storedTheme = { paletteId: "jade", mode: "light" };
+    // A LIGHT theme on purpose. The well bug only shows up when the page and the well disagree,
+    // and with a dark page they agree by accident and every one of these assertions passes on
+    // broken code.
+    await ana.evaluate((choice) => {
+      window.localStorage.setItem("translatv.theme", JSON.stringify(choice));
+    }, storedTheme);
+    await ana.reload();
+    if (!(await ana.locator(".room").isVisible())) {
+      await ana.getByLabel("Room code").fill(code);
+      await ana.getByRole("button", { name: "Join chat" }).click();
+      await ana.getByLabel("Your name, just for this chat").fill("Ana");
+      await ana.getByRole("button", { name: /Join and allow microphone/ }).click();
+      await waitFor(async () => ana.locator(".room").isVisible(), "Ana to rejoin under a stored theme");
+    }
+
+    /** What the browser actually resolved, page and well, plus the well's own contrast. */
+    const painted = await ana.evaluate(() => {
+      const value = (style, name) => style.getPropertyValue(name).trim();
+      const luminance = (hex) => {
+        const channel = (pair) => {
+          const v = parseInt(pair, 16) / 255;
+          return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+        };
+        return (
+          0.2126 * channel(hex.slice(1, 3)) +
+          0.7152 * channel(hex.slice(3, 5)) +
+          0.0722 * channel(hex.slice(5, 7))
+        );
+      };
+      const root = getComputedStyle(document.documentElement);
+      const wellNode = document.querySelector(".video-area");
+      const well = wellNode ? getComputedStyle(wellNode) : null;
+      // A real text node on the well, not the well's own tokens. --text being the dark half's
+      // and the text actually BEING that colour are two different facts, and the gap between
+      // them is the original bug: `color` inherits as a computed value, so dropping the one
+      // declaration that re-establishes it on .video-area leaves every token correct and puts
+      // page ink back on the dark well. Reading the resolved `color` measures the glass.
+      const inkNode = document.querySelector(".video-area .invite-code") ?? wellNode;
+      const out = {
+        pageBg: value(root, "--bg"),
+        pageText: value(root, "--text"),
+        wellText: well ? value(well, "--text") : "",
+        wellStage: well ? value(well, "--stage") : "",
+        wellScheme: well ? well.colorScheme : "",
+        paintedInk: inkNode ? getComputedStyle(inkNode).color : "",
+        paintedGround: well ? well.backgroundColor : "",
+      };
+      // rgb(r, g, b) as the browser reports a resolved colour, back to the hex the ratio wants.
+      const fromRgb = (text) => {
+        const parts = /rgba?\(([^)]+)\)/.exec(text);
+        if (!parts) return "";
+        const [r, g, b] = parts[1].split(",").map((piece) => Number(piece.trim()));
+        return `#${[r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+      };
+      const ratio = (one, other) => {
+        const a = luminance(one);
+        const b = luminance(other);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      };
+      const ink = fromRgb(out.paintedInk);
+      // The well paints --stage through a background, so an unresolvable backgroundColor (a
+      // gradient, or transparent) falls back to the token rather than scoring 0 and failing
+      // for the wrong reason.
+      const ground = fromRgb(out.paintedGround) || out.wellStage;
+      out.paintedHex = ink;
+      out.groundHex = ground;
+      out.wellContrast = ink && ground ? ratio(ink, ground) : 0;
+      out.pageLuminance = out.pageBg ? luminance(out.pageBg) : -1;
+      out.wellLuminance = out.wellStage ? luminance(out.wellStage) : -1;
+      return out;
+    });
+
+    // Bone is the :root fallback, so a page still wearing it after a stored Jade means either
+    // nothing painted or nothing was read back out of storage. Both of those are green upstairs.
+    check(
+      "a stored theme is painted, not just remembered",
+      painted.pageBg !== "" && painted.pageBg !== "#f7f3ea",
+      `--bg is ${painted.pageBg || "unset"}`,
+    );
+    check(
+      "and the stored appearance wins, so a light theme gives a light page",
+      painted.pageLuminance > 0.5,
+      `--bg luminance ${painted.pageLuminance.toFixed(3)}`,
+    );
+    check(
+      "the video well stays dark while the page around it is light",
+      painted.wellLuminance >= 0 && painted.wellLuminance < 0.05,
+      `well --stage ${painted.wellStage} at luminance ${painted.wellLuminance.toFixed(4)}`,
+    );
+    // The one that matters. This is the 1.04 to 1 bug stated as an assertion: page ink over the
+    // dark well is what it produced, and no arrangement of the tokens survives it.
+    check(
+      "and the words on the well are legible against it",
+      painted.wellContrast >= 4.5,
+      `${painted.paintedHex} on ${painted.groundHex} is ${painted.wellContrast.toFixed(2)} to 1`,
+    );
+    check(
+      "the well asks for a dark colour scheme, which the scrollbar and caret read",
+      painted.wellScheme === "dark",
+      `color-scheme is ${painted.wellScheme || "unset"}`,
+    );
+
+    // The picker is wired, not decorative. A no-op onChoose renders a control that reports the
+    // right thing and changes nothing, and the unit suite cannot tell the difference.
+    await openSettings(ana);
+    // By ROLE, not by label alone: the picker's <section> carries the same accessible name via
+    // aria-labelledby, so getByLabel matches the region and the select both and goes strict.
+    const themeSelect = ana.getByRole("combobox", { name: en("room.theme.label") });
+    await themeSelect.selectOption("rosewood");
+    const repainted = await waitFor(
+      async () => {
+        const next = await ana.evaluate(() =>
+          getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(),
+        );
+        return next !== painted.pageBg ? next : null;
+      },
+      "the page to repaint after choosing another theme",
+      5_000,
+    ).catch(() => null);
+    check("choosing another theme repaints the page", repainted !== null, `--bg went to ${repainted}`);
+
+    // The WELL, separately, and not as a duplicate of the line above. The page is painted by
+    // installTheme and the well by its own memo, so they are two mechanisms that can disagree:
+    // memoizing the well on nothing at all freezes it on whichever palette was mounted while
+    // the page keeps following the picker perfectly, and every other check here still passes.
+    const wellFollowed = await waitFor(
+      async () => {
+        const next = await ana.evaluate(() => {
+          const node = document.querySelector(".video-area");
+          return node ? getComputedStyle(node).getPropertyValue("--stage").trim() : "";
+        });
+        return next !== "" && next !== painted.wellStage ? next : null;
+      },
+      "the well to follow the newly chosen theme",
+      5_000,
+    ).catch(() => null);
+    check(
+      "and the well follows it rather than staying on the palette it mounted with",
+      wellFollowed !== null,
+      `well --stage was ${painted.wellStage}, now ${wellFollowed ?? "unchanged"}`,
+    );
+
+    // Back to where the rest of the run expects to find things.
+    await ana.evaluate(() => window.localStorage.removeItem("translatv.theme"));
+    await ana.reload();
+    if (!(await ana.locator(".room").isVisible())) {
+      await ana.getByLabel("Room code").fill(code);
+      await ana.getByRole("button", { name: "Join chat" }).click();
+      await ana.getByLabel("Your name, just for this chat").fill("Ana");
+      await ana.getByRole("button", { name: /Join and allow microphone/ }).click();
+      await waitFor(async () => ana.locator(".room").isVisible(), "Ana to rejoin after clearing the theme");
+    }
+  }
+
+  // ---------------------------------------------------------------------
   section("Ending kills the room permanently");
   await openSettings(ana);
   await ana.getByRole("button", { name: "End chat" }).click();
@@ -1256,6 +1435,193 @@ try {
   );
 
   // ---------------------------------------------------------------------
+  section("Report and block, from inside a call");
+  // Accounts made earlier in the run whose calls are all over, signed in afresh through the API:
+  // the server allows ten signups an hour from one address, and the run already makes ten.
+  /** Start a call on the account page and hand back its code. */
+  const hostCall = async (page, name) => {
+    await page.goto(BASE);
+    await page.getByRole("button", { name: en("landing.create") }).click();
+    await page.getByLabel(en("prejoin.name.label")).fill(name);
+    await page.getByLabel(en("prejoin.dialect.label")).selectOption("en-US");
+    await page.getByRole("button", { name: en("prejoin.submit.create") }).click();
+    return waitFor(async () => {
+      const text = await page.locator(".code-badge").textContent().catch(() => null);
+      return text && text.trim().length === 8 ? text.trim() : null;
+    }, `${name}'s room code`);
+  };
+  /** Join a call by its code, as far as the server lets them. */
+  const joinCall = async (page, code, name) => {
+    await page.goto(BASE);
+    await page.getByLabel(en("landing.codeLabel")).fill(code);
+    await page.getByRole("button", { name: en("landing.join") }).click();
+    await page.getByLabel(en("prejoin.name.label")).fill(name);
+    await page.getByLabel(en("prejoin.dialect.label")).selectOption("en-US");
+    await page.getByRole("button", { name: en("prejoin.submit.join") }).click();
+  };
+  const signedInAs = async (name, options = {}) =>
+    (await contextSignedInWith(BASE, (await apiSignIn(BASE, name)).refreshToken, options)).newPage();
+  const kit = await signedInAs("Cam", { permissions: ["microphone"] });
+  const lou = await signedInAs("Dee", { permissions: ["microphone"] });
+  for (const [name, page] of [["kit", kit], ["lou", lou]]) {
+    pages[name] = page;
+    page.on("pageerror", (e) => errors.push(`${name}: ${e.message}`));
+  }
+  const kitCode = await hostCall(kit, "Cam");
+  await joinCall(lou, kitCode, "Dee");
+  await waitFor(async () => (await kit.locator(".names").textContent()).includes("Dee"), "Cam to see Dee arrive");
+  await openSettings(lou);
+  await lou.getByRole("button", { name: en("safety.open") }).click();
+  const louDialog = lou.locator("dialog.safety-dialog");
+  check(
+    "the drawer offers to report or block the other person, by the name on screen",
+    await reached(louDialog.getByRole("heading", { name: en("safety.title", { name: "Cam" }) })),
+  );
+  check(
+    "the dialog opens with focus inside it",
+    await lou.evaluate(() => Boolean(document.activeElement?.closest("dialog"))),
+  );
+  await louDialog.getByRole("button", { name: en("safety.report.send") }).click();
+  check(
+    "a report with no reason is held back, with a sentence saying why",
+    await reached(louDialog.getByText(en("safety.report.pickReason"))),
+  );
+  await louDialog.getByLabel(en("safety.reason.harassment")).check();
+  await louDialog.getByLabel(en("safety.report.details")).fill("Kept insulting me after I asked them to stop.");
+  await louDialog.getByRole("button", { name: en("safety.report.send") }).click();
+  check("a report is sent from the call", await reached(louDialog.getByText(en("safety.done.reported"))));
+  await louDialog.getByRole("button", { name: en("safety.close") }).click();
+  check(
+    "a report on its own leaves the call going for both",
+    (await kit.locator(".room").isVisible()) && (await lou.locator(".room").isVisible()),
+  );
+  check("closing the dialog hands focus back out of it", await lou.evaluate(() => !document.activeElement?.closest("dialog")));
+
+  await openSettings(lou);
+  await lou.getByRole("button", { name: en("safety.open") }).click();
+  await louDialog.getByRole("button", { name: en("safety.block.button", { name: "Cam" }) }).click();
+  check(
+    "blocking asks first",
+    await reached(louDialog.getByRole("heading", { name: en("safety.confirm.title", { name: "Cam" }) })),
+  );
+  await louDialog.getByRole("button", { name: en("safety.confirm.block"), exact: true }).click();
+  check(
+    "blocking in a call ends it, and the blocker is told why",
+    await reached(lou.getByText(en("safety.ended.blocked", { name: "Cam" }))),
+  );
+  check(
+    "the other person sees an ordinary end of the call, and nothing about a block",
+    await reached(kit.getByText(en("app.ended.byPeer", { name: "Dee" }))) &&
+      !/blocked/i.test(await kit.locator("body").innerText()),
+  );
+  await kit.getByRole("button", { name: en("app.ended.back") }).click();
+  const kitSecond = await hostCall(kit, "Cam");
+  await joinCall(lou, kitSecond, "Dee");
+  check(
+    "the blocker cannot join the blocked person's next call, and is told only that it is not available",
+    await reached(lou.getByText(en("error.HOST_NOT_PRESENT"))),
+  );
+  const outsider = await signedInAs("Hal", { permissions: ["microphone"] });
+  await joinCall(outsider, kitSecond, "Hal");
+  check(
+    "while anyone else still joins that call",
+    await waitFor(async () => outsider.locator(".room").isVisible(), "Hal to join").then(() => true).catch(() => false),
+  );
+  check(
+    "and the host was told nothing about the refused join",
+    // "Report or block" is the drawer's own entry, there for the person who did join; what must
+    // not be anywhere is word of a block or of anyone turned away.
+    !/blocked|refused|not available/i.test(await kit.locator("body").innerText()) &&
+      (await kit.locator(".names").textContent()).includes("Hal"),
+  );
+  await openSettings(kit);
+  await kit.getByRole("button", { name: en("room.end") }).click();
+  await kit.getByRole("button", { name: en("room.end.confirm") }).click();
+  await kit.getByRole("button", { name: en("app.ended.back") }).click();
+
+  // ---------------------------------------------------------------------
+  section("Report and block, from call history");
+  await kit.getByRole("button", { name: en("history.open") }).click();
+  check(
+    "recent calls name the people this account was on a call with",
+    await reached(kit.locator(".recent-calls").getByText("Dee").first()),
+  );
+  await kit.getByRole("button", { name: en("safety.openLabel", { name: "Dee" }) }).first().click();
+  const kitDialog = kit.locator("dialog.safety-dialog");
+  await kitDialog.getByLabel(en("safety.reason.spam_or_scam")).check();
+  await kitDialog.getByLabel(en("safety.report.alsoBlock", { name: "Dee" })).check();
+  await kitDialog.getByRole("button", { name: en("safety.report.send") }).click();
+  check(
+    "a report with Also block ticked asks before blocking",
+    await reached(kitDialog.getByRole("heading", { name: en("safety.confirm.title", { name: "Dee" }) })),
+  );
+  await kitDialog.getByRole("button", { name: en("safety.confirm.reportAndBlock") }).click();
+  check(
+    "the report and the block land together",
+    await reached(kitDialog.getByText(en("safety.done.reportedAndBlocked", { name: "Dee" }))),
+  );
+  await kitDialog.getByRole("button", { name: en("safety.close") }).click();
+  check(
+    "the history row says the person is blocked",
+    await reached(kit.locator(".recent-calls").getByText(en("history.blocked")).first()),
+  );
+  await kit.getByRole("button", { name: en("blocked.open") }).click();
+  check("blocked people lists them", await reached(kit.locator(".blocked-people").getByText("Dee")));
+  await kit.getByRole("button", { name: en("blocked.unblockLabel", { name: "Dee" }) }).click();
+  check(
+    "and unblocking says so",
+    await reached(kit.locator(".blocked-people").getByText(en("blocked.unblocked", { name: "Dee" }))),
+  );
+  check(
+    "the account page shows no owner's report list to anyone but the owner",
+    (await kit.getByRole("button", { name: en("reports.open") }).count()) === 0,
+  );
+  const owen = await signedInAs("Gia");
+  pages.owen = owen;
+  await owen.goto(BASE);
+  await owen.getByRole("button", { name: en("reports.open") }).click();
+  const ownerList = owen.locator(".owner-reports");
+  check(
+    "the owner reads both reports, with their reasons and the reporter's words",
+    (await reached(ownerList.getByText(en("safety.reason.harassment"), { exact: false }).first())) &&
+      (await reached(ownerList.getByText("Kept insulting me after I asked them to stop."))) &&
+      (await ownerList.locator(".report-item").count()) === 2,
+  );
+  await ownerList.getByRole("button", { name: en("reports.markReviewed") }).first().click();
+  check(
+    "and marks one reviewed",
+    await reached(ownerList.getByText(en("reports.status.reviewed"), { exact: false }).first()),
+  );
+
+  // ---------------------------------------------------------------------
+  section("The public privacy and support pages");
+  // Reachable signed out, as a FIRST navigation (the server's SPA fallback serves the app at
+  // both paths), on a phone width with nothing to scroll sideways.
+  const reader = await (await browser.newContext({ viewport: { width: 360, height: 740 } })).newPage();
+  reader.on("pageerror", (e) => errors.push(`reader: ${e.message}`));
+  await reader.goto(BASE);
+  await waitFor(async () => (await reader.locator(".site-links a").count()) >= 3, "the sign in card to show its links");
+  check(
+    "the sign in card links to privacy, help, and support by mail",
+    JSON.stringify(await reader.locator(".site-links a").evaluateAll((as) => as.map((a) => a.getAttribute("href")))) ===
+      JSON.stringify(["/privacy", "/support", "mailto:help@harness.test"]),
+  );
+  for (const [path, title] of [["/privacy", en("privacy.title")], ["/support", en("support.title")]]) {
+    const response = await reader.goto(`${BASE}${path}`);
+    check(`${path} is served to someone signed out`, response?.status() === 200);
+    await waitFor(async () => (await reader.locator("h1").textContent()) === title, `${path} to render its title`);
+    check(`${path} shows its page, not the sign in form`, (await reader.getByRole("button", { name: en("auth.submit.signIn") }).count()) === 0);
+    check(
+      `${path} fits a phone with no sideways scroll`,
+      await reader.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth),
+    );
+    check(`${path} names the support address as a mailto link`, (await reader.locator("a[href='mailto:help@harness.test']").count()) === 1);
+  }
+  await reader.goto(`${BASE}/privacy`);
+  await waitFor(async () => (await reader.locator("h1").count()) === 1, "the privacy page");
+  check("the privacy page says it is a draft", (await reader.locator(".doc-draft").textContent()) === en("page.draft"));
+  await reader.close();
+
   section("Deleting an account");
   // A page of its own, outside the console error watch above: the wrong password below answers
   // 401 on purpose, and so does the sign in attempt after the account is gone.
@@ -1353,7 +1719,7 @@ try {
       .catch(() => false),
   );
   await eve.getByLabel(en("auth.email")).fill(emailFor("Eve"));
-  await eve.getByLabel(en("auth.password")).fill(PASSWORD);
+  await eve.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await eve.getByRole("button", { name: en("auth.submit.signIn") }).click();
   check(
     "and the deleted account can no longer sign in",
@@ -1528,7 +1894,7 @@ try {
   await otherTab.locator(".account-state", { hasText: "Ivy" }).waitFor();
   await otherTab.getByRole("button", { name: en("account.signOut") }).click();
   await otherTab.getByLabel(en("auth.email")).fill(emailFor("Jon"));
-  await otherTab.getByLabel(en("auth.password")).fill(PASSWORD);
+  await otherTab.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await otherTab.getByRole("button", { name: en("auth.submit.signIn") }).click();
   await otherTab.locator(".account-state", { hasText: "Jon" }).waitFor();
   check(
@@ -1614,7 +1980,7 @@ try {
   await tabB.locator(".account-state", { hasText: "Olga" }).waitFor();
   await tabB.getByRole("button", { name: en("account.signOut") }).click();
   await tabB.getByLabel(en("auth.email")).fill(emailFor("Gus"));
-  await tabB.getByLabel(en("auth.password")).fill(PASSWORD);
+  await tabB.getByLabel(en("auth.password"), { exact: true }).fill(PASSWORD);
   await tabB.getByRole("button", { name: en("auth.submit.signIn") }).click();
   await tabB.locator(".account-state", { hasText: "Gus" }).waitFor();
   const olgaGone = await apiDeleteAccount(INVITE_BASE, await apiSignIn(INVITE_BASE, "Olga"));

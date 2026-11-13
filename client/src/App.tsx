@@ -5,16 +5,21 @@ import { Landing } from "./components/Landing.jsx";
 import { PreJoin } from "./components/PreJoin.jsx";
 import { Room } from "./components/Room.jsx";
 import { codeFromPath } from "./lib/code.js";
-import { adoptCameraTrack } from "./rtc/cameraHandoff.js";
+import { pageFromPath, PRIVACY_IS_DRAFT } from "./lib/pages.js";
+import { InfoPage } from "./components/InfoPage.jsx";
+import { adoptCameraTrack, dropEndedCamera } from "./rtc/cameraHandoff.js";
 import { acquireCameraTrack, acquireMedia, LevelMeter } from "./rtc/media.js";
 import { PeerConnection } from "./rtc/PeerConnection.js";
+import { apiUrl } from "./net/apiBase.js";
 import { SignalingSocket, socketUrl } from "./net/socket.js";
 import { useStore } from "./state/store.js";
 import { AuthScreen } from "./components/AuthScreen.jsx";
 import { browserLock, browserStore, SessionManager } from "./lib/session.js";
 import { PreferenceSync } from "./lib/preferences.js";
 import { savedCorrectionsRegistry } from "./lib/savedCorrections.js";
+import { safetyRegistry } from "./lib/safety.js";
 import { useCopy } from "./i18n/useCopy.js";
+import { useApplyTheme } from "./theme/useTheme.js";
 import type { CopyRef } from "./i18n/copy.js";
 import { WebSpeechAdapter } from "./stt/WebSpeechAdapter.js";
 
@@ -61,12 +66,15 @@ const preferenceSync = new PreferenceSync((path, init) => session.authorizedFetc
 /** An account's saved corrections, listed on the start page with a delete, each pinned to its account. */
 const savedCorrectionsFor = savedCorrectionsRegistry(session);
 
+/** Blocking, reporting, recent calls and the owner's reports, each pinned to its account. */
+const safetyFor = safetyRegistry(session);
+
 /**
  * Mint an invite as the owner. The server checks ownership; this only asks.
  * Null for any refusal, which the landing page turns into one sentence.
  */
 async function createInvite(): Promise<string | null> {
-  const response = await session.authorizedFetch("/api/invites", { method: "POST" });
+  const response = await session.authorizedFetch(apiUrl("/api/invites"), { method: "POST" });
   if (!response.ok) return null;
   const body: unknown = await response.json();
   const code = typeof body === "object" && body !== null ? (body as { code?: unknown }).code : undefined;
@@ -75,6 +83,10 @@ async function createInvite(): Promise<string | null> {
 
 export function App() {
   const store = useStore();
+  // The one owner of the document element's colours. Here rather than in the picker, which is
+  // mounted only while the settings drawer exists: the landing and prejoin screens need the
+  // chosen theme too, and the theme has to be painted before there is anything to pick it with.
+  useApplyTheme();
   // Mirror the session into the store, restore a stored one, and ask the server whether signing
   // up needs an invite. Once, on mount.
   useEffect(() => {
@@ -83,13 +95,16 @@ export function App() {
     void session.restore();
 
     let cancelled = false;
-    void fetch("/healthz")
+    void fetch(apiUrl("/healthz"))
       .then((r) => (r.ok ? r.json() : null))
       .then((body: unknown) => {
         if (cancelled || typeof body !== "object" || body === null) return;
         const mode = (body as { signup?: unknown }).signup;
         // Only a value it knows moves it. Anything else leaves the cautious default ("invite").
         if (mode === "invite" || mode === "open") useStore.getState().setSignupMode(mode);
+        // A string or nothing: anything else shows no address rather than a broken link.
+        const support = (body as { supportEmail?: unknown }).supportEmail;
+        useStore.getState().setSupportEmail(typeof support === "string" && support.includes("@") ? support : null);
       })
       .catch(() => {
         // Unreachable server. The default already shows the invite field, which is the safe
@@ -154,6 +169,9 @@ export function App() {
   /** Guards against a second camera acquisition starting while the first is still awaiting the
    * permission prompt, which would otherwise add two video tracks for one click. */
   const acquiringCamera = useRef(false);
+
+  /** /privacy or /support, read once from the address the page was opened at. */
+  const [infoPage] = useState(() => pageFromPath(location.pathname));
 
   // A /r/<code> link lands straight on the join form with the code filled in.
   useEffect(() => {
@@ -541,6 +559,24 @@ export function App() {
     [localStream, announce],
   );
 
+  // A camera can end underneath the call (another app takes it, it is unplugged). The track's
+  // "ended" event is the only signal, so listen for it on whatever camera the stream holds, take
+  // the dead track out (rtc/cameraHandoff.ts), and say so: the button goes back to "turn your
+  // camera on", which reacquires one, and the peer is told the camera is off.
+  useEffect(() => {
+    const stream = localStream;
+    const tracks = stream?.getVideoTracks() ?? [];
+    if (!stream || tracks.length === 0) return;
+    const onEnded = () => {
+      if (!dropEndedCamera(stream)) return;
+      useStore.getState().setMedia({ hasVideo: false, cameraEnabled: false });
+      setCameraError({ key: "room.camera.stopped" });
+      announce({ cameraEnabled: false });
+    };
+    tracks.forEach((track) => track.addEventListener("ended", onEnded));
+    return () => tracks.forEach((track) => track.removeEventListener("ended", onEnded));
+  }, [localStream, store.hasVideo, announce]);
+
   const toggleCamera = useCallback(
     (enabled: boolean) => {
       localStream?.getVideoTracks().forEach((track) => {
@@ -618,6 +654,10 @@ export function App() {
 
   const { phase, pendingCode, error, ended } = store;
 
+  // /privacy and /support: public, so they come before the session is looked at. Reached only by
+  // a full navigation (plain links), so the path the page was opened with is the whole answer.
+  if (infoPage) return <InfoPage page={infoPage} draft={PRIVACY_IS_DRAFT} />;
+
   if (phase === "ended" && ended) {
     return (
       <div className="center">
@@ -674,6 +714,15 @@ export function App() {
           }
           void stt.current?.setPreferOnDevice(next);
         }}
+        safety={store.session.user ? safetyFor(store.session.user.id) : null}
+        onBlockedInCall={(name) => {
+          // The server has ended the call for both, as End chat would. Close the socket FIRST, so
+          // its room.ended (which names this person as the one who ended it) cannot land after
+          // this and replace the sentence that says what actually happened.
+          socket.current?.close();
+          teardown();
+          useStore.getState().setEnded({ reason: "ended", notice: { key: "safety.ended.blocked", params: { name } } });
+        }}
       />
     );
   }
@@ -725,6 +774,7 @@ export function App() {
       onCreateInvite={createInvite}
       onDeleteAccount={(password, userId) => session.deleteAccount(password, userId)}
       savedCorrectionsFor={savedCorrectionsFor}
+      safetyFor={safetyFor}
       onCreate={() => {
         setMode("create");
         useStore.getState().setError(null);

@@ -106,3 +106,52 @@ describe("RoomSession saved glossaries", () => {
     expect(session.glossaryFor("ben")).toEqual([]);
   });
 });
+
+// Translations run concurrently, so two calls for ONE line can be out together and land in either
+// order. The ticket says which answer is still the one to show: the newest call still out.
+describe("RoomSession translation tickets", () => {
+  it("shows the answer of the only call out for a line", () => {
+    const session = new RoomSession();
+    const ticket = session.beginTranslation("L1");
+    expect(session.settleTranslation("L1", ticket)).toBe(true);
+  });
+
+  it("drops an older call's answer that lands after a newer one's", () => {
+    const session = new RoomSession();
+    const older = session.beginTranslation("L1");
+    const newer = session.beginTranslation("L1");
+    expect(session.settleTranslation("L1", newer)).toBe(true);
+    expect(session.settleTranslation("L1", older)).toBe(false);
+  });
+
+  it("drops an older call's answer that lands first, and still shows the newer one after it", () => {
+    const session = new RoomSession();
+    const older = session.beginTranslation("L1");
+    const newer = session.beginTranslation("L1");
+    expect(session.settleTranslation("L1", older)).toBe(false);
+    expect(session.settleTranslation("L1", newer)).toBe(true);
+  });
+
+  it("shows an older call's answer again once the newer call is abandoned", () => {
+    const session = new RoomSession();
+    const older = session.beginTranslation("L1");
+    const newer = session.beginTranslation("L1");
+    session.abandonTranslation("L1", newer);
+    expect(session.settleTranslation("L1", older)).toBe(true);
+  });
+
+  it("keeps lines apart: a call for one line never makes another line's answer stale", () => {
+    const session = new RoomSession();
+    const one = session.beginTranslation("L1");
+    const two = session.beginTranslation("L2");
+    expect(session.settleTranslation("L1", one)).toBe(true);
+    expect(session.settleTranslation("L2", two)).toBe(true);
+  });
+
+  it("does not show a ticket twice", () => {
+    const session = new RoomSession();
+    const ticket = session.beginTranslation("L1");
+    expect(session.settleTranslation("L1", ticket)).toBe(true);
+    expect(session.settleTranslation("L1", ticket)).toBe(false);
+  });
+});

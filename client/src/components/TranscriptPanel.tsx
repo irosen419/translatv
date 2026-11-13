@@ -13,6 +13,8 @@ import {
 import { canCorrect, correctionDraft, correctionMessage, correctionProblem, willBeSaved } from "../lib/correction.js";
 import { failureCopyKey } from "../i18n/codes.js";
 import { useCopy } from "../i18n/useCopy.js";
+import { useStickToBottom } from "../lib/useStickToBottom.js";
+import { useStore } from "../state/store.js";
 
 interface Props {
   lines: readonly RenderedLine[];
@@ -33,7 +35,10 @@ interface Props {
 
 export function TranscriptPanel(props: Props) {
   const { lines, selfId, me, peer } = props;
-  const scroller = useRef<HTMLDivElement>(null);
+  // Follows new lines while the reader is at the bottom (lib/useStickToBottom.ts).
+  const follow = useStickToBottom<HTMLDivElement>(lines);
+  // Everyone who has been the peer in this room, so a line keeps its speaker's name after they leave.
+  const peerNames = useStore((state) => state.peerNames);
   const [draft, setDraft] = useState("");
   const [correcting, setCorrecting] = useState<RenderedLine | null>(null);
   const copy = useCopy();
@@ -51,28 +56,9 @@ export function TranscriptPanel(props: Props) {
   // The field's height with nothing in it, measured once. Anything taller means it has wrapped.
   const oneLine = useRef(0);
 
-  // Stick to the bottom, but only when the reader is already there. Yanking someone back down
-  // while they are reading scrollback is worse than a slightly stale view.
-  function pinIfNearBottom(): void {
-    const node = scroller.current;
-    if (!node) return;
-    const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 120;
-    if (nearBottom) node.scrollTop = node.scrollHeight;
-  }
-
-  useEffect(pinIfNearBottom, [lines]);
-
-  // The composer grows UPWARD, taking its height out of the transcript above it. That means the
-  // scroller gets shorter without its content or its scrollTop changing, so a reader who was
-  // pinned to the bottom silently stops being pinned. Re-pin on every resize of the field, under
-  // the same near the bottom rule the lines effect uses.
-  useEffect(() => {
-    const node = field.current;
-    if (!node || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => pinIfNearBottom());
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
+  // The composer grows UPWARD, taking its height out of the transcript above it, so the scroller
+  // gets shorter without a new line. The hook re-pins when the scroller itself resizes, which
+  // covers this.
 
   // Measure the empty field once.
   useEffect(() => {
@@ -183,6 +169,8 @@ export function TranscriptPanel(props: Props) {
     const text = submittableText(draft);
     if (!text) return;
     props.onSendChat(text);
+    // Someone who sends a message wants to see it land, even if they had scrolled up.
+    follow.pin(true);
     setDraft("");
     setExpanded(false);
     const node = field.current;
@@ -192,7 +180,7 @@ export function TranscriptPanel(props: Props) {
   function nameFor(memberId: string): string {
     if (memberId === selfId) return me?.username ?? copy.t("room.you");
     if (memberId === peer?.id) return peer.username;
-    return copy.t("panel.someone");
+    return peerNames[memberId] ?? copy.t("panel.someone");
   }
 
   return (
@@ -201,7 +189,7 @@ export function TranscriptPanel(props: Props) {
         <span>{copy.t("panel.title")}</span>
       </div>
 
-      <div className="transcript" ref={scroller}>
+      <div className="transcript" ref={follow.ref} onScroll={follow.onScroll}>
         {lines.length === 0 && (
           <p style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.5 }}>
             {copy.t("panel.empty")}
@@ -237,7 +225,9 @@ export function TranscriptPanel(props: Props) {
                 {/* Same quiet aside the overlays show. The panel is where someone scrolls back
                     to work out why a line reads the way it does, so leaving it out here would
                     hide the explanation in the one place it is most likely to be looked for. */}
-                {caption.noteKey && <span className="note">{copy.t(caption.noteKey)}</span>}
+                {/* The space is real text, not margin: copied out of the page, the note would
+                    otherwise run straight into the sentence ("racingnobody else is here"). */}
+                {caption.noteKey && <> <span className="note">{copy.t(caption.noteKey)}</span></>}
               </div>
 
               {/* The small italic row exists to keep the OTHER language visible beside the one

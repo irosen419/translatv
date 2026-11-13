@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Member, RenderedLine } from "@translatv/shared";
 import { FALLBACK_DIALECT } from "@translatv/shared";
 
+import { peerLinesFor } from "../lib/caption.js";
 import { initialUiDialect, useStore } from "./store.js";
 
 const PEER: Member = {
@@ -367,5 +368,112 @@ describe("initialUiDialect", () => {
   it("takes a dialect of the right language when only the base matches", () => {
     vi.stubGlobal("navigator", { language: "es" });
     expect(initialUiDialect()).toBe("es-AR");
+  });
+});
+
+// The join between this reducer and the subtitle's choice of line. peerLinesFor recognizes a
+// retried line by the text a failure leaves in `translated`, and that text is put there HERE. If
+// this handler stopped leaving it, a retry would hand the subtitle the line BEFORE the one being
+// retried, and bring a sentence the reader had finished back on screen for a full hold.
+describe("a retried line, as the subtitle sees it", () => {
+  it("stops the subtitle walking back past the line being retried", () => {
+    const earlier = line({ lineId: "A", from: "M2", translated: "hola", translationStatus: "ok" });
+    useStore.setState({ lines: [earlier, line({ lineId: "B", from: "M2" })] });
+    const { apply } = useStore.getState();
+    apply({ t: "translation.failed", lineId: "B", status: "unavailable", retriable: true, reason: "PROVIDER_ERROR" });
+    apply({ t: "translation.pending", lineId: "B" });
+
+    const { newest, settled } = peerLinesFor(useStore.getState().lines, "M1");
+    expect(newest?.lineId).toBe("B");
+    expect(settled).toBeNull();
+  });
+});
+
+// Who the other person is, as this reader's contactId, so the drawer can offer to report or block
+// them. It travels beside the member rather than inside it, and goes with them.
+describe("the peer's contactId", () => {
+  const joined = {
+    t: "room.joined" as const,
+    code: "ABCD1234",
+    selfId: "M1",
+    resumeToken: "t",
+    you: { ...PEER, id: "M1", username: "Ana", isHost: true },
+    peer: PEER,
+    polite: true,
+    config: { graceMs: 1, maxMembers: 2 },
+    iceServers: [],
+    snapshot: { lines: [], glossary: [] },
+  };
+
+  beforeEach(() => useStore.getState().reset());
+
+  it("comes with room.joined, and is null when the frame has none", () => {
+    useStore.getState().apply({ ...joined, peerContactId: "c1" });
+    expect(useStore.getState().peerContactId).toBe("c1");
+    useStore.getState().apply(joined);
+    expect(useStore.getState().peerContactId).toBeNull();
+  });
+
+  it("comes with peer.joined, and leaves with peer.left", () => {
+    useStore.getState().apply({ t: "peer.joined", peer: PEER, contactId: "c2" });
+    expect(useStore.getState().peerContactId).toBe("c2");
+    useStore.getState().apply({ t: "peer.left", peerId: PEER.id, reason: "left" });
+    expect(useStore.getState().peerContactId).toBeNull();
+  });
+
+  it("is cleared by reset", () => {
+    useStore.getState().apply({ t: "peer.joined", peer: PEER, contactId: "c2" });
+    useStore.getState().reset();
+    expect(useStore.getState().peerContactId).toBeNull();
+  });
+});
+
+describe("the support contact", () => {
+  it("starts unknown, and survives reset, since it is about the server rather than a call", () => {
+    expect(useStore.getState().supportEmail).toBeNull();
+    useStore.getState().setSupportEmail("help@example.test");
+    useStore.getState().reset();
+    expect(useStore.getState().supportEmail).toBe("help@example.test");
+    useStore.getState().setSupportEmail(null);
+  });
+});
+
+describe("the names of people who were in the room", () => {
+  const joined = {
+    t: "room.joined" as const,
+    code: "ABCD1234",
+    selfId: "M1",
+    resumeToken: "t",
+    you: { ...PEER, id: "M1", username: "Ana", isHost: true },
+    peer: PEER,
+    polite: true,
+    config: { graceMs: 1, maxMembers: 2 },
+    iceServers: [],
+    snapshot: { lines: [], glossary: [] },
+  };
+
+  beforeEach(() => useStore.getState().reset());
+
+  it("keeps the peer's name after they leave, so their lines still say who said them", () => {
+    useStore.getState().apply({ t: "peer.joined", peer: PEER });
+    useStore.getState().apply({ t: "peer.left", peerId: PEER.id, reason: "left" });
+    expect(useStore.getState().peer).toBeNull();
+    expect(useStore.getState().peerNames).toEqual({ M2: "Ben" });
+  });
+
+  it("follows a rename, and learns the peer a room.joined arrives with", () => {
+    useStore.getState().apply(joined);
+    expect(useStore.getState().peerNames).toEqual({ M2: "Ben" });
+    useStore.getState().apply({ t: "peer.updated", peerId: "M2", username: "Benja" });
+    expect(useStore.getState().peerNames).toEqual({ M2: "Benja" });
+  });
+
+  it("starts empty in each new room, and is cleared by reset", () => {
+    useStore.getState().apply({ t: "peer.joined", peer: PEER });
+    useStore.getState().apply({ ...joined, peer: null });
+    expect(useStore.getState().peerNames).toEqual({});
+    useStore.getState().apply({ t: "peer.joined", peer: PEER });
+    useStore.getState().reset();
+    expect(useStore.getState().peerNames).toEqual({});
   });
 });

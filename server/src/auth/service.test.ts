@@ -30,7 +30,8 @@ import {
 
 const NOW = 1_800_000_000_000;
 // Generated, never literal. See passwords.test.ts.
-const PASSWORD = randomBytes(12).toString("hex");
+// Random, then given each kind of character the policy asks for (shared/src/auth.ts).
+const PASSWORD = `Aa1!${randomBytes(12).toString("hex")}`;
 const SECRET = randomBytes(32).toString("hex");
 
 let store: Store;
@@ -126,6 +127,17 @@ describe("signup in invite mode", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("sanitizes the invite: anything that is not a complete code is refused before the store", async () => {
+    const auth = service();
+    const invite = auth.createInvite(null, NOW);
+    for (const junk of [`${invite.code}<script>`, `${invite.code}X`, invite.code.slice(0, -1), "' OR 1=1 --", "x".repeat(64)]) {
+      const result = await auth.signup({ invite: junk, email: "a@example.test", password: PASSWORD, displayName: "A" }, NOW);
+      expect(result).toMatchObject({ ok: false, error: "INVITE_INVALID" });
+    }
+    const good = await auth.signup({ invite: invite.code, email: "a@example.test", password: PASSWORD, displayName: "A" }, NOW);
+    expect(good.ok).toBe(true);
+  });
+
   it("does not spend the invite when the email is already taken", async () => {
     const auth = service();
     await signedUp(auth, "ana@example.test");
@@ -142,11 +154,13 @@ describe("signup in invite mode", () => {
     expect(retry.ok).toBe(true);
   });
 
-  it("refuses a password under ten characters, before spending the invite", async () => {
+  it("refuses a password that misses a rule, before spending the invite", async () => {
     const auth = service();
     const invite = auth.createInvite(null, NOW);
-    const weak = await auth.signup({ invite: invite.code, email: "a@example.test", password: "123456789", displayName: "A" }, NOW);
-    expect(weak).toMatchObject({ ok: false, error: "WEAK_PASSWORD" });
+    for (const password of ["Abc1!", "abcdefg1!", "Abcdefgh!"]) {
+      const weak = await auth.signup({ invite: invite.code, email: "a@example.test", password, displayName: "A" }, NOW);
+      expect(weak).toMatchObject({ ok: false, error: "WEAK_PASSWORD" });
+    }
     const retry = await auth.signup({ invite: invite.code, email: "a@example.test", password: PASSWORD, displayName: "A" }, NOW);
     expect(retry.ok).toBe(true);
   });
@@ -194,6 +208,15 @@ describe("the owner", () => {
     // And away again: the role moves, it is not kept by whoever held it first.
     const moved = service({ ownerEmail: "someone.else@example.test" });
     expect(moved.userFor(before.user.id)?.isOwner).toBe(false);
+  });
+
+  it("answers isOwner by account id, for the spend ledger's owner_call", async () => {
+    const auth = service({ ownerEmail: "owner@example.test" });
+    const owner = await signedUp(auth, "owner@example.test");
+    const other = await signedUp(auth, "ben@example.test");
+    expect(auth.isOwner(owner.user.id)).toBe(true);
+    expect(auth.isOwner(other.user.id)).toBe(false);
+    expect(auth.isOwner("no-such-account")).toBe(false);
   });
 });
 

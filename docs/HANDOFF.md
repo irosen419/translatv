@@ -237,10 +237,13 @@ What this means for $4.99, plus ads, plus a premium tier:
   - Keep the free on-device recognizers unless testing shows their accuracy fails.
   - All in one speech translation, at $4 to $5 per call-hour, is out of reach at these prices.
 - **Haiku 4.5 may retire soon.**
-  - Anthropic lists its retirement as "not sooner than October 15, 2026", with 60 days' notice,
-    and there is no newer Haiku.
-  - Anthropic's next option, Sonnet 5, costs 2.6x as much, so a model decision is coming either
-    way.
+  - Anthropic lists its retirement as "not sooner than October 15, 2026", with 60 days' notice.
+  - There is now a newer Haiku: Claude Haiku 5.5 (`claude-haiku-5-5`), at $0.10 in and $0.50 out
+    per million tokens for prompts up to 100,000 tokens (a tenth of Haiku 4.5's price), and $0.50
+    and $2.50 above that. Its tokenizer counts about 30 percent more tokens for the same text. It
+    refuses `temperature`, so the request had to become a function of the model first (done:
+    `server/src/translate/anthropic.ts`). Whether it translates as well is what `npm run blind`
+    measures (section 6). The default stays Haiku 4.5 until the owner decides.
 - **Free competition exists.** FaceTime's Live Translation on iOS 26 translates calls at no
   charge. It covers Spanish from Spain but not Mexico, and needs an iPhone 15 Pro or later.
   Pixel 10 and Samsung phones translate calls free too.
@@ -319,6 +322,14 @@ What the evidence suggests:
   notice before retiring a model, so Haiku runs until late November at the earliest.
 
 ### The test that would settle it
+
+**Status (2026-11-11).** The owner narrowed the first run to Claude Haiku 4.5 against Claude
+Haiku 5.5 (thinking off, and adaptive thinking at effort low), under a $6 cap, and the harness
+exists: `npm run blind` (TESTING.md). Two things differ from the plan below. The 625 sentences
+are synthetic, written for the test (`eval/blind/README.md`), not taken from role play calls,
+and there is no glossary. And a Claude Sonnet 5.5 judge gives a preliminary score before the
+native speaker sheet, which the run also writes, is filled in. The plan below is otherwise
+unchanged.
 
 A blind side by side comparison, run the way WMT26 rated its entries, and only when the owner
 arms it.
@@ -452,8 +463,9 @@ anyway. So saving corrections needed one decision first (question 22). The owner
     Native-speaker raters for four Spanish varieties are the real cost: who should they be?
 11. **A second provider.** OpenAI's models are the strongest candidates for better translation.
     Is another server key and another bill fine, or Anthropic only?
-12. **The deadline.** Haiku 4.5 retires no sooner than October 15, 2026, with 60 days' notice,
-    and there is no newer Haiku. What is the fallback if the test has not run by then?
+12. **The deadline.** Haiku 4.5 retires no sooner than October 15, 2026, with 60 days' notice.
+    Claude Haiku 5.5 is the obvious fallback, and `npm run blind` compares the two. What is the
+    fallback if the test has not run by then?
 
 **Product and platform**
 

@@ -10,9 +10,11 @@
 
 import { glossaryDocument, type GlossaryEntry } from "@translatv/shared";
 
+import { apiUrl } from "../net/apiBase.js";
+
 type Fetch = (path: string, init?: RequestInit) => Promise<Response>;
 
-const PATH = "/api/me/glossary";
+const PATH = apiUrl("/api/me/glossary");
 
 function same(a: GlossaryEntry, b: GlossaryEntry): boolean {
   return (

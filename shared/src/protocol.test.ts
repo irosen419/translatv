@@ -301,3 +301,32 @@ describe("server sent dialects", () => {
     expect(serverMessage.safeParse(bad).success).toBe(false);
   });
 });
+
+// Who the other person is, as the viewer's own contactId (the one /api/me/calls and contacts
+// carry), so a client can report or block them from inside the call. Optional, so a client built
+// before it ignores it and a server with no accounts behind it can leave it out.
+describe("the peer's contactId", () => {
+  const member = {
+    id: "m",
+    username: "Ana",
+    dialect: "es-AR",
+    connection: "connected",
+    micEnabled: true,
+    cameraEnabled: true,
+    wantsTranslation: true,
+    isHost: true,
+  };
+
+  it("rides peer.joined, optionally", () => {
+    expect(serverMessage.safeParse({ t: "peer.joined", peer: member, contactId: "c1" }).success).toBe(true);
+    expect(serverMessage.safeParse({ t: "peer.joined", peer: member }).success).toBe(true);
+    const parsed = serverMessage.parse({ t: "peer.joined", peer: member, contactId: "c1" });
+    expect(parsed).toMatchObject({ contactId: "c1" });
+  });
+
+  it("rides room.joined as peerContactId, optionally", () => {
+    const joined = serverMessage.options.find((o) => o.shape.t.value === "room.joined");
+    expect(Object.keys(joined?.shape ?? {})).toContain("peerContactId");
+    expect((joined?.shape as Record<string, z.ZodTypeAny>)["peerContactId"]?.isOptional()).toBe(true);
+  });
+});

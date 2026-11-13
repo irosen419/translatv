@@ -229,6 +229,53 @@ class RenderMarkdownTest(unittest.TestCase):
         self.assertEqual(len(row), 1)
 
 
+ATTRIBUTION_PROJECT = "fixture-attribution"
+
+# The shared contract for the attribution fixture. Mirrored in server/src/spend/ledger.test.ts.
+EXPECTED_ENVS = {
+    "local": {"env": "local", "spent_usd": 0.001, "entries": 1},
+    "pi": {"env": "pi", "spent_usd": 0.0025, "entries": 2},
+    "production": {"env": "production", "spent_usd": 0.0, "entries": 1},
+    "unrecorded": {"env": "unrecorded", "spent_usd": 0.004, "entries": 1},
+}
+EXPECTED_BY_OWNER = {
+    "owner": {"spent_usd": 0.0015, "entries": 2},
+    "others": {"spent_usd": 0.002, "entries": 2},
+    "unrecorded": {"spent_usd": 0.004, "entries": 1},
+}
+
+
+class AttributionTest(unittest.TestCase):
+    """Where a call ran (env) and whose call it was (owner_call), summed the same way as ledger.ts."""
+
+    def setUp(self):
+        self.summary = spend_log.totals(spend_log.load(ATTRIBUTION_PROJECT, root=FIXTURE_ROOT))
+
+    def test_spend_is_bucketed_by_environment_with_older_rows_unrecorded(self):
+        self.assertEqual(self.summary["envs"], EXPECTED_ENVS)
+
+    def test_the_owners_calls_are_split_from_other_peoples(self):
+        self.assertEqual(self.summary["by_owner"], EXPECTED_BY_OWNER)
+
+    def test_a_ledger_without_attribution_renders_no_attribution_lines(self):
+        text = spend_log.render_markdown(FIXTURE_PROJECT, root=FIXTURE_ROOT)
+        self.assertNotIn("By environment", text)
+        self.assertNotIn("Owner's calls", text)
+
+    def test_the_view_summarizes_environment_and_owner_spend(self):
+        text = spend_log.render_markdown(ATTRIBUTION_PROJECT, root=FIXTURE_ROOT)
+        self.assertIn(
+            "By environment: local $0.0010 (calls: 1), pi $0.0025 (calls: 2), "
+            "production $0.0000 (calls: 1), unrecorded $0.0040 (calls: 1).",
+            text,
+        )
+        self.assertIn(
+            "Owner's calls $0.0015 (calls: 2), other people's $0.0020 (calls: 2), "
+            "unrecorded $0.0040 (calls: 1).",
+            text,
+        )
+
+
 class NoDashesTest(unittest.TestCase):
     # Built from code points rather than written literally, so this file can check ITSELF.
     # A literal here would make the test find its own assertion and fail forever, which is the

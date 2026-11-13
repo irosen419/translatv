@@ -137,3 +137,31 @@ describe("the correction dialog", () => {
     expect(host.querySelector("#correction-problem")?.getAttribute("role")).toBe("alert");
   });
 });
+
+describe("who said each line", () => {
+  const names = () => [...host.querySelectorAll("[data-line-id] .who")].map((n) => n.textContent);
+
+  it("keeps a departed speaker's name, from the names the room has seen", () => {
+    useStore.setState({ peerNames: { gone: "Phone" } });
+    act(() => {
+      root.render(
+        <TranscriptPanel
+          lines={[line({ lineId: "L1", from: "gone" }), line({ lineId: "L2", from: "never-seen" })]}
+          selfId="me"
+          me={member("me", "en-US")}
+          peer={null}
+          onCorrect={() => {}}
+          onRetry={() => {}}
+          onSendChat={() => {}}
+        />,
+      );
+    });
+    expect(names()).toEqual(["Phone", copy.t("panel.someone")]);
+  });
+
+  it("separates the quiet note from the sentence, so copied text does not run together", () => {
+    render([line({ from: "me", srcDialect: "en-US", text: "hello there", translated: null, translationStatus: "skipped", skipReason: "no_peer" })]);
+    const row = host.querySelector("[data-line-id] .t");
+    expect(row?.textContent).toMatch(/hello there\s+\S/);
+  });
+});

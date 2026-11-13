@@ -19,6 +19,8 @@
 // URL, dropped from storage the moment the server says it is no longer good.
 
 import type { AuthErrorCode, AuthSession, PublicUser } from "@translatv/shared";
+import { apiUrl } from "../net/apiBase.js";
+import { browserStorage, type WebStorage } from "./browserStorage.js";
 
 /** Where the refresh token lives between page loads. */
 export const REFRESH_KEY = "translatv.refresh";
@@ -36,26 +38,15 @@ export const REFRESH_MARGIN_MS = 60_000;
  */
 export const MIN_REFRESH_DELAY_MS = 60_000;
 
-/** The slice of Storage this needs. An interface so a test can hand it something that throws. */
-export interface TokenStore {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
-}
-
 /**
- * The browser's localStorage, or null when it cannot be used.
- *
- * Probed rather than assumed: merely READING the property throws in some configurations (Safari
- * private mode, blocked site data), so a bare `window.localStorage` is itself what can break.
+ * The slice of Storage this needs, and the browser's localStorage or null when it cannot be used.
+ * The guard itself lives in lib/browserStorage.ts, because the theme preference needs the same
+ * one and a second copy of it is a second chance to get it wrong.
  */
-export function browserStore(): TokenStore | null {
-  try {
-    return typeof window === "undefined" ? null : window.localStorage;
-  } catch {
-    return null;
-  }
-}
+export type TokenStore = WebStorage;
+
+/** The browser's localStorage, or null when it cannot be used. */
+export const browserStore: () => TokenStore | null = browserStorage;
 
 function readRefresh(store: TokenStore | null): string | null {
   if (!store) return null;
@@ -176,11 +167,11 @@ export class SessionManager {
   }
 
   signIn(email: string, password: string): Promise<AuthOutcome> {
-    return this.obtain("/api/auth/login", { email, password });
+    return this.obtain(apiUrl("/api/auth/login"), { email, password });
   }
 
   signUp(input: { invite?: string; email: string; password: string; displayName: string }): Promise<AuthOutcome> {
-    return this.obtain("/api/auth/signup", input);
+    return this.obtain(apiUrl("/api/auth/signup"), input);
   }
 
   /**
@@ -197,7 +188,7 @@ export class SessionManager {
     this.drop();
     if (!token) return;
     try {
-      await this.deps.fetch("/api/auth/logout", {
+      await this.deps.fetch(apiUrl("/api/auth/logout"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ refreshToken: token }),
@@ -238,7 +229,7 @@ export class SessionManager {
       const token = await this.accessToken();
       if (token === null) return { ok: false, error: "UNAUTHENTICATED" };
       if (this.user?.id !== userId) return { ok: false, error: "ACCOUNT_MISMATCH" };
-      response = await this.deps.fetch("/api/account", {
+      response = await this.deps.fetch(apiUrl("/api/account"), {
         method: "DELETE",
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
         body: JSON.stringify({ password, userId }),
@@ -392,7 +383,7 @@ export class SessionManager {
       }
       let response: Response;
       try {
-        response = await this.deps.fetch("/api/auth/refresh", {
+        response = await this.deps.fetch(apiUrl("/api/auth/refresh"), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ refreshToken: token }),

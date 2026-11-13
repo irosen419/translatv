@@ -19,12 +19,24 @@
 
 import type { CopyRef } from "../i18n/copy.js";
 import type { SttAdapter, SttCapabilities, SttEvents, SttStatus } from "./types.js";
+import { cleanRecognizerText } from "./recognizerText.js";
 
 /** Base restart delay. Doubles per consecutive rapid failure. */
 const BASE_RESTART_MS = 250;
 const MAX_RESTART_MS = 8_000;
 /** A restart sooner than this after a start counts as a rapid cycle. */
 const RAPID_CYCLE_MS = 1_000;
+/**
+ * How long an interim may sit unchanged before it is treated as a finished sentence.
+ *
+ * iPhone Safari keeps a whole monologue as one growing interim and finalizes only after a long
+ * silence or at the session's end, so the other person read a paragraph at once, late (owner
+ * test, 2026-11-13). When the results stop changing for this long the speaker has paused, and
+ * the session is stopped so the engine settles what it has (stop, not abort, so it is delivered
+ * rather than dropped). Long enough not to cut a sentence at a breath, short enough to read as
+ * live. Engines that finalize promptly (Chrome) almost never reach it.
+ */
+export const SETTLE_MS = 1_800;
 /** Consecutive rapid cycles before giving up and asking the user to intervene. */
 const MAX_CONSECUTIVE_ERRORS = 6;
 /**
@@ -147,6 +159,10 @@ export class WebSpeechAdapter implements SttAdapter {
   private consecutiveErrors = 0;
   private lastStartAt = 0;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Pending check that the current interim has stopped changing (SETTLE_MS). */
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** True while a session is ending because WE stopped it to settle a pause. */
+  private settling = false;
   private recycleTimer: ReturnType<typeof setInterval> | null = null;
   private onDevice = false;
   private pendingInterim = "";
@@ -286,7 +302,8 @@ export class WebSpeechAdapter implements SttAdapter {
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const result = event.results[i];
         if (!result) continue;
-        const text = result[0].transcript.trim();
+        // Without the recognizer's own markers ("</s>"), which are not words anyone said.
+        const text = cleanRecognizerText(result[0].transcript);
         if (!text) continue;
         if (result.isFinal) {
           if (firedFinals.has(i)) continue;
@@ -301,6 +318,9 @@ export class WebSpeechAdapter implements SttAdapter {
         this.pendingInterim = interim.trim();
         this.events.onInterim(this.pendingInterim);
       }
+      // Every result restarts the wait; a final with nothing after it cancels it.
+      if (this.pendingInterim) this.armSettle(recognition);
+      else this.clearSettle();
     };
 
     recognition.onerror = (event) => this.onError(event.error);
@@ -382,11 +402,35 @@ export class WebSpeechAdapter implements SttAdapter {
     }
   }
 
+  /** Start (or restart) the wait for an interim to stop changing. See SETTLE_MS. */
+  private armSettle(recognition: SpeechRecognitionLike): void {
+    this.clearSettle();
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = null;
+      if (this.intentionalStop || this.recognition !== recognition || !this.pendingInterim) return;
+      this.settling = true;
+      try {
+        recognition.stop();
+      } catch {
+        this.settling = false;
+      }
+    }, SETTLE_MS);
+  }
+
+  private clearSettle(): void {
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+    this.settleTimer = null;
+  }
+
   private onEnd(): void {
+    this.clearSettle();
     if (this.intentionalStop) {
       this.events.onStatus({ kind: "idle" });
       return;
     }
+    // A session WE stopped to settle a pause is not a failure, however short it ran.
+    const settled = this.settling;
+    this.settling = false;
 
     // A session that ends while interim text is pending would lose that speech across the
     // boundary. Commit it as a final instead, so a sentence interrupted by the 60 second cap
@@ -397,7 +441,9 @@ export class WebSpeechAdapter implements SttAdapter {
     }
 
     const alive = Date.now() - this.lastStartAt;
-    if (alive < RAPID_CYCLE_MS) {
+    if (settled) {
+      this.consecutiveErrors = 0;
+    } else if (alive < RAPID_CYCLE_MS) {
       this.consecutiveErrors += 1;
     } else {
       // A session that ran for a while then ended is the ordinary silence timeout, not a
@@ -453,6 +499,7 @@ export class WebSpeechAdapter implements SttAdapter {
     this.started = false;
     if (this.restartTimer) clearTimeout(this.restartTimer);
     if (this.recycleTimer) clearInterval(this.recycleTimer);
+    this.clearSettle();
     this.restartTimer = null;
     this.recycleTimer = null;
   }

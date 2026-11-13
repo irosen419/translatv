@@ -11,9 +11,82 @@
 import { z } from "zod";
 import { username } from "./protocol.js";
 
-/** Must match server/src/auth/passwords.ts, which enforces it. The client uses it to explain. */
-export const MIN_PASSWORD_LENGTH = 10;
+/**
+ * The password policy (owner decision, 2026-11-12): at least 8 characters, with a lowercase
+ * letter, an uppercase letter, a number and a symbol. Enforced by server/src/auth/passwords.ts at
+ * signup; the client runs the same function to tick each rule off as the person types. Sign in
+ * never checks it, so an account made under an older rule still signs in.
+ */
+export const MIN_PASSWORD_LENGTH = 8;
 export const MAX_PASSWORD_LENGTH = 1024;
+
+/** Each rule, in the order the signup form lists them. */
+export const PASSWORD_RULES = ["length", "lowercase", "uppercase", "digit", "symbol"] as const;
+export type PasswordRule = (typeof PASSWORD_RULES)[number];
+
+// Unicode classes rather than A to Z, so Ñ and á count as letters for a Spanish speaker. A symbol
+// is anything that is not a letter, a number or whitespace: a space alone is not a symbol.
+const RULE_TESTS: Record<Exclude<PasswordRule, "length">, RegExp> = {
+  lowercase: /\p{Ll}/u,
+  uppercase: /\p{Lu}/u,
+  digit: /\p{Nd}/u,
+  symbol: /[^\p{L}\p{N}\s]/u,
+};
+
+/** The rules this password does not meet, in PASSWORD_RULES order. Empty means acceptable. */
+export function unmetPasswordRules(password: string): PasswordRule[] {
+  return PASSWORD_RULES.filter((rule) =>
+    rule === "length"
+      ? password.length < MIN_PASSWORD_LENGTH || password.length > MAX_PASSWORD_LENGTH
+      : !RULE_TESTS[rule].test(password),
+  );
+}
+
+/**
+ * Invite codes: Crockford base32 (no I, L, O or U), the same alphabet as room codes, in three
+ * dashed groups of four, such as 2CPW-GDFB-QTVT. The server mints them (server/src/auth/service.ts)
+ * and the signup form masks its input to this shape.
+ */
+export const INVITE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+export const INVITE_GROUPS = 3;
+export const INVITE_GROUP_LENGTH = 4;
+export const INVITE_CODE_LENGTH = INVITE_GROUPS * INVITE_GROUP_LENGTH;
+
+/**
+ * Fold what a person typed into code characters only: uppercase, each lookalike read as the
+ * character the alphabet really has (O as 0, I and L as 1, U as V), and everything else dropped.
+ */
+function inviteCharacters(input: string): string {
+  return [...input.toUpperCase()]
+    .map((c) => (c === "O" ? "0" : c === "I" || c === "L" ? "1" : c === "U" ? "V" : c))
+    .filter((c) => INVITE_ALPHABET.includes(c))
+    .join("");
+}
+
+/**
+ * The invite field's mask: the typed text as the code's own shape, dashes added between groups
+ * and nothing past the code's length. A trailing dash the person typed is kept, so typing the
+ * dash themselves does not fight the mask.
+ */
+export function formatInviteInput(input: string): string {
+  const chars = inviteCharacters(input).slice(0, INVITE_CODE_LENGTH);
+  const groups: string[] = [];
+  for (let i = 0; i < chars.length; i += INVITE_GROUP_LENGTH) groups.push(chars.slice(i, i + INVITE_GROUP_LENGTH));
+  const formatted = groups.join("-");
+  const full = chars.length % INVITE_GROUP_LENGTH === 0 && chars.length > 0 && chars.length < INVITE_CODE_LENGTH;
+  return full && /-\s*$/.test(input) ? `${formatted}-` : formatted;
+}
+
+/**
+ * The canonical code (twelve characters, no dashes) for a complete code, or null for anything
+ * else. The server's sanitizer: only text that could be a real code reaches the store.
+ */
+export function canonicalInvite(input: string): string | null {
+  const stripped = input.toUpperCase().replace(/[\s-]/g, "");
+  if (stripped.length !== INVITE_CODE_LENGTH) return null;
+  const chars = inviteCharacters(stripped);
+  return chars.length === INVITE_CODE_LENGTH ? chars : null;
+}
 export const MAX_EMAIL_LENGTH = 254;
 
 /**
@@ -85,7 +158,7 @@ export type InviteResponse = z.infer<typeof inviteResponse>;
 export const authErrorCode = z.enum([
   /** The body did not parse: missing field, not an email, a name with nothing left after cleaning. */
   "INVALID_INPUT",
-  /** The password is shorter than MIN_PASSWORD_LENGTH. */
+  /** The password misses a rule of the policy (unmetPasswordRules says which). */
   "WEAK_PASSWORD",
   /** Invite only signup, and the code is missing, unknown, expired or already used. */
   "INVITE_INVALID",
@@ -112,6 +185,14 @@ export const authErrorCode = z.enum([
    */
   "ACCOUNT_MISMATCH",
   "RATE_LIMITED",
+  /**
+   * The contactId names nobody this account has been on a call with (to block or report), or
+   * nobody it has blocked (to unblock). The same answer for an id that was never anyone's, so it
+   * says nothing about which accounts exist.
+   */
+  "CONTACT_NOT_FOUND",
+  /** The owner asked to review a report id that does not exist. */
+  "REPORT_NOT_FOUND",
 ]);
 export const AUTH_ERROR_CODES = authErrorCode.options;
 export type AuthErrorCode = z.infer<typeof authErrorCode>;

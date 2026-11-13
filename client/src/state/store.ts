@@ -23,6 +23,9 @@ import { errorCopyKey } from "../i18n/codes.js";
 import type { PeerState } from "../rtc/PeerConnection.js";
 import type { SttStatus } from "../stt/types.js";
 import type { SessionState } from "../lib/session.js";
+import { browserStorage } from "../lib/browserStorage.js";
+import { loadTheme } from "../theme/storage.js";
+import type { ThemeChoice } from "../theme/theme.js";
 
 export type Phase = "landing" | "prejoin" | "room" | "ended";
 
@@ -65,13 +68,41 @@ interface State {
    * server costs one ignored field, hiding it on an invite only one guarantees a refusal.
    */
   signupMode: SignupMode;
+  /**
+   * Where to write for help, from /healthz (SUPPORT_EMAIL), or null when the server has none or
+   * has not answered. Null shows no address at all, never a dead link. About the server, so it
+   * survives reset() like signupMode.
+   */
+  supportEmail: string | null;
   /** Prefilled from a /r/<code> link so a shared link lands straight on the join form. */
   pendingCode: string | null;
+  /**
+   * The colours, as a palette plus an appearance mode.
+   *
+   * Here rather than in a hook's own state for the same reason uiDialect is: two places read it
+   * that are nowhere near each other in the tree (the picker in the settings drawer, and the one
+   * effect at the root that owns the document element), and passing it between them would be
+   * prop drilling through every screen in the app. Device scoped, so it survives reset() along
+   * with the dialect: ending a call is not a reason to change somebody's colours.
+   */
+  theme: ThemeChoice;
 
   code: string | null;
   selfId: string | null;
   me: Member | null;
   peer: Member | null;
+  /**
+   * The peer as THIS reader's contactId (room.joined's peerContactId, peer.joined's contactId):
+   * what reporting or blocking them from the drawer names them by. Null with no peer, with one
+   * account on both ends, or when the server did not say.
+   */
+  peerContactId: string | null;
+  /**
+   * The name of everyone who has been the peer in THIS room, by member id, kept after they leave.
+   * A line outlives its speaker's seat, and without this the panel could only call a departed
+   * speaker "Someone". Cleared with the room.
+   */
+  peerNames: Record<string, string>;
   polite: boolean;
   iceServers: RTCIceServer[];
 
@@ -116,7 +147,10 @@ interface State {
   setUiDialect(dialect: string): void;
   setSession(session: SessionState): void;
   setSignupMode(mode: SignupMode): void;
+  setSupportEmail(email: string | null): void;
   setPendingCode(code: string | null): void;
+  /** Writing it down is the caller's job, through chooseTheme in theme/useTheme.ts. */
+  setTheme(theme: ThemeChoice): void;
   apply(message: ServerMessage): void;
   reset(): void;
 
@@ -152,12 +186,16 @@ export const useStore = create<State>((set, get) => ({
   uiDialect: initialUiDialect(),
   session: { status: "signedOut", user: null },
   signupMode: "invite",
+  supportEmail: null,
   pendingCode: null,
+  theme: loadTheme(browserStorage()),
 
   code: null,
   selfId: null,
   me: null,
   peer: null,
+  peerContactId: null,
+  peerNames: {},
   polite: true,
   iceServers: [],
 
@@ -180,7 +218,9 @@ export const useStore = create<State>((set, get) => ({
   setUiDialect: (uiDialect) => set({ uiDialect }),
   setSession: (session) => set({ session }),
   setSignupMode: (signupMode) => set({ signupMode }),
+  setSupportEmail: (supportEmail) => set({ supportEmail }),
   setPendingCode: (pendingCode) => set({ pendingCode }),
+  setTheme: (theme) => set({ theme }),
   setPeerState: (peerState) => set({ peerState }),
   setSttStatus: (sttStatus) => set({ sttStatus }),
   setSocketState: (socketState) => set({ socketState }),
@@ -195,6 +235,8 @@ export const useStore = create<State>((set, get) => ({
       selfId: null,
       me: null,
       peer: null,
+      peerContactId: null,
+      peerNames: {},
       lines: [],
       peerState: "new",
       sttStatus: { kind: "idle" },
@@ -220,6 +262,8 @@ export const useStore = create<State>((set, get) => ({
           // rather than whatever this tab last guessed.
           uiDialect: message.you.dialect,
           peer: null,
+          peerContactId: null,
+          peerNames: {},
           polite: message.polite,
           iceServers: message.iceServers,
           error: null,
@@ -234,6 +278,8 @@ export const useStore = create<State>((set, get) => ({
           me: message.you,
           uiDialect: message.you.dialect,
           peer: message.peer,
+          peerContactId: message.peerContactId ?? null,
+          peerNames: message.peer ? { [message.peer.id]: message.peer.username } : {},
           polite: message.polite,
           iceServers: message.iceServers,
           lines: message.snapshot.lines,
@@ -242,11 +288,15 @@ export const useStore = create<State>((set, get) => ({
         return;
 
       case "peer.joined":
-        set({ peer: message.peer });
+        set((s) => ({
+          peer: message.peer,
+          peerContactId: message.contactId ?? null,
+          peerNames: { ...s.peerNames, [message.peer.id]: message.peer.username },
+        }));
         return;
 
       case "peer.left":
-        set({ peer: null, peerState: "new" });
+        set({ peer: null, peerContactId: null, peerState: "new" });
         return;
 
       case "peer.updated":
@@ -265,6 +315,9 @@ export const useStore = create<State>((set, get) => ({
                     ? { wantsTranslation: message.wantsTranslation }
                     : {}),
                 },
+                ...(message.username !== undefined
+                  ? { peerNames: { ...s.peerNames, [message.peerId]: message.username } }
+                  : {}),
               }
             : {},
         );

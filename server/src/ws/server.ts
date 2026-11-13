@@ -23,9 +23,10 @@ import {
   type TranslationFailureCode,
 } from "@translatv/shared";
 
-import type { RoomUserData } from "../account/service.js";
+import { contactIdFor, type RoomUserData } from "../account/service.js";
 import type { Config } from "../config.js";
 import { log } from "../log.js";
+import { originAllowed } from "../security/origin.js";
 import { GRACE_MS, MAX_MEMBERS, RoomManager, type Member } from "../rooms/RoomManager.js";
 import { bearerFromUpgrade, selectSubprotocol } from "../auth/bearer.js";
 import { roomHash } from "../spend/caps.js";
@@ -34,7 +35,7 @@ import {
   MAX_CONNECTIONS_PER_IP,
   TokenBuckets,
 } from "../security/rateLimit.js";
-import type { TranslationService } from "../translate/TranslationService.js";
+import type { TranslateResult, TranslationService } from "../translate/TranslationService.js";
 import { RoomSession } from "./RoomSession.js";
 
 /** How often expired rooms and seats are swept. */
@@ -206,6 +207,12 @@ export interface AccessVerifier {
    * the wiring cannot be forgotten in index.ts.
    */
   onAccountDeleted?(listener: (userId: string) => void): () => void;
+  /**
+   * Whether this account is the owner's (OWNER_EMAIL), so each paid call's ledger row can say
+   * whether the owner was on it. Optional like onAccountDeleted: without it rows make no claim
+   * either way, which is the honest answer when nobody can tell.
+   */
+  isOwner?(userId: string): boolean;
 }
 
 /** A member's open call history row, and who it names on the other end so far. */
@@ -244,6 +251,7 @@ export class SignalingServer {
   /** memberId -> their open call history row. Empty when no RoomUserData was given. */
   private readonly calls = new Map<string, OpenCall>();
   private unsubscribeDeleted: (() => void) | null = null;
+  private unsubscribeBlocked: (() => void) | null = null;
 
   private sweepTimer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
@@ -284,6 +292,7 @@ export class SignalingServer {
     this.pingTimer.unref();
 
     this.unsubscribeDeleted = auth.onAccountDeleted?.((userId) => this.disconnectUser(userId)) ?? null;
+    this.unsubscribeBlocked = userData?.onBlocked((blockerId, blockedId) => this.separate(blockerId, blockedId)) ?? null;
   }
 
   /**
@@ -317,11 +326,7 @@ export class SignalingServer {
     //
     // Production stays strict: there, the allowlist is the whole CSRF defense.
     if (origin !== undefined) {
-      const allowed =
-        this.config.allowedOrigins.includes(origin) ||
-        (!this.config.isProduction && isDevelopmentOrigin(origin));
-
-      if (!allowed) {
+      if (!originAllowed(this.config, origin)) {
         log.warn("ws.origin_refused", { origin });
         done(false, 403, "origin not allowed");
         return;
@@ -622,6 +627,34 @@ export class SignalingServer {
       return;
     }
 
+    // Two accounts with a block between them, in either direction, are never in one room. The
+    // refusal is the one a code with no live room behind it gets (HOST_NOT_PRESENT, fatal), word
+    // for word, so the person refused cannot tell a block from a call that is not available, and
+    // the host is told nothing. A FULL room is left to answer ROOM_FULL below, as it does for
+    // anyone, so the block does not show as a different answer there either.
+    const occupied = this.rooms.peek(message.code);
+    if (
+      occupied &&
+      occupied.members.length < MAX_MEMBERS &&
+      occupied.members.some((m) => m.userId !== userId && this.userData?.blockedBetween(userId, m.userId) === true)
+    ) {
+      log.info("room.join_refused", { room: roomHash(occupied.code), user: userId });
+      this.fail(connection.socket, "HOST_NOT_PRESENT", true);
+      return;
+    }
+
+    // One account is one side of a call. The same account joining its own room from a second
+    // device (signed in on a laptop and a phone at once) would be a call with yourself: both
+    // seats would read and write the one account's saved dialect and glossary, and its call
+    // history would name itself as the peer. Refused with its own code, since the person refused
+    // already knows the room exists (they are in it) and is owed the real reason. Checked after
+    // the host and block checks, so it says nothing to anyone those would refuse.
+    if (occupied?.members.some((m) => m.userId !== "" && m.userId === userId)) {
+      log.info("room.join_refused", { room: roomHash(occupied.code), user: userId, reason: "same_account" });
+      this.fail(connection.socket, "SAME_ACCOUNT", true);
+      return;
+    }
+
     const result = this.rooms.join(
       message.code,
       message.username,
@@ -651,9 +684,17 @@ export class SignalingServer {
       config: { graceMs: GRACE_MS, maxMembers: MAX_MEMBERS },
       iceServers: this.config.iceServers,
       snapshot: session.snapshot(),
+      ...this.contactField("peerContactId", userId, peer),
     });
 
-    this.broadcast(room.code, { t: "peer.joined", peer: toWire(member) }, member.id);
+    // One frame per reader rather than a broadcast, because each reader's contactId for the new
+    // arrival is their own.
+    for (const other of room.members) {
+      if (other.id === member.id) continue;
+      const socket = this.byMember.get(other.id);
+      if (!socket) continue;
+      this.send(socket, { t: "peer.joined", peer: toWire(member), ...this.contactField("contactId", other.userId, member) });
+    }
     log.info("room.joined", { room: roomHash(room.code), members: room.members.length });
 
     // The same account on both ends (two tabs, one person) is not a contact of itself.
@@ -721,6 +762,7 @@ export class SignalingServer {
       config: { graceMs: GRACE_MS, maxMembers: MAX_MEMBERS },
       iceServers: this.config.iceServers,
       snapshot: session.snapshot(),
+      ...this.contactField("peerContactId", member.userId, peer),
     });
 
     this.broadcast(
@@ -769,6 +811,30 @@ export class SignalingServer {
   }
 
   /**
+   * `{ [key]: contactId }` naming `peer` as the reader `viewerId` refers to them, or nothing: with
+   * no peer, with one account on both ends, or with no account data behind the server (whose
+   * contactIds would resolve against no history).
+   */
+  private contactField<K extends string>(key: K, viewerId: string, peer: Member | null): Partial<Record<K, string>> {
+    if (!this.userData || !peer || !viewerId || !peer.userId || peer.userId === viewerId) return {};
+    return { [key]: contactIdFor(viewerId, peer.userId) } as Partial<Record<K, string>>;
+  }
+
+  /**
+   * A block was just made. Any call the two are in together ends for both, exactly as if the
+   * blocker had pressed End chat: the same room.ended frame, naming them, and nothing about why.
+   */
+  private separate(blockerId: string, blockedId: string): void {
+    const now = Date.now();
+    for (const room of this.rooms.roomsHolding(blockerId, blockedId)) {
+      const blocker = room.members.find((m) => m.userId === blockerId);
+      if (!blocker) continue;
+      this.endRoom(room.code, blocker.id, blocker.username, now);
+      log.info("room.ended_by_block", { room: roomHash(room.code) });
+    }
+  }
+
+  /**
    * Destroy a room and tell whoever is still in it, by name.
    *
    * Shared by the End button and by the host leaving, because those are the same event as far
@@ -792,7 +858,6 @@ export class SignalingServer {
     }
 
     this.sessions.delete(roomCode);
-    this.translation.forgetRoom(roomHash(roomCode));
     log.info("room.ended", { room: roomHash(roomCode) });
   }
 
@@ -960,7 +1025,19 @@ export class SignalingServer {
     }
 
     this.broadcastAll(roomCode, { t: "translation.pending", lineId: line.lineId });
-    await this.runTranslation(roomCode, line.lineId, text, speaker.dialect, targetDialect, peer?.id);
+    await this.runTranslation(roomCode, line.lineId, text, speaker.dialect, targetDialect, peer?.id, speaker.userId);
+  }
+
+  /**
+   * Whether the owner's account is in this room, for the ledger. Asked at the moment of the call,
+   * so a call the owner joined late is marked from then on. Says nothing (an empty object) when
+   * this server cannot tell who the owner is.
+   */
+  private ownerOnCall(roomCode: string): { ownerOnCall?: boolean } {
+    const isOwner = this.auth.isOwner?.bind(this.auth);
+    if (!isOwner) return {};
+    const room = this.rooms.peek(roomCode);
+    return { ownerOnCall: room?.members.some((m) => m.userId !== "" && isOwner(m.userId)) ?? false };
   }
 
   private async runTranslation(
@@ -971,24 +1048,46 @@ export class SignalingServer {
     targetDialect: string,
     /** The member who reads this translation, whose saved terms join its prompt. */
     readerId: string | undefined,
+    /** The account whose line this is, for the ledger row's spend tag (never written raw). */
+    speakerUserId: string | null,
   ): Promise<void> {
     const session = this.sessions.get(roomCode);
     if (!session) return;
 
-    const result = await this.translation.translate({
-      lineId,
-      text,
-      sourceDialect,
-      targetDialect,
-      context: session.contextFor(text),
-      glossary: session.glossaryFor(readerId),
-      roomHash: roomHash(roomCode),
-      kind: "translation",
-    });
+    const ticket = session.beginTranslation(lineId);
+    let result: TranslateResult;
+    try {
+      result = await this.translation.translate({
+        lineId,
+        text,
+        sourceDialect,
+        targetDialect,
+        context: session.contextFor(text),
+        glossary: session.glossaryFor(readerId),
+        roomHash: roomHash(roomCode),
+        kind: "translation",
+        speakerUserId,
+        ...this.ownerOnCall(roomCode),
+      });
+    } catch (error) {
+      // No answer at all, from an unreadable ledger for one (see runDetached). This call stops
+      // being the newest, so an older call for the line that is still out is shown when it lands
+      // rather than dropped as stale behind a call that is never coming back. With no older call
+      // out the line still waits, exactly as it did before calls ran concurrently. The error still
+      // reaches runDetached's log, as it always has.
+      session.abandonTranslation(lineId, ticket);
+      throw error;
+    }
 
     // The room can end while a translation is in flight. Dropping the result is correct; the
     // handler must simply not throw when the room it belonged to is gone.
     if (!this.sessions.has(roomCode)) return;
+
+    // A newer call for this same line was made while this one was in flight, so this answer is
+    // stale whichever way it went. Without this, a late failure overwrites a retry that succeeded,
+    // or an old translation overwrites a new one. Dropping it changes nothing about spend: the
+    // call was recorded, or failed to be, before translate() returned, exactly like any other.
+    if (!session.settleTranslation(lineId, ticket)) return;
 
     if (result.ok) {
       const updated = session.setTranslation(lineId, result.text, "ok");
@@ -1101,6 +1200,8 @@ export class SignalingServer {
       line.srcDialect,
       targetDialect,
       peer?.id,
+      // The line's author, for its spend tag. Null when they have left and nobody can say.
+      speaker?.userId ?? null,
     );
   }
 
@@ -1235,7 +1336,9 @@ export class SignalingServer {
     const open = this.calls.get(memberId);
     if (!open) return;
     this.calls.delete(memberId);
-    this.userData?.callEnded(open.callId, now);
+    // Nobody ever joined: there was no call to remember, so the row goes rather than closing.
+    if (open.peerUserId === null && this.userData?.callUnanswered) this.userData.callUnanswered(open.callId);
+    else this.userData?.callEnded(open.callId, now);
     const session = this.sessions.get(open.roomCode);
     const made = session?.takeCorrections(memberId) ?? [];
     session?.dropSaved(memberId);
@@ -1388,9 +1491,6 @@ export class SignalingServer {
     for (const room of destroyed) {
       for (const member of room.members) this.closeCall(member.id, now);
       this.sessions.delete(room.code);
-      // The third lifetime. Room, session, and translation queue all end here now; the queue used
-      // to be left behind and accumulate one entry per room for the life of the process.
-      this.translation.forgetRoom(roomHash(room.code));
       log.info("room.destroyed", { room: roomHash(room.code) });
     }
 
@@ -1430,6 +1530,8 @@ export class SignalingServer {
     for (const memberId of [...this.calls.keys()]) this.closeCall(memberId, now);
     this.unsubscribeDeleted?.();
     this.unsubscribeDeleted = null;
+    this.unsubscribeBlocked?.();
+    this.unsubscribeBlocked = null;
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.sweepTimer = null;
     if (this.pingTimer) clearInterval(this.pingTimer);
@@ -1441,44 +1543,6 @@ export class SignalingServer {
   get roomCount(): number {
     return this.rooms.size;
   }
-}
-
-/**
- * Whether an Origin points at this machine or at the local network it is on.
- *
- * Parsed rather than string matched: "http://localhost.evil.com" contains "localhost" and is
- * emphatically not local, and "http://192.168.1.5.evil.example" starts with a private address
- * and is not one. A substring check waves both through.
- *
- * This is a DEVELOPMENT only relaxation, and it is narrower than it looks. A browser sets Origin
- * itself and a page cannot forge it, so a hostile site still arrives as its own origin and is
- * still refused. The only thing admitted here is a page genuinely served from a loopback or
- * private address, which on a development machine is this app being opened from a phone.
- */
-function isDevelopmentOrigin(origin: string): boolean {
-  let hostname: string;
-  try {
-    ({ hostname } = new URL(origin));
-  } catch {
-    return false;
-  }
-
-  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]") return true;
-
-  // RFC 1918 plus the link local range phones fall back to when DHCP is slow. Each octet is
-  // compared as a number, so 172.32.0.1 is correctly outside 172.16.0.0/12 rather than matching
-  // a "172." prefix.
-  const octets = hostname.split(".");
-  if (octets.length !== 4) return false;
-  const [a, b] = octets.map((part) => (/^\d{1,3}$/.test(part) ? Number(part) : Number.NaN));
-  if (a === undefined || b === undefined || Number.isNaN(a) || Number.isNaN(b)) return false;
-  if (octets.some((part) => !/^\d{1,3}$/.test(part) || Number(part) > 255)) return false;
-
-  if (a === 10) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 169 && b === 254) return true;
-  return false;
 }
 
 function toWire(member: Member): WireMember {

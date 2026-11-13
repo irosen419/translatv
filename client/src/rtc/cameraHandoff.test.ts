@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Phase } from "../state/store.js";
-import { adoptCameraTrack } from "./cameraHandoff.js";
+import { adoptCameraTrack, dropEndedCamera } from "./cameraHandoff.js";
 
 /** A track that records whether anything ever stopped it. */
 function fakeTrack(): MediaStreamTrack & { stop: ReturnType<typeof vi.fn> } {
@@ -70,5 +70,33 @@ describe("adoptCameraTrack", () => {
     expect(adopted).toBeNull();
     expect(stream.getTracks()).toEqual([]);
     expect(track.stop).toHaveBeenCalledOnce();
+  });
+});
+
+describe("dropEndedCamera", () => {
+  function stream(tracks: Array<Partial<MediaStreamTrack>>): MediaStream {
+    const held = [...tracks] as MediaStreamTrack[];
+    return {
+      getVideoTracks: () => held.filter((t) => t.kind === "video"),
+      removeTrack: (t: MediaStreamTrack) => held.splice(held.indexOf(t), 1),
+      getTracks: () => held,
+    } as unknown as MediaStream;
+  }
+
+  it("takes an ended camera track out of the stream, so the camera can be turned on again", () => {
+    // A camera another app took, or one unplugged, ends its track. Left in the stream, the self
+    // view stayed black under a button that still said the camera was on, and turning it on
+    // again did nothing because the stream still "had" a camera.
+    const audio = { kind: "audio", readyState: "live" } as const;
+    const camera = { kind: "video", readyState: "ended" } as const;
+    const s = stream([audio, camera]);
+    expect(dropEndedCamera(s)).toBe(true);
+    expect(s.getTracks()).toEqual([audio]);
+  });
+
+  it("leaves a live camera alone", () => {
+    const s = stream([{ kind: "video", readyState: "live" }]);
+    expect(dropEndedCamera(s)).toBe(false);
+    expect(s.getVideoTracks()).toHaveLength(1);
   });
 });

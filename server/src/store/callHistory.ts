@@ -37,6 +37,15 @@ export function setCallPeer(store: Store, id: string, peerUserId: string): void 
   store.db.prepare("UPDATE call_history SET peer_user_id = ? WHERE id = ? AND peer_user_id IS NULL").run(peerUserId, id);
 }
 
+/**
+ * Remove a row that never had anyone on the other end, when that call ends. Guarded on the peer
+ * still being unset, so a row that DID name someone (whose account was deleted since, which also
+ * leaves the peer unset) is never taken by a stale call to this.
+ */
+export function deleteUnansweredCall(store: Store, id: string): void {
+  store.db.prepare("DELETE FROM call_history WHERE id = ? AND peer_user_id IS NULL AND ended_at IS NULL").run(id);
+}
+
 /** Close a row. Only the first close counts, so a late sweep cannot stretch a finished call. */
 export function endCall(store: Store, id: string, now: number): void {
   store.db.prepare("UPDATE call_history SET ended_at = ? WHERE id = ? AND ended_at IS NULL").run(now, id);
@@ -79,13 +88,17 @@ export function listCalls(
   }));
 }
 
-/** Contacts, DERIVED: every distinct peer this user has a call with, most recent call first. */
+/**
+ * Contacts, DERIVED: every distinct peer this user has a call with, most recent call first. Except
+ * the people this user has blocked: a block takes them out of the list, and leaves the calls.
+ */
 export function listContacts(store: Store, userId: string): ContactRow[] {
   return store.db
     .prepare(
       `SELECT c.peer_user_id, u.display_name, max(c.started_at) AS last_call_at, count(*) AS calls
          FROM call_history c JOIN users u ON u.id = c.peer_user_id
         WHERE c.user_id = ?
+          AND NOT EXISTS (SELECT 1 FROM blocks b WHERE b.blocker_id = c.user_id AND b.blocked_id = c.peer_user_id)
         GROUP BY c.peer_user_id
         ORDER BY last_call_at DESC, c.peer_user_id`,
     )
@@ -96,4 +109,12 @@ export function listContacts(store: Store, userId: string): ContactRow[] {
       lastCallAt: Number(row["last_call_at"]),
       callCount: Number(row["calls"]),
     }));
+}
+
+/** Every account this user has been on a call with, blocked or not. What a contactId resolves in. */
+export function listPeerIds(store: Store, userId: string): string[] {
+  return store.db
+    .prepare("SELECT DISTINCT peer_user_id FROM call_history WHERE user_id = ? AND peer_user_id IS NOT NULL")
+    .all(userId)
+    .map((row) => String(row["peer_user_id"]));
 }

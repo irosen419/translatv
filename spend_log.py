@@ -28,6 +28,11 @@ One JSON object per line, one line per API call:
     cumulative_usd              running total for the program as the row recorded it
     cap_usd                     the cap in force for the program on this row
     note                        free text
+    env                         where the call ran ("local", "pi", "production"), absent on
+                                rows written before 2026-11-11, which read as "unrecorded"
+    owner_call                  true when the owner's account was on the call, false when it
+                                was not, absent when the row does not say
+    user_tag                    keyed hash of the speaker's account id, never the id itself
 
 Rows written before 2026-08 also carry image_count, always 0. Nothing reads it: this project
 renders nothing, and the dashboard's reader already treats an absent key as zero. It is not
@@ -182,6 +187,10 @@ def _round(amount):
     return round(float(amount), MONEY_PRECISION)
 
 
+# The bucket for rows written before attribution existed. Never guessed into another.
+UNRECORDED = "unrecorded"
+
+
 def totals(records):
     """Aggregate records into the numbers the cockpit and the cap gate both read.
 
@@ -197,6 +206,12 @@ def totals(records):
     input_tokens = 0
     output_tokens = 0
     programs = {}
+    envs = {}
+    by_owner = {
+        "owner": {"spent_usd": 0.0, "entries": 0},
+        "others": {"spent_usd": 0.0, "entries": 0},
+        UNRECORDED: {"spent_usd": 0.0, "entries": 0},
+    }
 
     for record in records:
         cost = _numeric(record.get("cost_usd"))
@@ -204,6 +219,21 @@ def totals(records):
             unparsed += 1
         else:
             known += cost
+
+        env = record.get("env")
+        env_name = env if isinstance(env, str) and env else UNRECORDED
+        env_bucket = envs.setdefault(env_name, {"env": env_name, "spent_usd": 0.0, "entries": 0})
+        env_bucket["entries"] += 1
+        if cost is not None:
+            env_bucket["spent_usd"] = _round(env_bucket["spent_usd"] + cost)
+
+        owner_call = record.get("owner_call")
+        owner_bucket = by_owner[
+            "owner" if owner_call is True else "others" if owner_call is False else UNRECORDED
+        ]
+        owner_bucket["entries"] += 1
+        if cost is not None:
+            owner_bucket["spent_usd"] = _round(owner_bucket["spent_usd"] + cost)
 
         input_tokens += int(_numeric(record.get("input_tokens")) or 0)
         output_tokens += int(_numeric(record.get("output_tokens")) or 0)
@@ -228,7 +258,34 @@ def totals(records):
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "programs": programs,
+        "envs": envs,
+        "by_owner": by_owner,
     }
+
+
+def _bucket_text(bucket):
+    return "$%.4f (calls: %d)" % (bucket["spent_usd"], bucket["entries"])
+
+
+def _attribution_lines(records, summary):
+    """The view's attribution summary, only for labels some row carries. Mirrors ledger.ts."""
+    lines = []
+    if any(isinstance(r.get("env"), str) and r.get("env") for r in records):
+        names = sorted(name for name in summary["envs"] if name != UNRECORDED)
+        if UNRECORDED in summary["envs"]:
+            names.append(UNRECORDED)
+        parts = ["%s %s" % (name, _bucket_text(summary["envs"][name])) for name in names]
+        lines.append("By environment: %s." % ", ".join(parts))
+    if any(isinstance(r.get("owner_call"), bool) for r in records):
+        owners = summary["by_owner"]
+        parts = [
+            "Owner's calls %s" % _bucket_text(owners["owner"]),
+            "other people's %s" % _bucket_text(owners["others"]),
+        ]
+        if owners[UNRECORDED]["entries"] > 0:
+            parts.append("unrecorded %s" % _bucket_text(owners[UNRECORDED]))
+        lines.append("%s." % ", ".join(parts))
+    return lines
 
 
 def _cost_cell(record):
@@ -275,6 +332,7 @@ def render_markdown(project=DEFAULT_PROJECT, root=None, write=False):
             "%d entries carry no recoverable cost, so the total above is a floor."
             % summary["unparsed_rows"]
         )
+    lines += _attribution_lines(records, summary)
 
     lines += [
         "",

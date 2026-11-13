@@ -161,7 +161,7 @@ describe("DATA_DIR", () => {
 });
 
 describe("accounts configuration", () => {
-  const NAMES = ["AUTH_SECRET", "SIGNUP_MODE", "OWNER_EMAIL"] as const;
+  const NAMES = ["AUTH_SECRET", "SIGNUP_MODE", "OWNER_EMAIL", "SUPPORT_EMAIL"] as const;
   let savedAccounts: Record<string, string | undefined>;
   beforeEach(() => {
     savedAccounts = {};
@@ -208,7 +208,101 @@ describe("accounts configuration", () => {
     expect(describeConfig(config).join("\n")).not.toContain(secret);
   });
 
+  it("has no support contact unless SUPPORT_EMAIL is set, and says so", () => {
+    const config = loadConfig(root);
+    expect(config.supportEmail).toBe(null);
+    expect(describeConfig(config).join("\n")).toContain("SUPPORT_EMAIL is not set");
+  });
+
+  it("reads SUPPORT_EMAIL, normalized like any email", () => {
+    process.env["SUPPORT_EMAIL"] = "  Help@Example.TEST ";
+    const config = loadConfig(root);
+    expect(config.supportEmail).toBe("help@example.test");
+    expect(describeConfig(config).join("\n")).toContain("a support contact is configured");
+  });
+
+  it("refuses a SUPPORT_EMAIL that is not an address, rather than print a dead link", () => {
+    process.env["SUPPORT_EMAIL"] = "help at example";
+    expect(thrownMessage()).toContain("SUPPORT_EMAIL");
+  });
+
   it("no longer reads ADMIN_PASSWORD at all", () => {
     expect("adminPassword" in loadConfig(root)).toBe(false);
+  });
+});
+
+describe("SERVE_CLIENT", () => {
+  let savedServe: string | undefined;
+  beforeEach(() => {
+    savedServe = process.env["SERVE_CLIENT"];
+    delete process.env["SERVE_CLIENT"];
+  });
+  afterEach(() => {
+    if (savedServe === undefined) delete process.env["SERVE_CLIENT"];
+    else process.env["SERVE_CLIENT"] = savedServe;
+  });
+
+  it("is on by default, so the one image deploy serves the client exactly as before", () => {
+    expect(loadConfig(root).serveClient).toBe(true);
+    process.env["SERVE_CLIENT"] = "  ";
+    expect(loadConfig(root).serveClient).toBe(true);
+  });
+
+  it("turns off with 0, false or off, for an API only server behind a static site", () => {
+    for (const value of ["0", "false", "off", "OFF"]) {
+      process.env["SERVE_CLIENT"] = value;
+      expect(loadConfig(root).serveClient).toBe(false);
+    }
+  });
+
+  it("stays on with 1, true or on", () => {
+    for (const value of ["1", "true", "on"]) {
+      process.env["SERVE_CLIENT"] = value;
+      expect(loadConfig(root).serveClient).toBe(true);
+    }
+  });
+
+  it("refuses a value it does not know rather than guessing which one was meant", () => {
+    process.env["SERVE_CLIENT"] = "nope";
+    expect(thrownMessage()).toContain("SERVE_CLIENT");
+  });
+
+  it("says in the boot report when the server is API only", () => {
+    process.env["SERVE_CLIENT"] = "0";
+    expect(describeConfig(loadConfig(root)).join("\n")).toContain("API only");
+  });
+});
+
+describe("SPEND_ENV", () => {
+  let saved: { spend: string | undefined; node: string | undefined };
+  beforeEach(() => {
+    saved = { spend: process.env["SPEND_ENV"], node: process.env["NODE_ENV"] };
+    delete process.env["SPEND_ENV"];
+  });
+  afterEach(() => {
+    if (saved.spend === undefined) delete process.env["SPEND_ENV"];
+    else process.env["SPEND_ENV"] = saved.spend;
+    if (saved.node === undefined) delete process.env["NODE_ENV"];
+    else process.env["NODE_ENV"] = saved.node;
+  });
+
+  it("labels a developer's machine local without anyone setting it", () => {
+    process.env["NODE_ENV"] = "development";
+    expect(loadConfig(root).spendEnv).toBe("local");
+  });
+
+  it("reads a named environment, such as the Pi", () => {
+    process.env["SPEND_ENV"] = "Pi";
+    expect(loadConfig(root).spendEnv).toBe("pi");
+  });
+
+  it("refuses a name that would become a messy ledger column", () => {
+    process.env["SPEND_ENV"] = "my laptop";
+    expect(thrownMessage()).toContain("SPEND_ENV");
+  });
+
+  it("names the environment in the boot report", () => {
+    process.env["SPEND_ENV"] = "pi";
+    expect(describeConfig(loadConfig(root)).join("\n")).toContain('spend is labeled "pi"');
   });
 });

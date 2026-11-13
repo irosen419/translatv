@@ -13,7 +13,7 @@
 
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual, type ScryptOptions } from "node:crypto";
 
-import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@translatv/shared";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, unmetPasswordRules } from "@translatv/shared";
 
 // The policy numbers live in shared/src/auth.ts so the client can explain them in the reader's
 // language; this is where they are enforced.
@@ -41,8 +41,9 @@ function memoryFor(N: number, r: number): number {
   return 128 * N * r + 1024 * 1024;
 }
 
+/** Whether a new password meets the policy in shared/src/auth.ts. Sign in never asks this. */
 export function passwordIsAcceptable(password: string): boolean {
-  return password.length >= MIN_PASSWORD_LENGTH && password.length <= MAX_PASSWORD_LENGTH;
+  return unmetPasswordRules(password).length === 0;
 }
 
 export async function hashPassword(password: string): Promise<string> {

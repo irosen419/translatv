@@ -155,6 +155,13 @@ export class PeerConnection {
    * setup above already handles like any other renegotiation.
    */
   addVideoTrack(track: MediaStreamTrack, stream: MediaStream): void {
+    // A camera that ended mid call leaves its sender behind, still holding the dead track. Reuse
+    // it: a second video sender would renegotiate and leave the peer with two video tracks.
+    const sender = this.pc.getSenders().find((s) => s.track?.kind === "video");
+    if (sender) {
+      void sender.replaceTrack(track);
+      return;
+    }
     this.pc.addTrack(track, stream);
   }
 

@@ -3,5 +3,6 @@
   "protocolVersion": 2,
   "apiVersion": 1,
   "signup": "invite",
-  "translation": "enabled"
+  "translation": "enabled",
+  "supportEmail": "help@example.test"
 }

@@ -45,7 +45,44 @@ export interface ChipState {
    * it went onto the screen of whoever was in the call whatever language they had picked.
    */
   translationUnavailable: TranslationFailureCode | null;
+  /**
+   * Your own lines keep coming back from translation nearly unchanged, which means you are
+   * speaking the other person's language under your own setting (lib/languageMismatch.ts).
+   */
+  speakingOtherLanguage?: boolean;
   onToggleSttEngine(): void;
+}
+
+/**
+ * The full sentence version of a speech failure, or null when there is nothing to say.
+ *
+ * Separate from the chips because it answers a different question. A chip says WHAT state the
+ * call is in, in two words, in a strip people scan. This says what it MEANS, and it exists
+ * because two words were not enough: a real call ran with the speaker believing they were being
+ * subtitled, while "no subtitles" sat in a pill and the explanation sat in a `title` tooltip
+ * that a phone never shows.
+ *
+ * Only the terminal states. `reconnecting` and `downloading` both resolve on their own, and a
+ * banner that appears on every wobble is one people learn to dismiss without reading, which
+ * costs the real one its audience.
+ */
+export interface SttAlert {
+  /** That it is YOUR device, so it reads as yours to fix rather than as the app being broken. */
+  title: CopyKey;
+  /** What the other person loses, which is the part nobody works out for themselves. */
+  body: CopyKey;
+  /** The adapter's own device specific instructions, passed through rather than restated. */
+  notice: CopyRef;
+}
+
+export function sttAlert(state: Pick<ChipState, "sttStatus">): SttAlert | null {
+  const { sttStatus } = state;
+  if (sttStatus.kind !== "blocked" && sttStatus.kind !== "failed") return null;
+  return {
+    title: "alert.noSubtitles.title",
+    body: "alert.noSubtitles.body",
+    notice: sttStatus.notice,
+  };
 }
 
 /** Is this chip telling the user something is wrong right now? */
@@ -64,9 +101,17 @@ export function buildChips(state: ChipState): Chip[] {
     peerMicEnabled,
     peerWantsTranslation,
     translationUnavailable,
+    speakingOtherLanguage = false,
     onToggleSttEngine,
   } = state;
   const chips: Chip[] = [];
+
+  // Yours to fix, and invisible otherwise: the other person reads your words "translated" into
+  // the language they were already in, and you see nothing wrong at all. A warning, so it floats
+  // over the video on a phone, where the dialect picker is one tap away in the drawer.
+  if (speakingOtherLanguage) {
+    chips.push({ text: "chips.wrongLanguage", tone: "warn", title: { key: "chips.wrongLanguage.title" } });
+  }
 
   // First in the list, and tone "bad" so it counts as a problem and floats over the video on a
   // phone rather than hiding in the drawer. Translation IS the product: a call where it has

@@ -286,6 +286,21 @@ describe("entry", () => {
     expect(tinyButWrong).toThrow(RangeError);
   });
 
+  it("accepts its own six decimal rounding on a call that costs a hundredth of a cent", () => {
+    // A Haiku 5.5 line costs about $0.0001, where rounding to the house's six decimals moves the
+    // cost by up to half a millionth: 0.5 percent, five times the relative band. Every row such a
+    // call wrote was refused by the module's own rounding (found by the blind test's dry run).
+    const record = entry({ program: "blind-test", kind: "eval", model: "claude-haiku-5-5", inputTokens: 953, outputTokens: 7 });
+    expect(record.cost_usd).toBe(0.000099);
+  });
+
+  it("still refuses a tiny cost that is wrong by more than its rounding", () => {
+    // Expected $0.0000988. A millionth off is twice what rounding can explain.
+    expect(() =>
+      entry({ program: "blind-test", kind: "eval", model: "claude-haiku-5-5", inputTokens: 953, outputTokens: 7, costUsdOverride: 0.000097 }),
+    ).toThrow(RangeError);
+  });
+
   it("does not write image_count, because this project renders nothing", () => {
     // It used to write a literal 0 on the theory that the dashboard needed the key present. It
     // does not: its reader is `value.is_a?(Numeric) ? value.to_i : 0`, so an absent key already
@@ -448,6 +463,23 @@ describe("pricing", () => {
     // A price with no citable source does not belong in the table at all.
     const price = priceFor("claude-haiku-4-5");
     expect(price?.source).toBeTruthy();
+  });
+
+  it("stamps a long prompt row with the rates it was billed at, so its arithmetic checks out", () => {
+    // A Haiku 5.5 call over 100,000 input tokens is billed at the long rate on everything. The row
+    // has to say so: written with the short unit prices, its own arithmetic would contradict its
+    // cost, and both readers would show a unit price nobody was charged.
+    const long = entry({ program: "p", kind: "eval", model: "claude-haiku-5-5", inputTokens: 100_001, outputTokens: 1000 });
+    expect(long).toMatchObject({ unit_cost_in_usd_per_mtok: 0.5, unit_cost_out_usd_per_mtok: 2.5, cost_usd: 0.052501 });
+    const short = entry({ program: "p", kind: "eval", model: "claude-haiku-5-5", inputTokens: 100_000, outputTokens: 1000 });
+    expect(short).toMatchObject({ unit_cost_in_usd_per_mtok: 0.1, unit_cost_out_usd_per_mtok: 0.5, cost_usd: 0.0105 });
+  });
+
+  it("refuses a long prompt cost stated at the short rate", () => {
+    // The under-logging this tier exists to prevent, arriving as an override.
+    expect(() =>
+      entry({ program: "p", kind: "eval", model: "claude-haiku-5-5", inputTokens: 100_001, outputTokens: 1000, costUsdOverride: 0.010501 }),
+    ).toThrow(RangeError);
   });
 
   it("rounds to six decimals, matching spend_log.py and the dashboard's Ruby reader", () => {
@@ -625,6 +657,110 @@ describe("parity with the Python renderer", () => {
     // one embedded newline. The claim under test is "identical modulo that one documented
     // print() newline", not "identical strings", so the expectation says so rather than
     // trimming both sides and hiding what the difference actually is.
+    expect(python.stdout).toBe(`${tsOutput}\n`);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Attribution: where a call ran (env) and whose call it was (owner_call, user_tag).
+// ---------------------------------------------------------------------------------------------
+
+const ATTRIBUTION_PROJECT = "fixture-attribution";
+
+// The shared contract for the attribution fixture. Mirrored in test_spend_log.py.
+const EXPECTED_ENVS = {
+  local: { env: "local", spent_usd: 0.001, entries: 1 },
+  pi: { env: "pi", spent_usd: 0.0025, entries: 2 },
+  production: { env: "production", spent_usd: 0, entries: 1 },
+  unrecorded: { env: "unrecorded", spent_usd: 0.004, entries: 1 },
+};
+const EXPECTED_BY_OWNER = {
+  owner: { spent_usd: 0.0015, entries: 2 },
+  others: { spent_usd: 0.002, entries: 2 },
+  unrecorded: { spent_usd: 0.004, entries: 1 },
+};
+
+describe("attribution on a ledger row", () => {
+  const base = {
+    program: "runtime-translation",
+    kind: "translation" as const,
+    model: "claude-haiku-4-5",
+    inputTokens: 500,
+    outputTokens: 100,
+    ts: "2026-11-11T19:00:00.000Z",
+  };
+
+  it("writes env, owner_call and user_tag when given", () => {
+    const record = entry({ ...base, env: "pi", ownerCall: true, userTag: "0123456789abcdef" });
+    expect(record.env).toBe("pi");
+    expect(record.owner_call).toBe(true);
+    expect(record.user_tag).toBe("0123456789abcdef");
+  });
+
+  it("writes an explicit false owner_call, which is a fact, not an absence", () => {
+    const record = entry({ ...base, ownerCall: false });
+    expect(record.owner_call).toBe(false);
+  });
+
+  it("leaves every ordinary row byte for byte as before when none is given", () => {
+    const record = entry(base);
+    expect(Object.keys(record)).not.toContain("env");
+    expect(Object.keys(record)).not.toContain("owner_call");
+    expect(Object.keys(record)).not.toContain("user_tag");
+  });
+
+  it("refuses an environment name that would split one environment into several", () => {
+    expect(() => entry({ ...base, env: "Pi" })).toThrow(RangeError);
+    expect(() => entry({ ...base, env: "my laptop" })).toThrow(RangeError);
+  });
+
+  it("refuses a user tag that is not a tag, such as a raw account id or an email", () => {
+    expect(() => entry({ ...base, userTag: "user-1" })).toThrow(RangeError);
+    expect(() => entry({ ...base, userTag: "someone@example.test" })).toThrow(RangeError);
+  });
+});
+
+describe("attribution totals", () => {
+  const records = (): SpendRecord[] => load({ root: FIXTURE_ROOT, project: ATTRIBUTION_PROJECT });
+
+  it("buckets spend by environment, with rows written before attribution as unrecorded", () => {
+    expect(totals(records()).envs).toEqual(EXPECTED_ENVS);
+  });
+
+  it("splits the owner's calls from other people's, with older rows as unrecorded", () => {
+    expect(totals(records()).by_owner).toEqual(EXPECTED_BY_OWNER);
+  });
+
+  it("counts a row with no recoverable cost as an entry that adds nothing", () => {
+    expect(totals(records()).envs["production"]).toEqual({ env: "production", spent_usd: 0, entries: 1 });
+  });
+
+  it("says nothing about attribution in the view when no row carries it", () => {
+    const text = renderMarkdown({ root: FIXTURE_ROOT, project: FIXTURE_PROJECT });
+    expect(text).not.toContain("By environment");
+    expect(text).not.toContain("Owner's calls");
+  });
+
+  it("summarizes environment and owner spend in the view when rows carry them", () => {
+    const text = renderMarkdown({ root: FIXTURE_ROOT, project: ATTRIBUTION_PROJECT });
+    expect(text).toContain(
+      "By environment: local $0.0010 (calls: 1), pi $0.0025 (calls: 2), " +
+        "production $0.0000 (calls: 1), unrecorded $0.0040 (calls: 1).",
+    );
+    expect(text).toContain(
+      "Owner's calls $0.0015 (calls: 2), other people's $0.0020 (calls: 2), " +
+        "unrecorded $0.0040 (calls: 1).",
+    );
+  });
+
+  it("renders the attribution fixture byte identical to spend_log.py", () => {
+    const tsOutput = renderMarkdown({ root: FIXTURE_ROOT, project: ATTRIBUTION_PROJECT });
+    const python = spawnSync(
+      "python3",
+      [join(REPO_ROOT, "spend_log.py"), "render", ATTRIBUTION_PROJECT, "--root", FIXTURE_ROOT],
+      { encoding: "utf8" },
+    );
+    expect(python.status).toBe(0);
     expect(python.stdout).toBe(`${tsOutput}\n`);
   });
 });

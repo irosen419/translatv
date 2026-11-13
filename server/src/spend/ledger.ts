@@ -42,7 +42,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { costUsd, MONEY_PRECISION, priceFor, roundMoney } from "./pricing.js";
+import { costUsd, MONEY_PRECISION, ratesFor, roundMoney } from "./pricing.js";
+import { SPEND_ENV_PATTERN, USER_TAG_PATTERN } from "./attribution.js";
 
 export const LEDGER_FILE = "spend_log.jsonl";
 export const MARKDOWN_FILE = "spend_log.md";
@@ -99,6 +100,17 @@ export const COST_TOLERANCE_RELATIVE = 0.001;
  */
 export const COST_TOLERANCE_FLOOR_USD = 1e-9;
 
+/**
+ * Half of the smallest amount a stored cost can express: every cost is rounded to MONEY_PRECISION
+ * decimals, so a correct cost can sit up to this far from its unrounded arithmetic.
+ *
+ * Invisible while the cheapest call cost about $0.001, where it is 0.05 percent and inside the
+ * relative band. A Claude Haiku 5.5 line costs about $0.0001, where it is 0.5 percent, and without
+ * this every such row was refused over the module's own rounding. It is far too small to hide a
+ * real mismatch, which is off by a whole model's pricing.
+ */
+export const COST_TOLERANCE_ROUNDING_USD = 0.5 * 10 ** -MONEY_PRECISION;
+
 export interface SpendRecord {
   ts: string | null;
   project: string;
@@ -129,6 +141,22 @@ export interface SpendRecord {
    * row, so older rows need no rewrite.
    */
   billable?: false;
+  /**
+   * Where the call ran: "local" for a developer's machine, "pi", "production", and so on (see
+   * spend/attribution.ts). Absent on rows written before attribution existed, which every reader
+   * shows as "unrecorded" rather than guessing.
+   */
+  env?: string;
+  /**
+   * Whether the owner's account (OWNER_EMAIL) was on the call, so the owner's own use and testing
+   * can be told apart from other people's. Absent on older rows and on spend that is not a call.
+   */
+  owner_call?: boolean;
+  /**
+   * Whose line it was: a keyed hash of the speaker's account id (spend/attribution.ts), never the
+   * id, an email or a name. This file is committed to a public repository.
+   */
+  user_tag?: string;
 }
 
 export interface HeaderRecord {
@@ -144,6 +172,21 @@ export interface ProgramTotal {
   entries: number;
 }
 
+/** Spend in one environment. Rows with no env are bucketed under UNRECORDED. */
+export interface EnvTotal {
+  env: string;
+  spent_usd: number;
+  entries: number;
+}
+
+export interface SpendBucket {
+  spent_usd: number;
+  entries: number;
+}
+
+/** The bucket name for rows written before attribution existed. Never guessed into another. */
+export const UNRECORDED = "unrecorded";
+
 export interface Totals {
   known_usd: number;
   unparsed_rows: number;
@@ -151,6 +194,10 @@ export interface Totals {
   input_tokens: number;
   output_tokens: number;
   programs: Record<string, ProgramTotal>;
+  /** Spend per environment, keyed by env name, with older rows under "unrecorded". */
+  envs: Record<string, EnvTotal>;
+  /** The owner's calls, other people's, and rows that do not say. */
+  by_owner: { owner: SpendBucket; others: SpendBucket; unrecorded: SpendBucket };
 }
 
 /**
@@ -275,6 +322,9 @@ function checkCostConsistency(
     (inputTokens / 1_000_000) * inRate + (outputTokens / 1_000_000) * outRate;
   const tolerance = Math.max(
     COST_TOLERANCE_FLOOR_USD,
+    // Plus the tiniest margin, so a cost that rounded exactly half a unit is not refused over the
+    // floating point representation of that half.
+    COST_TOLERANCE_ROUNDING_USD * (1 + 1e-9),
     Math.abs(expected) * COST_TOLERANCE_RELATIVE,
   );
   if (Math.abs(costUsdValue - expected) <= tolerance) return;
@@ -306,6 +356,12 @@ export interface EntryOptions {
   worstCaseUsd?: number | null;
   /** See SpendRecord.billable. */
   billable?: boolean;
+  /** See SpendRecord.env. Must match SPEND_ENV_PATTERN. */
+  env?: string;
+  /** See SpendRecord.owner_call. */
+  ownerCall?: boolean;
+  /** See SpendRecord.user_tag. Must be a tag from userTag(), never an id. */
+  userTag?: string;
 }
 
 /**
@@ -333,9 +389,23 @@ export function entry(options: EntryOptions): SpendRecord {
     project = PROJECT_SLUG,
     worstCaseUsd = null,
     billable = true,
+    env,
+    ownerCall,
+    userTag,
   } = options;
 
-  const price = priceFor(model);
+  // Checked here, at write time, like a contradicting cost: a malformed label would split one
+  // environment's spend across two buckets, and a raw account id in user_tag would publish it.
+  if (env !== undefined && !SPEND_ENV_PATTERN.test(env)) {
+    throw new RangeError(`env must be a SPEND_ENV name such as "local" or "pi", got ${JSON.stringify(env)}`);
+  }
+  if (userTag !== undefined && !USER_TAG_PATTERN.test(userTag)) {
+    throw new RangeError("user_tag must be a 16 character hex tag from userTag(), never an account id");
+  }
+
+  // The rates THIS call was billed at: a long prompt is billed at its model's long rate (see
+  // ModelPrice.longPrompt), and a row stamped with the base rate would contradict its own cost.
+  const price = ratesFor(model, inputTokens ?? 0);
   const inRate = price?.inputUsdPerMTok ?? null;
   const outRate = price?.outputUsdPerMTok ?? null;
 
@@ -386,6 +456,9 @@ export function entry(options: EntryOptions): SpendRecord {
     // Written only when they say something, so every ordinary row stays byte for byte as before.
     ...(worstCaseUsd !== null ? { worst_case_usd: roundMoney(worstCaseUsd) } : {}),
     ...(billable ? {} : { billable: false as const }),
+    ...(env !== undefined ? { env } : {}),
+    ...(ownerCall !== undefined ? { owner_call: ownerCall } : {}),
+    ...(userTag !== undefined ? { user_tag: userTag } : {}),
   };
 }
 
@@ -555,11 +628,31 @@ export function totals(records: SpendRecord[]): Totals {
   let inputTokens = 0;
   let outputTokens = 0;
   const programs: Record<string, ProgramTotal> = {};
+  const envs: Record<string, EnvTotal> = {};
+  const byOwner = {
+    owner: { spent_usd: 0, entries: 0 },
+    others: { spent_usd: 0, entries: 0 },
+    unrecorded: { spent_usd: 0, entries: 0 },
+  };
 
   for (const record of records) {
     const cost = typeof record.cost_usd === "number" ? record.cost_usd : null;
     if (cost === null) unparsed += 1;
     else known += cost;
+
+    const envName = typeof record.env === "string" && record.env.length > 0 ? record.env : UNRECORDED;
+    const envBucket = (envs[envName] ??= { env: envName, spent_usd: 0, entries: 0 });
+    envBucket.entries += 1;
+    if (cost !== null) envBucket.spent_usd = roundMoney(envBucket.spent_usd + cost);
+
+    const ownerBucket =
+      record.owner_call === true
+        ? byOwner.owner
+        : record.owner_call === false
+          ? byOwner.others
+          : byOwner.unrecorded;
+    ownerBucket.entries += 1;
+    if (cost !== null) ownerBucket.spent_usd = roundMoney(ownerBucket.spent_usd + cost);
 
     inputTokens += record.input_tokens ?? 0;
     outputTokens += record.output_tokens ?? 0;
@@ -585,7 +678,38 @@ export function totals(records: SpendRecord[]): Totals {
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     programs,
+    envs,
+    by_owner: byOwner,
   };
+}
+
+/** "$0.0010 (calls: 1)", the one shape both attribution summary lines use. */
+function bucketText(bucket: SpendBucket): string {
+  return `$${bucket.spent_usd.toFixed(4)} (calls: ${bucket.entries})`;
+}
+
+/**
+ * The view's attribution summary: one line per kind of label, and only when some row carries
+ * that label, so a ledger written before attribution existed renders exactly as it always has.
+ * Environments sort by name with "unrecorded" last. Mirrored in spend_log.py.
+ */
+function attributionLines(records: SpendRecord[], summary: Totals): string[] {
+  const lines: string[] = [];
+  if (records.some((r) => typeof r.env === "string" && r.env.length > 0)) {
+    const names = Object.keys(summary.envs)
+      .filter((name) => name !== UNRECORDED)
+      .sort();
+    if (summary.envs[UNRECORDED]) names.push(UNRECORDED);
+    const parts = names.map((name) => `${name} ${bucketText(summary.envs[name] as EnvTotal)}`);
+    lines.push(`By environment: ${parts.join(", ")}.`);
+  }
+  if (records.some((r) => typeof r.owner_call === "boolean")) {
+    const { owner, others, unrecorded } = summary.by_owner;
+    const parts = [`Owner's calls ${bucketText(owner)}`, `other people's ${bucketText(others)}`];
+    if (unrecorded.entries > 0) parts.push(`unrecorded ${bucketText(unrecorded)}`);
+    lines.push(`${parts.join(", ")}.`);
+  }
+  return lines;
 }
 
 /**
@@ -640,6 +764,7 @@ export function renderMarkdown(options: LoadOptions & { write?: boolean }): stri
       `${summary.unparsed_rows} entries carry no recoverable cost, so the total above is a floor.`,
     );
   }
+  lines.push(...attributionLines(records, summary));
   lines.push(
     "",
     "| ts | program | kind | model | in | out | cost | cap | note |",

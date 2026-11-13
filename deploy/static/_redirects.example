@@ -1,0 +1,12 @@
+# SPA fallback for the web client as a static site (Cloudflare Pages `_redirects` format; Netlify
+# reads the same format). An EXAMPLE, named so that no host picks it up by itself: copy it to
+# client/dist/_redirects after `npm run build:static` (DEPLOY.md, "Two services").
+#
+# A room link is /r/<code>. It is a client side route with no file behind it, so a static host
+# must answer it with index.html and a 200, or a shared link opened as a first navigation is a 404.
+# Files that exist (index.html, /assets/*) are served as themselves before this rule applies.
+#
+# Cloudflare Pages already falls back to index.html when the project has no 404.html, so there
+# this file is belt and braces; on hosts without that default it is required.
+
+/*    /index.html   200

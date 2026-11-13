@@ -22,10 +22,10 @@ import { roomHash, SpendGate } from "../spend/caps.js";
 import { openStore, type Store } from "../store/index.js";
 import { TranslationService } from "../translate/TranslationService.js";
 import { SignalingServer } from "../ws/server.js";
-import { AccountService } from "./service.js";
+import { AccountService, contactIdFor } from "./service.js";
 
 const ORIGIN = "http://localhost:5173";
-const PASSWORD = randomBytes(12).toString("hex");
+const PASSWORD = `Aa1!${randomBytes(12).toString("hex")}`;
 
 let root: string;
 let store: Store;
@@ -45,6 +45,7 @@ function config(): Config {
     authSecret: null,
     signupMode: "open",
     ownerEmail: null,
+    supportEmail: null,
     dailyCapUsd: 10,
     roomCapUsd: 1.5,
     iceServers: [],
@@ -52,6 +53,7 @@ function config(): Config {
     trustProxy: false,
     dataDir: root,
     databasePath: ":memory:",
+    serveClient: true,
   };
 }
 
@@ -264,6 +266,19 @@ describe("call history from a room's lifecycle", () => {
 
     const dump = JSON.stringify(store.db.prepare("SELECT * FROM call_history").all());
     expect(dump).not.toContain(code);
+  });
+
+  it("keeps no row for a call nobody joined, once it ends", async () => {
+    // A host who opened a room and left alone had a call in their history named "Nobody joined",
+    // one per attempt (owner report, 2026-11-13). It was never a call with anyone.
+    const session = await signup("Ana");
+    const host = await Client.connect(session);
+    host.send({ t: "room.create", username: "Ana", dialect: "en-US", wantsVideo: false });
+    await host.next("room.created");
+    expect(rowsFor(session.user.id)).toHaveLength(1); // open while they wait
+    host.send({ t: "room.end" });
+    await host.closed();
+    await until(() => rowsFor(session.user.id).length === 0);
   });
 
   it("closes the guest's row when they leave, and the host's when the room ends", async () => {
@@ -575,5 +590,178 @@ describe("deleting an account with a live socket", () => {
     expect(await deleteOver(session)).toBe(204);
     expect(await idle.closed()).toBe(CLOSE.normal);
     await expect(Client.connect(session)).rejects.toThrow();
+  });
+});
+
+describe("the peer's contactId in a call", () => {
+  it("is each reader's own contactId for the other, the one their call history carries", async () => {
+    const anaSession = await signup("Ana");
+    const benSession = await signup("Ben");
+    const ana = await Client.connect(anaSession);
+    ana.send({ t: "room.create", username: "Ana", dialect: "es-AR", wantsVideo: false });
+    const created = await ana.next("room.created");
+    const ben = await Client.connect(benSession);
+    ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "en-US" });
+    const joined = await ben.next("room.joined");
+    const arrived = await ana.next("peer.joined");
+    expect(joined.peerContactId).toBe(contactIdFor(benSession.user.id, anaSession.user.id));
+    expect(arrived.contactId).toBe(contactIdFor(anaSession.user.id, benSession.user.id));
+    const history = account.callsFor(benSession.user.id, {});
+    expect(history.ok && history.value.calls[0]?.peer?.contactId).toBe(joined.peerContactId);
+  });
+
+  it("never arises for one account on both ends, which is refused with SAME_ACCOUNT", async () => {
+    // It used to be a call with yourself, with no contactId either way. Now the second device is
+    // turned away, so the account's saved dialect and history are never written by two seats.
+    const session = await signup("Ana");
+    const host = await Client.connect(session);
+    host.send({ t: "room.create", username: "Ana", dialect: "es-AR", wantsVideo: false });
+    const created = await host.next("room.created");
+    const tab = await Client.connect(session);
+    tab.send({ t: "room.join", code: created.code, username: "Ana 2", dialect: "en-US" });
+    expect((await tab.next("error")).code).toBe("SAME_ACCOUNT");
+    expect(host.received.some((m) => m.t === "peer.joined")).toBe(false);
+    expect(account.callsFor(session.user.id, {}).ok).toBe(true);
+  });
+});
+
+describe("a block between two accounts", () => {
+  async function blockOver(session: AuthSession, contactId: string): Promise<number> {
+    const response = await fetch(`${base}/api/me/blocks`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${session.accessToken}` },
+      body: JSON.stringify({ contactId }),
+    });
+    return response.status;
+  }
+
+  /** Ana and Ben were on a call once, and it is over. */
+  async function pastCall() {
+    const { anaSession, benSession, ana, ben } = await pair();
+    ben.send({ t: "room.leave" });
+    await ben.closed();
+    ana.send({ t: "room.end" });
+    await ana.closed();
+    return { anaSession, benSession };
+  }
+
+  /** What a guest is told on joining a room. The error frame only. */
+  async function joinRefusal(guest: AuthSession, code: string) {
+    const client = await Client.connect(guest);
+    client.send({ t: "room.join", code, username: "Guest", dialect: "en-US" });
+    return client.next("error");
+  }
+
+  it.each([
+    ["the host blocked the guest", "host"],
+    ["the guest blocked the host", "guest"],
+  ])("keeps them out of one room when %s", async (_name, who) => {
+    const { anaSession, benSession } = await pastCall();
+    if (who === "host") account.block(anaSession.user.id, { contactId: contactIdFor(anaSession.user.id, benSession.user.id) }, Date.now());
+    else account.block(benSession.user.id, { contactId: contactIdFor(benSession.user.id, anaSession.user.id) }, Date.now());
+
+    const host = await Client.connect(anaSession);
+    host.send({ t: "room.create", username: "Ana", dialect: "es-AR", wantsVideo: false });
+    const created = await host.next("room.created");
+    const refusal = await joinRefusal(benSession, created.code);
+    expect(refusal).toEqual({ t: "error", code: "HOST_NOT_PRESENT", fatal: true });
+
+    // The host hears nothing at all about it.
+    host.send({ t: "ping" });
+    await host.next("pong");
+    expect(host.received.some((m) => m.t === "peer.joined" || m.t === "error")).toBe(false);
+    // And somebody else still gets in.
+    const cam = await Client.connect(await signup("Cam"));
+    cam.send({ t: "room.join", code: created.code, username: "Cam", dialect: "en-US" });
+    await cam.next("room.joined");
+  });
+
+  it("refuses in exactly the words a code with nobody behind it gets, so the refusal tells nothing", async () => {
+    const { anaSession, benSession } = await pastCall();
+    account.block(anaSession.user.id, { contactId: contactIdFor(anaSession.user.id, benSession.user.id) }, Date.now());
+    const host = await Client.connect(anaSession);
+    host.send({ t: "room.create", username: "Ana", dialect: "es-AR", wantsVideo: false });
+    const created = await host.next("room.created");
+    const blocked = await joinRefusal(benSession, created.code);
+    const nobody = await joinRefusal(benSession, "ZZZZZZZZ");
+    expect(blocked).toEqual(nobody);
+  });
+
+  it("still answers ROOM_FULL when the room is full, the same as for anyone", async () => {
+    const { anaSession, benSession } = await pastCall();
+    account.block(anaSession.user.id, { contactId: contactIdFor(anaSession.user.id, benSession.user.id) }, Date.now());
+    const host = await Client.connect(anaSession);
+    host.send({ t: "room.create", username: "Ana", dialect: "es-AR", wantsVideo: false });
+    const created = await host.next("room.created");
+    const cam = await Client.connect(await signup("Cam"));
+    cam.send({ t: "room.join", code: created.code, username: "Cam", dialect: "en-US" });
+    await cam.next("room.joined");
+    expect((await joinRefusal(benSession, created.code)).code).toBe("ROOM_FULL");
+  });
+
+  it("made during a call, ends it for both the way ending it does", async () => {
+    const { anaSession, benSession, ana, ben } = await pair();
+    expect(await blockOver(benSession, contactIdFor(benSession.user.id, anaSession.user.id))).toBe(200);
+    const toAna = await ana.next("room.ended");
+    const toBen = await ben.next("room.ended");
+    // Exactly what End chat says, naming who ended it, and nothing about why.
+    expect(toAna).toEqual({ t: "room.ended", by: toBen.by, byUsername: "Ben" });
+    expect(await ana.closed()).toBe(CLOSE.roomEnded);
+    expect(await ben.closed()).toBe(CLOSE.roomEnded);
+    expect(rowsFor(anaSession.user.id)[0]?.ended_at).not.toBeNull();
+    expect(rowsFor(benSession.user.id)[0]?.ended_at).not.toBeNull();
+  });
+
+  it("made with a report during a call, ends it the same way", async () => {
+    const { anaSession, benSession, ana, ben } = await pair();
+    const response = await fetch(`${base}/api/me/reports`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${anaSession.accessToken}` },
+      body: JSON.stringify({ contactId: contactIdFor(anaSession.user.id, benSession.user.id), reason: "harassment", alsoBlock: true }),
+    });
+    expect(response.status).toBe(201);
+    await ben.next("room.ended");
+    await ana.next("room.ended");
+  });
+
+  it("leaves a call with somebody else alone", async () => {
+    const { anaSession, benSession } = await pastCall();
+    const host = await Client.connect(anaSession);
+    host.send({ t: "room.create", username: "Ana", dialect: "es-AR", wantsVideo: false });
+    const created = await host.next("room.created");
+    const cam = await Client.connect(await signup("Cam"));
+    cam.send({ t: "room.join", code: created.code, username: "Cam", dialect: "en-US" });
+    await cam.next("room.joined");
+    expect(await blockOver(anaSession, contactIdFor(anaSession.user.id, benSession.user.id))).toBe(200);
+    host.send({ t: "ping" });
+    await host.next("pong");
+    expect(host.received.some((m) => m.t === "room.ended")).toBe(false);
+    expect(host.closeCode).toBeNull();
+  });
+
+  it("a report without a block leaves the call going", async () => {
+    const { anaSession, benSession, ana } = await pair();
+    const response = await fetch(`${base}/api/me/reports`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${anaSession.accessToken}` },
+      body: JSON.stringify({ contactId: contactIdFor(anaSession.user.id, benSession.user.id), reason: "other" }),
+    });
+    expect(response.status).toBe(201);
+    ana.send({ t: "ping" });
+    await ana.next("pong");
+    expect(ana.received.some((m) => m.t === "room.ended")).toBe(false);
+  });
+
+  it("lifted, lets them be in a room together again", async () => {
+    const { anaSession, benSession } = await pastCall();
+    const contactId = contactIdFor(anaSession.user.id, benSession.user.id);
+    account.block(anaSession.user.id, { contactId }, Date.now());
+    account.unblock(anaSession.user.id, { contactId });
+    const host = await Client.connect(anaSession);
+    host.send({ t: "room.create", username: "Ana", dialect: "es-AR", wantsVideo: false });
+    const created = await host.next("room.created");
+    const ben = await Client.connect(benSession);
+    ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "en-US" });
+    await ben.next("room.joined");
   });
 });

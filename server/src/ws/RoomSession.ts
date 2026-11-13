@@ -47,6 +47,59 @@ export class RoomSession {
    */
   private readonly saved = new Map<string, readonly GlossaryEntry[]>();
 
+  /**
+   * The translation calls still out per line, oldest first, held only while one is in flight.
+   *
+   * Translations run concurrently, so two calls for ONE line (the original and a retry, or two
+   * people clicking retry together) can land in either order. The revision cannot settle it: it
+   * is stamped when a result lands, not when its call was made, so a stale answer landing last
+   * gets the higher revision and wins on every client. The newest call still out is the one to
+   * show.
+   */
+  private readonly openCalls = new Map<string, number[]>();
+  private callCounter = 0;
+
+  /** Note that a translation call for this line is starting, and return its ticket. */
+  beginTranslation(lineId: string): number {
+    this.callCounter += 1;
+    const open = this.openCalls.get(lineId) ?? [];
+    open.push(this.callCounter);
+    this.openCalls.set(lineId, open);
+    return this.callCounter;
+  }
+
+  /**
+   * Whether a call's answer is still the one to show: true only for the newest call still out
+   * for the line. Settling the newest closes every older one too, since nothing older may land
+   * over it, so the map never holds more than the lines with a call in flight.
+   */
+  settleTranslation(lineId: string, ticket: number): boolean {
+    const open = this.openCalls.get(lineId);
+    if (!open?.includes(ticket)) return false;
+    if (open.at(-1) === ticket) {
+      this.openCalls.delete(lineId);
+      return true;
+    }
+    this.forget(lineId, open, ticket);
+    return false;
+  }
+
+  /**
+   * A call that ended with no answer at all (it threw). It stops being the newest, so an older
+   * call still out for the line becomes the one to show again rather than being dropped as stale
+   * behind a call that will never land.
+   */
+  abandonTranslation(lineId: string, ticket: number): void {
+    const open = this.openCalls.get(lineId);
+    if (open) this.forget(lineId, open, ticket);
+  }
+
+  private forget(lineId: string, open: number[], ticket: number): void {
+    const rest = open.filter((t) => t !== ticket);
+    if (rest.length === 0) this.openCalls.delete(lineId);
+    else this.openCalls.set(lineId, rest);
+  }
+
   nextLineId(): string {
     lineCounter += 1;
     return `L${lineCounter}`;

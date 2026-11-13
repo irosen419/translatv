@@ -16,6 +16,7 @@ import { flushView, isEphemeralLedger, ledgerWritable } from "./spend/ledger.js"
 import { createAnthropicClient } from "./translate/anthropic.js";
 import { TranslationService } from "./translate/TranslationService.js";
 import { SignalingServer } from "./ws/server.js";
+import { spendTagKey } from "./spend/attribution.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // dist/index.js sits two levels below the server workspace, which is one below the repo root.
@@ -141,7 +142,12 @@ const auth = new AuthService(store, {
 });
 
 const llm = writable.ok && config.anthropicApiKey ? createAnthropicClient(config.anthropicApiKey) : null;
-const translation = new TranslationService(llm, gate, repoRoot);
+// Each paid call's ledger row says where it ran (SPEND_ENV) and whose call it was, the person as
+// a keyed tag that the public ledger cannot be matched back to an account with (spend/attribution.ts).
+const translation = new TranslationService(llm, gate, repoRoot, undefined, {
+  env: config.spendEnv,
+  tagKey: spendTagKey(authSecret),
+});
 
 // The spend view is rebuilt here, off the paid call path, and only when a row has landed since
 // last time. Rendering it per append was tried and reverted: it reparses the whole ledger and

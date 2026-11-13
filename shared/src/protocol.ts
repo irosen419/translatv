@@ -46,7 +46,9 @@ export const WS_BEARER_PREFIX = "bearer.";
  * field, a new required field, or a changed meaning. Adding an optional field or a new message
  * type an old client can ignore does not need a bump.
  */
-export const PROTOCOL_VERSION = 2;
+// 3 (2026-11-13): the SAME_ACCOUNT error code, which a version 2 client's strict parse of an
+// error frame would reject.
+export const PROTOCOL_VERSION = 3;
 
 /** Room codes are 8 Crockford base32 characters. The alphabet excludes I, L, O, and U. */
 export const ROOM_CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{8}$/;
@@ -293,6 +295,12 @@ export const errorCode = z.enum([
    * arrive at create or join without an account, the refusal would say so rather than guess.
    */
   "UNAUTHENTICATED",
+  /**
+   * This account is already in the room, from another device or tab. One account is one side of
+   * a call, so a second person needs a second account. Fatal for the joining socket only; the
+   * seat already in the room is untouched. Added in PROTOCOL_VERSION 3.
+   */
+  "SAME_ACCOUNT",
 ]);
 export const ERROR_CODES = errorCode.options;
 export type ErrorCode = z.infer<typeof errorCode>;
@@ -511,8 +519,19 @@ export const serverMessage = z.discriminatedUnion("t", [
     config: roomConfig,
     iceServers: z.array(rtcIceServerConfig),
     snapshot: z.object({ lines: z.array(renderedLine), glossary: z.array(serverGlossaryEntry) }),
+    /**
+     * The peer as THIS reader's contactId (the per viewer opaque id of /api/me/calls), so the
+     * client can report or block them from inside the call. Absent with no peer, with the same
+     * account on both ends, or on a server with no accounts behind it. Optional, so no bump.
+     */
+    peerContactId: z.string().optional(),
   }),
-  z.object({ t: z.literal("peer.joined"), peer: member }),
+  z.object({
+    t: z.literal("peer.joined"),
+    peer: member,
+    /** The new arrival as the reader's contactId. Absent as for room.joined's peerContactId. */
+    contactId: z.string().optional(),
+  }),
   z.object({
     t: z.literal("peer.left"),
     peerId: z.string(),

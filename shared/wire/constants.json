@@ -168,8 +168,77 @@
       "request": null,
       "response": "contactsResponse",
       "status": 200
+    },
+    {
+      "bearer": true,
+      "id": "me.blocks.get",
+      "method": "GET",
+      "path": "/api/me/blocks",
+      "request": null,
+      "response": "blocksResponse",
+      "status": 200
+    },
+    {
+      "bearer": true,
+      "id": "me.blocks.create",
+      "method": "POST",
+      "path": "/api/me/blocks",
+      "request": {
+        "in": "body",
+        "schema": "contactRef"
+      },
+      "response": "blocksResponse",
+      "status": 200
+    },
+    {
+      "bearer": true,
+      "id": "me.blocks.delete",
+      "method": "DELETE",
+      "path": "/api/me/blocks",
+      "request": {
+        "in": "body",
+        "schema": "contactRef"
+      },
+      "response": "blocksResponse",
+      "status": 200
+    },
+    {
+      "bearer": true,
+      "id": "me.reports.create",
+      "method": "POST",
+      "path": "/api/me/reports",
+      "request": {
+        "in": "body",
+        "schema": "reportRequest"
+      },
+      "response": "reportReceipt",
+      "status": 201
+    },
+    {
+      "bearer": true,
+      "id": "owner.reports.list",
+      "method": "GET",
+      "path": "/api/owner/reports",
+      "request": null,
+      "response": "reportsResponse",
+      "status": 200
+    },
+    {
+      "bearer": true,
+      "id": "owner.reports.review",
+      "method": "POST",
+      "path": "/api/owner/reports/review",
+      "request": {
+        "in": "body",
+        "schema": "reviewReportRequest"
+      },
+      "response": "ownerReport",
+      "status": 200
     }
   ],
+  "INVITE_ALPHABET": "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
+  "INVITE_GROUPS": 3,
+  "INVITE_GROUP_LENGTH": 4,
   "LIMITS": {
     "chat": 2000,
     "glossaryEntries": 40,
@@ -181,8 +250,15 @@
   },
   "MAX_EMAIL_LENGTH": 254,
   "MAX_PASSWORD_LENGTH": 1024,
-  "MIN_PASSWORD_LENGTH": 10,
-  "PROTOCOL_VERSION": 2,
+  "MIN_PASSWORD_LENGTH": 8,
+  "PASSWORD_RULES": [
+    "length",
+    "lowercase",
+    "uppercase",
+    "digit",
+    "symbol"
+  ],
+  "PROTOCOL_VERSION": 3,
   "ROOM_CODE_PATTERN": "^[0-9A-HJKMNP-TV-Z]{8}$",
   "WS_BEARER_PREFIX": "bearer.",
   "WS_PATH": "/ws",

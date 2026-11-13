@@ -25,7 +25,8 @@ export function accountsEnv(root) {
 }
 
 /** A password for a harness's accounts. Generated per run, never written down. */
-export const PASSWORD = randomBytes(12).toString("hex");
+// Random, then given each kind of character the password policy asks for (shared/src/auth.ts).
+export const PASSWORD = `Aa1!${randomBytes(12).toString("hex")}`;
 
 /** The email a harness account named `name` gets. */
 export function emailFor(name) {

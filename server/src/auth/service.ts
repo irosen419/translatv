@@ -17,7 +17,11 @@
 
 import { createHash, createHmac, hkdfSync, randomBytes, randomInt } from "node:crypto";
 import {
+  canonicalInvite,
   deleteAccountRequest,
+  INVITE_ALPHABET,
+  INVITE_GROUP_LENGTH,
+  INVITE_GROUPS,
   loginRequest,
   refreshRequest,
   signupRequest,
@@ -77,10 +81,6 @@ export const FAILURE_WINDOW_MS = 15 * 60 * 1000;
 export const ERASE_RETRY_MS = 60 * 1000;
 export const ERASE_ATTEMPTS = 60;
 
-/** Invite codes: Crockford base32, the same alphabet as room codes, in three groups of four. */
-const INVITE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const INVITE_GROUPS = 3;
-const INVITE_GROUP_LENGTH = 4;
 
 export interface AuthOptions {
   secret: string;
@@ -101,15 +101,6 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-/** Fold what a person might type into the canonical code: case, spaces, dashes, lookalikes. */
-export function normalizeInvite(input: string): string {
-  return input
-    .toUpperCase()
-    .replace(/[\s-]/g, "")
-    .replace(/O/g, "0")
-    .replace(/[IL]/g, "1")
-    .replace(/U/g, "V");
-}
 
 /**
  * Mint one single use invite straight into the store, and return the code (only its hash is kept).
@@ -122,7 +113,7 @@ export function mintInvite(store: Store, createdBy: string | null, now: number):
   const code = generateInvite();
   const expiresAt = now + INVITE_TTL_MS;
   insertInvite(store, {
-    codeHash: sha256(normalizeInvite(code)),
+    codeHash: sha256(canonicalInvite(code) as string),
     createdBy,
     createdAt: now,
     expiresAt,
@@ -189,8 +180,11 @@ export class AuthService {
     const { email, password, displayName } = parsed.data;
 
     // Checked BEFORE the password policy and before hashing, so a caller with no invite learns
-    // nothing else and costs no scrypt.
-    const inviteHash = parsed.data.invite ? sha256(normalizeInvite(parsed.data.invite)) : null;
+    // nothing else and costs no scrypt. canonicalInvite is the sanitizer: case, spaces, dashes and
+    // lookalikes are forgiven, and anything that is not a complete code of the code's own
+    // characters is refused here, before it reaches the store.
+    const canonical = parsed.data.invite ? canonicalInvite(parsed.data.invite) : null;
+    const inviteHash = canonical === null ? null : sha256(canonical);
     if (this.options.signupMode === "invite") {
       if (inviteHash === null || !inviteIsUsable(this.store, inviteHash, now)) return refuse("INVITE_INVALID");
     }
@@ -332,6 +326,11 @@ export class AuthService {
   userFor(userId: string): PublicUser | null {
     const user = findUserById(this.store, userId);
     return user ? toPublic(user) : null;
+  }
+
+  /** Whether this account is the owner's, for the spend ledger's owner_call (ws/server.ts). */
+  isOwner(userId: string): boolean {
+    return this.userFor(userId)?.isOwner === true;
   }
 
   // -------------------------------------------------------------------------

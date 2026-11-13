@@ -1,0 +1,16 @@
+{
+  "id": "Qx7pL2vN9cR4tY8wK1mZ3a",
+  "reason": "harassment",
+  "details": "Kept insulting me after I asked them to stop.",
+  "status": "reviewed",
+  "createdAt": 1791403700000,
+  "reviewedAt": 1791403800000,
+  "reporter": {
+    "userId": "aB3dE5fG7hJ9kL1mN3pQ5r",
+    "displayName": "Ana"
+  },
+  "reported": {
+    "userId": "sT7uV9wX1yZ3aB5cD7eF9g",
+    "displayName": "Ben"
+  }
+}

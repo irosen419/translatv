@@ -56,7 +56,19 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # --with-deps asks apt for the fonts and libraries Chromium wants, and apt needs Ubuntu's
+      # package hosts. On 2026-11-11 the hosted runner could not resolve them for over half an
+      # hour, and this step failed three runs of a commit that changed no code, before a single
+      # test had started. The browser itself comes from Playwright's own host, and the hosted
+      # image already carries the libraries a browser needs, so when apt fails the browser alone
+      # is installed and the run goes on. Nothing is skipped: if a library really is missing,
+      # the end to end run below fails on launch and says so.
+      - name: Install Chromium
+        run: |
+          npx playwright install --with-deps chromium || {
+            echo "::warning::apt could not install Chromium's system packages; installing the browser alone"
+            npx playwright install chromium
+          }
       - run: npm run build
       - name: Two browser end to end run
         run: npm run e2e

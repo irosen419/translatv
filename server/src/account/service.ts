@@ -15,7 +15,15 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   callsQuery,
+  contactRef,
   LIMITS,
+  REPORTS_LIST_MAX,
+  reportRequest,
+  reviewReportRequest,
+  type BlocksResponse,
+  type OwnerReport,
+  type ReportReceipt,
+  type ReportsResponse,
   glossaryDocument,
   preferences as preferencesSchema,
   type CallsPage,
@@ -28,7 +36,9 @@ import {
 import type { AuthResult } from "../auth/service.js";
 import { mergeNewestFirst, screenCorrection, type ScreenReason } from "./corrections.js";
 import { log } from "../log.js";
-import { endCall, insertCall, listCalls, listContacts, setCallPeer } from "../store/callHistory.js";
+import { blockedEitherWay, deleteBlock, insertBlock, listBlocks } from "../store/blocks.js";
+import { deleteUnansweredCall, endCall, insertCall, listCalls, listContacts, listPeerIds, setCallPeer } from "../store/callHistory.js";
+import { findReport, insertReport, listReports, markReviewed, type ReportRow } from "../store/reports.js";
 import { findGlossary, replaceGlossary } from "../store/glossaries.js";
 import { findPreferences, savePreferences } from "../store/preferences.js";
 import type { Store } from "../store/store.js";
@@ -44,11 +54,25 @@ export interface RoomUserData {
   /** The user left, timed out, or the room ended. */
   callEnded(callId: string, now: number): void;
   /**
+   * The user's call ended with nobody ever on the other end: drop its row instead of closing it.
+   * A room opened and left alone is not a call with anyone, and listing it as "Nobody joined"
+   * filled the history with noise (owner report, 2026-11-13). Optional so a stand in without
+   * call history need not implement it.
+   */
+  callUnanswered?(callId: string): void;
+  /**
    * The corrections this user made in a call that just closed, oldest first. Screened, and the
    * survivors saved to THIS user's stored glossary. The caller hands over only the corrections the
    * user made themselves (owner decision C2), which is what keeps the other person out of it.
    */
   saveCorrections(userId: string, corrections: readonly GlossaryEntry[]): void;
+  /** Has either account blocked the other? If so they are never in one room together. */
+  blockedBetween(a: string, b: string): boolean;
+  /**
+   * Hear about each block as it is made, so a call the two are already in can be ended. Returns
+   * the way to stop listening. Required, so the socket layer cannot be wired without it.
+   */
+  onBlocked(listener: (blockerId: string, blockedId: string) => void): () => void;
 }
 
 const INVALID = { ok: false, error: "INVALID_INPUT" } as const;
@@ -73,7 +97,22 @@ export function contactIdFor(viewerId: string, peerId: string): string {
   return createHash("sha256").update(`translatv contact v1\n${viewerId}\n${peerId}`).digest("base64url").slice(0, 22);
 }
 
+function toOwnerReport(row: ReportRow): OwnerReport {
+  return {
+    id: row.id,
+    reason: row.reason,
+    details: row.details,
+    status: row.status,
+    createdAt: row.createdAt,
+    reviewedAt: row.reviewedAt,
+    reporter: row.reporterId !== null && row.reporterName !== null ? { userId: row.reporterId, displayName: row.reporterName } : null,
+    reported: row.reportedId !== null && row.reportedName !== null ? { userId: row.reportedId, displayName: row.reportedName } : null,
+  };
+}
+
 export class AccountService implements RoomUserData {
+  private readonly blockListeners = new Set<(blockerId: string, blockedId: string) => void>();
+
   constructor(private readonly store: Store) {}
 
   // -------------------------------------------------------------------------
@@ -155,6 +194,118 @@ export class AccountService implements RoomUserData {
   }
 
   // -------------------------------------------------------------------------
+  // Safety: blocks and reports
+  // -------------------------------------------------------------------------
+
+  /**
+   * The account a contactId names, looked up ONLY among the people this viewer has been on a call
+   * with. So a contactId lifted from someone else's list, or made up, names nobody, and nobody can
+   * be blocked or reported without having actually been in a call with them.
+   */
+  private peerFor(viewerId: string, contactId: string): string | null {
+    return listPeerIds(this.store, viewerId).find((peerId) => contactIdFor(viewerId, peerId) === contactId) ?? null;
+  }
+
+  blocksFor(userId: string): BlocksResponse {
+    return {
+      blocked: listBlocks(this.store, userId).map((row) => ({
+        contactId: contactIdFor(userId, row.blockedId),
+        displayName: row.displayName,
+        blockedAt: row.createdAt,
+      })),
+    };
+  }
+
+  block(userId: string, body: unknown, now: number): AuthResult<BlocksResponse> {
+    const parsed = contactRef.safeParse(body);
+    if (!parsed.success) return INVALID;
+    const peerId = this.peerFor(userId, parsed.data.contactId);
+    if (peerId === null) return { ok: false, error: "CONTACT_NOT_FOUND" };
+    insertBlock(this.store, userId, peerId, now);
+    log.info("account.blocked", { user: userId });
+    this.announceBlock(userId, peerId);
+    return { ok: true, value: this.blocksFor(userId) };
+  }
+
+  unblock(userId: string, body: unknown): AuthResult<BlocksResponse> {
+    const parsed = contactRef.safeParse(body);
+    if (!parsed.success) return INVALID;
+    // Resolved among this account's OWN blocks, which outlive the history rows they came from.
+    const blocked = listBlocks(this.store, userId).find((row) => contactIdFor(userId, row.blockedId) === parsed.data.contactId);
+    if (!blocked) return { ok: false, error: "CONTACT_NOT_FOUND" };
+    deleteBlock(this.store, userId, blocked.blockedId);
+    log.info("account.unblocked", { user: userId });
+    return { ok: true, value: this.blocksFor(userId) };
+  }
+
+  blockedBetween(a: string, b: string): boolean {
+    try {
+      return blockedEitherWay(this.store, a, b);
+    } catch (error) {
+      // Unreadable: refuse the pairing rather than risk putting a blocked person in the room.
+      log.error("account.block_read_failed", { error: error instanceof Error ? error.message : "unknown" });
+      return true;
+    }
+  }
+
+  onBlocked(listener: (blockerId: string, blockedId: string) => void): () => void {
+    this.blockListeners.add(listener);
+    return () => this.blockListeners.delete(listener);
+  }
+
+  private announceBlock(blockerId: string, blockedId: string): void {
+    for (const listener of this.blockListeners) {
+      try {
+        listener(blockerId, blockedId);
+      } catch (error) {
+        log.error("account.block_listener_failed", { error: error instanceof Error ? error.message : "unknown" });
+      }
+    }
+  }
+
+  /**
+   * Report someone this account has been on a call with. The details are the reporter's own words:
+   * stored for the owner, and never logged (log.ts withholds a `details` key too, but nothing here
+   * hands it one). With alsoBlock, the block lands in the same transaction as the report.
+   */
+  report(userId: string, body: unknown, now: number): AuthResult<ReportReceipt> {
+    const parsed = reportRequest.safeParse(body);
+    if (!parsed.success) return INVALID;
+    const peerId = this.peerFor(userId, parsed.data.contactId);
+    if (peerId === null) return { ok: false, error: "CONTACT_NOT_FOUND" };
+    const id = randomBytes(16).toString("base64url");
+    const details = parsed.data.details === undefined || parsed.data.details === "" ? null : parsed.data.details;
+    const alsoBlock = parsed.data.alsoBlock === true;
+    this.store.transaction(() => {
+      insertReport(this.store, { id, reporterId: userId, reportedId: peerId, reason: parsed.data.reason, details, createdAt: now });
+      if (alsoBlock) insertBlock(this.store, userId, peerId, now);
+    });
+    log.info("account.reported", { user: userId, reason: parsed.data.reason, withDetails: details !== null, alsoBlock });
+    if (alsoBlock) this.announceBlock(userId, peerId);
+    return { ok: true, value: { id, blocked: alsoBlock || this.isBlockedBy(userId, peerId) } };
+  }
+
+  private isBlockedBy(blockerId: string, blockedId: string): boolean {
+    return listBlocks(this.store, blockerId).some((row) => row.blockedId === blockedId);
+  }
+
+  /** The owner's list. The caller (the router) has already checked the caller is the owner. */
+  reportsForOwner(): ReportsResponse {
+    return { reports: listReports(this.store, REPORTS_LIST_MAX).map(toOwnerReport) };
+  }
+
+  reviewReport(body: unknown, now: number): AuthResult<OwnerReport> {
+    const parsed = reviewReportRequest.safeParse(body);
+    if (!parsed.success) return INVALID;
+    if (findReport(this.store, parsed.data.id) === null) return { ok: false, error: "REPORT_NOT_FOUND" };
+    markReviewed(this.store, parsed.data.id, now);
+    const row = findReport(this.store, parsed.data.id);
+    if (row === null) return { ok: false, error: "REPORT_NOT_FOUND" };
+    log.info("account.report_reviewed", { report: row.id });
+    return { ok: true, value: toOwnerReport(row) };
+  }
+
+  // -------------------------------------------------------------------------
   // RoomUserData: called by the socket layer, never throws
   // -------------------------------------------------------------------------
 
@@ -210,6 +361,14 @@ export class AccountService implements RoomUserData {
       // Most likely the account was deleted during the call, and the foreign key refuses rows for
       // it. The transaction rolled back, so nothing is half saved.
       log.warn("account.corrections_save_failed", { error: error instanceof Error ? error.message : "unknown" });
+    }
+  }
+
+  callUnanswered(callId: string): void {
+    try {
+      deleteUnansweredCall(this.store, callId);
+    } catch (error) {
+      log.warn("account.call_record_failed", { error: error instanceof Error ? error.message : "unknown" });
     }
   }
 

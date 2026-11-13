@@ -15,7 +15,7 @@ import http from "node:http";
 import net, { type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { LlmFailure, MAX_OUTPUT_TOKENS } from "./TranslationService.js";
-import { createAnthropicClient, MAX_RETRIES } from "./anthropic.js";
+import { createAnthropicClient, MAX_RETRIES, profileFor, type RequestProfile } from "./anthropic.js";
 
 type Answer = () => Promise<Response>;
 
@@ -155,7 +155,7 @@ describe("the Anthropic adapter", () => {
   it("asks for at most MAX_OUTPUT_TOKENS, the figure a lost request's worst case is priced on", async () => {
     const { fetch, requests } = fakeFetch([ok]);
     const { result } = complete(fetch);
-    await expect(result).resolves.toEqual({ text: "hola", inputTokens: 812, outputTokens: 7 });
+    await expect(result).resolves.toEqual({ text: "hola", inputTokens: 812, outputTokens: 7, stopReason: "end_turn" });
     expect(requests).toHaveLength(1);
     expect(requests[0]?.body["max_tokens"]).toBe(MAX_OUTPUT_TOKENS);
   });
@@ -463,5 +463,113 @@ describe("the Anthropic adapter", () => {
     await new Promise((resolve) => setTimeout(resolve, 250));
     expect(requests).toHaveLength(1);
     expect(lost()).toBe(0);
+  });
+});
+
+/** An answer with these content blocks and this stop reason, otherwise like ANSWER. */
+const answerWith = (content: unknown[], stopReason: string): Answer => () =>
+  Promise.resolve(
+    new Response(JSON.stringify({ ...ANSWER, model: "claude-haiku-5-5", content, stop_reason: stopReason }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+
+/** One call for `model` (and `profile`, when given) over a fake fetch that records the raw body. */
+async function completeFor(model: string | undefined, answer: Answer, profile?: RequestProfile) {
+  const raw: string[] = [];
+  const fetch = (async (_url: unknown, init?: RequestInit) => {
+    raw.push(String(init?.body));
+    return answer();
+  }) as typeof globalThis.fetch;
+  const client = createAnthropicClient("sk-ant-fake-not-a-key", { fetch, model, profile });
+  const result = await client.complete({
+    system: "system",
+    user: "user",
+    signal: new AbortController().signal,
+    sendBefore: Date.now() + 60_000,
+    onLost: () => undefined,
+  });
+  return { result, raw, body: JSON.parse(raw[0] ?? "{}") as Record<string, unknown> };
+}
+
+describe("the request each model is sent", () => {
+  it("sends Haiku 4.5 byte for byte what production has always sent", async () => {
+    // The production request may not move while the blind test is being prepared: the comparison
+    // is against today's production call, and arm A is that call.
+    const { raw } = await completeFor(undefined, ok);
+    expect(raw).toEqual([
+      '{"model":"claude-haiku-4-5","max_tokens":512,"temperature":0.2,"system":"system","messages":[{"role":"user","content":"user"}]}',
+    ]);
+    const named = await completeFor("claude-haiku-4-5", ok);
+    expect(named.raw).toEqual(raw);
+  });
+
+  it("sends Haiku 5.5 no sampling parameter and thinking disabled", async () => {
+    // A non default temperature is a 400 on Haiku 5.5, and thinking is on unless it is turned off.
+    const { body } = await completeFor("claude-haiku-5-5", answerWith([{ type: "text", text: "hola" }], "end_turn"));
+    expect(body).toEqual({
+      model: "claude-haiku-5-5",
+      max_tokens: MAX_OUTPUT_TOKENS,
+      thinking: { type: "disabled" },
+      system: "system",
+      messages: [{ role: "user", content: "user" }],
+    });
+    for (const sampling of ["temperature", "top_p", "top_k"]) expect(body).not.toHaveProperty(sampling);
+  });
+
+  it("sends adaptive thinking and an effort when a profile asks for them, never a thinking budget", async () => {
+    const { body } = await completeFor(
+      "claude-haiku-5-5",
+      answerWith([{ type: "text", text: "hola" }], "end_turn"),
+      { temperature: null, thinking: "adaptive", effort: "low", maxTokens: 4096, jsonSchema: null },
+    );
+    expect(body).toMatchObject({ thinking: { type: "adaptive" }, output_config: { effort: "low" }, max_tokens: 4096 });
+    expect(JSON.stringify(body)).not.toContain("budget_tokens");
+    expect(body).not.toHaveProperty("temperature");
+  });
+
+  it("asks for structured output through output_config.format, beside the effort", async () => {
+    const schema = { type: "object", properties: { a: { type: "integer" } }, required: ["a"], additionalProperties: false };
+    const { body } = await completeFor(
+      "claude-sonnet-5-5",
+      answerWith([{ type: "text", text: '{"a":1}' }], "end_turn"),
+      { temperature: null, thinking: "omit", effort: "low", maxTokens: 4096, jsonSchema: schema },
+    );
+    expect(body).toMatchObject({ output_config: { effort: "low", format: { type: "json_schema", schema } } });
+    expect(body).not.toHaveProperty("thinking");
+    expect(body).not.toHaveProperty("tool_choice");
+  });
+
+  it("reads the text by block type, so thinking blocks ahead of it are never the answer", async () => {
+    const { result } = await completeFor(
+      "claude-haiku-5-5",
+      answerWith(
+        [
+          { type: "thinking", thinking: "", signature: "sig" },
+          { type: "text", text: "hola " },
+          { type: "text", text: "che" },
+        ],
+        "end_turn",
+      ),
+    );
+    expect(result).toEqual({ text: "hola che", inputTokens: 812, outputTokens: 7, stopReason: "end_turn" });
+  });
+
+  it("returns a refusal as no text, with its usage, so it is logged and never shown as a translation", async () => {
+    // A refusal is an ordinary 200 and is billed. Thrown, it would never reach the ledger; with
+    // its partial text kept, it would reach a reader as though it were a translation.
+    const { result } = await completeFor("claude-haiku-5-5", answerWith([{ type: "text", text: "I can" }], "refusal"));
+    expect(result).toEqual({ text: "", inputTokens: 812, outputTokens: 7, stopReason: "refusal" });
+  });
+
+  it("refuses to build a client for a model it has no request shape for, rather than guessing one", () => {
+    expect(() => createAnthropicClient("sk-ant-fake-not-a-key", { model: "claude-haiku-5" })).toThrow(/no request profile/);
+    expect(profileFor("claude-haiku-5")).toBeNull();
+  });
+
+  it("knows a profile for the default model and for Haiku 5.5, and none sends a sampling parameter to Haiku 5.5", () => {
+    expect(profileFor("claude-haiku-4-5")).toEqual({ temperature: 0.2, thinking: "omit", effort: null, maxTokens: MAX_OUTPUT_TOKENS, jsonSchema: null });
+    expect(profileFor("claude-haiku-5-5")?.temperature).toBeNull();
   });
 });

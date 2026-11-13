@@ -1,4 +1,4 @@
-// The translation pipeline: ordering, the spend gate, and failure behavior.
+// The translation pipeline: the spend gate, failure behavior, and per call timing.
 //
 // The client is injected rather than constructed here, so every test runs against a fake and no
 // test ever touches the network or spends money. That is also what makes the "no API key"
@@ -14,6 +14,7 @@ import {
   type TranslationFailureCode,
 } from "@translatv/shared";
 import { append, entry as ledgerEntry, type SpendKind } from "../spend/ledger.js";
+import { userTag, type SpendAttribution } from "../spend/attribution.js";
 import { PROGRAMS, type SpendGate } from "../spend/caps.js";
 import { costUsd, DEFAULT_MODEL } from "../spend/pricing.js";
 import { log } from "../log.js";
@@ -49,7 +50,15 @@ export const LATE_CEILING_MS = 60_000;
 export const MAX_OUTPUT_TOKENS = 512;
 /** Tokens the message framing adds around the prompt, generously. Only feeds the worst case. */
 const FRAMING_TOKENS = 64;
-/** Concurrent in flight calls across the whole process. */
+/**
+ * Concurrent in flight calls across the whole process, late ones (settleLate) included.
+ *
+ * Translations run concurrently, within a room as well as across rooms, so this is the ONLY bound
+ * on how many calls can be at the provider together. It is therefore also the bound the spend
+ * rule in CLAUDE.md names: the gate is checked before each call, so calls in flight together can
+ * each pass a cap check before any of them is recorded, and a cap can be overshot by up to this
+ * many calls (owner decision, 2026-10-22).
+ */
 export const MAX_CONCURRENT = 8;
 
 /**
@@ -71,6 +80,13 @@ export interface TranslateRequest {
   glossary: readonly GlossaryEntry[];
   roomHash: string;
   kind: SpendKind;
+  /**
+   * The account whose line this is. Used ONLY to make the ledger row's user_tag, a keyed hash
+   * (spend/attribution.ts): the id itself never reaches the ledger, a log line or the provider.
+   */
+  speakerUserId?: string | null;
+  /** Whether the owner's account is on this call, for the ledger row's owner_call. */
+  ownerOnCall?: boolean;
 }
 
 export interface TranslateOk {
@@ -125,7 +141,21 @@ export interface LlmClient {
      * the error.
      */
     onLost: () => void;
-  }): Promise<{ text: string; inputTokens: number; outputTokens: number }>;
+  }): Promise<{
+    text: string;
+    inputTokens: number;
+    outputTokens: number;
+    /**
+     * Why the model stopped, as the provider said, when the client knows. Informational: a refusal
+     * already arrives as no text, which is what this service acts on.
+     */
+    stopReason?: string | null;
+  }>;
+}
+
+/** Filled in by execute() for the timing line translate() logs. Null until the provider is called. */
+interface CallTiming {
+  providerMs: number | null;
 }
 
 /** A call on its way to the provider, from the moment it is sent until it settles. */
@@ -164,11 +194,22 @@ export class LlmFailure extends Error {
   }
 }
 
+/**
+ * The most one request to `model` can be billed: the prompt's UTF-8 bytes plus FRAMING_TOKENS in
+ * (a byte level tokenizer never makes more tokens than bytes, whatever its ratio on ordinary text),
+ * and all of maxOutputTokens out, at the rate a prompt that long is billed at. Null when the model
+ * has no documented price. Exported for the blind test (src/eval/blind), which logs a lost request
+ * exactly as this service does.
+ */
+export function requestWorstCaseUsd(model: string, system: string, user: string, maxOutputTokens: number): number | null {
+  const inputTokens = Buffer.byteLength(system, "utf8") + Buffer.byteLength(user, "utf8") + FRAMING_TOKENS;
+  return costUsd(model, inputTokens, maxOutputTokens);
+}
+
 export class TranslationService {
   private inFlight = 0;
   /** Every call still running, in time or late (settleLate), until it settles. */
   private readonly running = new Set<RunningCall>();
-  private readonly queues = new Map<string, Promise<unknown>>();
   /**
    * Set once a terminal failure proves the configuration is wrong.
    *
@@ -207,6 +248,12 @@ export class TranslationService {
      * chmods one does not run as root, which is exactly where nobody would notice it skipping.
      */
     private readonly appendRecord: typeof append = append,
+    /**
+     * Where this process spends and how to tag a person, for the labels on each row. Null writes
+     * no labels, which is every row from before attribution existed and every test that does not
+     * ask for them.
+     */
+    private readonly attribution: SpendAttribution | null = null,
   ) {}
 
   get enabled(): boolean {
@@ -218,43 +265,59 @@ export class TranslationService {
     return this.disabledReason;
   }
 
-  /** How many rooms still hold a queue entry. Exposed so the leak is observable in a test. */
-  get pendingRooms(): number {
-    return this.queues.size;
-  }
-
   /**
-   * Drop a room's queue entry.
+   * Translate one line.
    *
-   * The chain is per room and the rooms themselves are swept, but nothing released this map, so
-   * it grew for the lifetime of the process: one entry per room ever translated in, held forever.
-   * Called from the same sweep that destroys a room and from the end path, so all three lifetimes
-   * (room, session, queue) finish together rather than two of the three.
-   */
-  forgetRoom(roomHash: string): void {
-    this.queues.delete(roomHash);
-  }
-
-  /**
-   * Translate one line, preserving per room ordering.
+   * CONCURRENT, including within a room. This used to chain per room so translations completed in
+   * the order lines were spoken, and the price was that a sentence finished while the previous one
+   * was still at the provider waited for it before its own call even started: queue depth
+   * multiplied provider latency (vt-0014: six lines at 300 ms landed at 310 through 1829 ms). The
+   * ordering it bought is not needed. A line reaches the transcript, in order, the moment it is
+   * finalized, and its translation fills in that line by lineId, so a later sentence finishing
+   * first cannot reorder anything on screen.
    *
-   * Ordering matters: two finals from the same speaker translated concurrently can complete out
-   * of order, and a transcript that reorders itself reads as a bug even when every line is
-   * correct. Chaining per room costs a little latency and buys correct order.
+   * What concurrency does cost, stated so it is a decision rather than an accident: the spend gate
+   * is checked per call before the call is made, so lines in flight together in one room can each
+   * pass the room cap check before any of them is recorded. The overshoot is bounded by
+   * MAX_CONCURRENT calls of a few hundredths of a cent each, and every one that returns is
+   * recorded (record(), before execute returns) unless the ledger write itself fails. The same
+   * was already true across rooms against the daily cap. Two more costs of the same kind. When
+   * the ledger cannot be written, up to MAX_CONCURRENT calls from ONE room can already be out
+   * before the failure latch trips, where the queue held a room to one at a time and the latch
+   * tripped after three. And one room can now take every slot, so a burst of more than
+   * MAX_CONCURRENT lines refuses the rest with TOO_MANY_IN_FLIGHT: that room's own, which the
+   * queue made wait instead, and any other room's line in the meantime, which one room could
+   * never crowd out while it held a single slot. A late call (settleLate) keeps its slot until it
+   * settles, so a hung provider still holds the process to MAX_CONCURRENT calls of unknown cost.
+   *
+   * Two calls for the SAME line can also overlap (a retry while the first is out). Which answer
+   * to show is settled by RoomSession.settleTranslation, not here.
    */
   async translate(request: TranslateRequest): Promise<TranslateResult> {
-    const previous = this.queues.get(request.roomHash) ?? Promise.resolve();
-    const run = previous.then(() => this.execute(request));
-    // Swallow rejections on the chain itself so one failure does not poison the queue for
-    // every later line in the same room.
-    this.queues.set(
-      request.roomHash,
-      run.catch(() => undefined),
-    );
-    return run;
+    const started = performance.now();
+    const timing: CallTiming = { providerMs: null };
+    // execute() has already appended any spend to the ledger by the time it returns, so this
+    // line is written after the record, never instead of it.
+    const result = await this.execute(request, timing);
+
+    // Only for lines that reached the provider: a refusal before the call has no latency worth
+    // reading, and logging one would dilute every figure this exists to produce. Counts and
+    // durations only; the line's words are counted, never carried.
+    if (timing.providerMs !== null) {
+      log.info("translation.timing", {
+        room: request.roomHash,
+        lineId: request.lineId,
+        outcome: result.ok ? "ok" : result.reason,
+        providerMs: Math.round(timing.providerMs),
+        totalMs: Math.round(performance.now() - started),
+        words: request.text.split(/\s+/).filter(Boolean).length,
+        outputTokens: result.ok ? result.outputTokens : null,
+      });
+    }
+    return result;
   }
 
-  private async execute(request: TranslateRequest): Promise<TranslateResult> {
+  private async execute(request: TranslateRequest, timing: CallTiming): Promise<TranslateResult> {
     if (this.client === null) {
       return {
         ok: false,
@@ -349,6 +412,7 @@ export class TranslationService {
     const client = this.client;
     this.inFlight += 1;
     this.running.add(running);
+    const callStarted = performance.now();
     // Wrapped, so a client that throws rather than rejecting still releases its slot.
     const call = (async () =>
       client.complete({
@@ -373,6 +437,10 @@ export class TranslationService {
       }),
     ]);
     clearTimeout(timer);
+    // How long the provider had this line: until it answered or failed, or, at a timeout, the
+    // whole TIMEOUT_MS the caller was made to wait. What the call does after that (settleLate)
+    // reaches nobody, so it is not latency anyone saw.
+    timing.providerMs = performance.now() - callStarted;
 
     if (outcome === "timeout") {
       // Worth another try: the next sentence may land in a quieter moment. The call itself is
@@ -509,8 +577,22 @@ export class TranslationService {
    * nobody could recover, and the harmful direction is under-counting.
    */
   private worstCaseUsd(system: string, user: string): number | null {
-    const inputTokens = Buffer.byteLength(system, "utf8") + Buffer.byteLength(user, "utf8") + FRAMING_TOKENS;
-    return costUsd(DEFAULT_MODEL, inputTokens, MAX_OUTPUT_TOKENS);
+    return requestWorstCaseUsd(DEFAULT_MODEL, system, user, MAX_OUTPUT_TOKENS);
+  }
+
+  /**
+   * The attribution labels for one request's row: where it ran, whether the owner was on the
+   * call, and the speaker's tag. Each is written only when known, so a row never claims a label
+   * it does not have.
+   */
+  private labelsFor(request: TranslateRequest): { env?: string; ownerCall?: boolean; userTag?: string } {
+    if (this.attribution === null) return {};
+    const { env, tagKey } = this.attribution;
+    return {
+      env,
+      ...(request.ownerOnCall !== undefined ? { ownerCall: request.ownerOnCall } : {}),
+      ...(tagKey !== null && request.speakerUserId ? { userTag: userTag(tagKey, request.speakerUserId) } : {}),
+    };
   }
 
   /**
@@ -543,6 +625,7 @@ export class TranslationService {
             ? { worstCaseUsd: spent.worstCaseUsd }
             : { inputTokens: spent.inputTokens, outputTokens: spent.outputTokens }),
           capUsd: this.gate.capFor(program),
+          ...this.labelsFor(request),
           // "not charged to a user": the provider may well have billed it, and the house pays.
           note: unbilled === undefined ? request.kind : `${request.kind}, ${unbilled}, not charged to a user`,
           billable: unbilled === undefined,

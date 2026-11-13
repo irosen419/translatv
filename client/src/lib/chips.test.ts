@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChips, isProblem, type ChipState } from "./chips.js";
+import { buildChips, isProblem, sttAlert, type ChipState } from "./chips.js";
 import { useStore } from "../state/store.js";
 
 // The chips are asserted by KEY, not by words. Which chip exists is what this module decides;
@@ -113,5 +113,74 @@ describe("a terminal translation failure", () => {
     });
 
     expect(useStore.getState().translationUnavailable).toBeNull();
+  });
+});
+
+/**
+ * The alert is a separate decision from the chip, and deliberately so.
+ *
+ * A chip is two words in a strip. That is right for "they are muted", which is someone else's
+ * doing and nothing you can act on, and it was wrong for this: a real call ran with the speaker
+ * believing they were being subtitled, because "no subtitles" in a pill said nothing about the
+ * consequence and the explanation was in a `title` tooltip, which does not exist on a phone.
+ *
+ * So the same state now produces both. The chip stays, because the strip should still show it.
+ * The alert is the sentence, and it says what the OTHER person is missing, which is the part
+ * nobody can work out for themselves.
+ */
+describe("sttAlert", () => {
+  it("says nothing while speech is working", () => {
+    expect(sttAlert(quiet())).toBeNull();
+    expect(sttAlert(quiet({ sttStatus: { kind: "listening", onDevice: true } }))).toBeNull();
+    expect(sttAlert(quiet({ kind: "idle" } as never))).toBeNull();
+  });
+
+  it("stays quiet while a reconnect is still in flight", () => {
+    // Transient. The supervisor is backing off and will retry, and a banner that appears on
+    // every wobble is one people learn to close without reading.
+    expect(sttAlert(quiet({ sttStatus: { kind: "reconnecting", attempt: 2 } }))).toBeNull();
+    expect(sttAlert(quiet({ sttStatus: { kind: "downloading", language: "en-US" } }))).toBeNull();
+  });
+
+  for (const status of [
+    { kind: "blocked", reason: "permission", notice: { key: "stt.permission" } },
+    { kind: "blocked", reason: "no-microphone", notice: { key: "stt.noMicrophone" } },
+    { kind: "failed", notice: { key: "stt.keepsDropping" } },
+  ] as const) {
+    it(`speaks up when speech is ${status.kind} (${"reason" in status ? status.reason : "terminal"})`, () => {
+      const alert = sttAlert(quiet({ sttStatus: status }));
+      expect(alert).not.toBeNull();
+      // The headline names YOUR device, and the body names what your partner loses. Both, and
+      // in that order: the first tells you it is yours to fix, the second is why you should.
+      expect(alert?.title).toBe("alert.noSubtitles.title");
+      expect(alert?.body).toBe("alert.noSubtitles.body");
+    });
+  }
+
+  it("carries the adapter's own instructions through rather than restating them", () => {
+    // The adapter already worked out WHAT went wrong and handed back a ref. Rewriting that here
+    // would mean this module owning a second, drifting copy of every device specific fix.
+    const notice = { key: "stt.permission" } as const;
+    expect(sttAlert(quiet({ sttStatus: { kind: "blocked", reason: "permission", notice } }))?.notice).toBe(
+      notice,
+    );
+  });
+
+  it("keeps the chip as well, so the strip still reports it", () => {
+    const blocked = quiet({
+      sttStatus: { kind: "blocked", reason: "permission", notice: { key: "stt.permission" } },
+    });
+    expect(problems(blocked)).toContain("chips.noSubtitles");
+    expect(sttAlert(blocked)).not.toBeNull();
+  });
+});
+
+describe("the wrong language warning", () => {
+  it("is a problem, so it floats over the video on a phone", () => {
+    expect(problems(quiet({ speakingOtherLanguage: true }))).toContain("chips.wrongLanguage");
+  });
+
+  it("is absent when your lines are translating normally", () => {
+    expect(buildChips(quiet()).map((c) => c.text)).not.toContain("chips.wrongLanguage");
   });
 });

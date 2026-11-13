@@ -16,6 +16,8 @@ import { CLOSE, LIMITS, WS_PATH, type ServerMessage } from "@translatv/shared";
 import { GRACE_MS } from "../rooms/RoomManager.js";
 import type { Config } from "../config.js";
 import { roomHash, SpendGate } from "../spend/caps.js";
+import { spendTagKey, userTag } from "../spend/attribution.js";
+import { load } from "../spend/ledger.js";
 import { MAX_CONNECTIONS_PER_IP } from "../security/rateLimit.js";
 import { TranslationService, type LlmClient } from "../translate/TranslationService.js";
 import { accessKey, ACCESS_TTL_MS, mintAccessToken, verifyAccessToken } from "../auth/accessTokens.js";
@@ -23,6 +25,12 @@ import { clientAddress, SignalingServer, type AccessVerifier } from "./server.js
 
 let server: Server;
 let signaling: SignalingServer;
+/**
+ * When set, that numbered spend gate check THROWS, the way SpendGate.check rethrows a ledger it
+ * cannot read (EACCES). That escapes translate() rather than coming back as a failure. Counted
+ * from 1 per test, and reset before each.
+ */
+let throwOnGateCheck: number | null = null;
 let port: number;
 let root: string;
 
@@ -37,6 +45,7 @@ function config(): Config {
     authSecret: null,
     signupMode: "invite",
     ownerEmail: null,
+    supportEmail: null,
     dailyCapUsd: 10,
     roomCapUsd: 1.5,
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -44,6 +53,7 @@ function config(): Config {
     trustProxy: false,
     dataDir: root,
     databasePath: ":memory:",
+    serveClient: true,
   };
 }
 
@@ -79,12 +89,22 @@ interface ConnectOptions {
 // Counts its calls, because "no API call happened" is the actual requirement of the skip path
 // and every other signal for it is indirect. Without the counter a test can only assert that no
 // failure was reported, which a broken skip would also satisfy.
-const echoClient: LlmClient & { calls: number; lastPrompt: string } = {
+//
+// `script`, when set, answers instead of the echo. It gets the 1 based call number, so a test can
+// make one call slow or failing and the next one fast, which is how two calls for the same line
+// come back in the opposite order to the one they were made in. Reset before every test.
+const echoClient: LlmClient & {
+  calls: number;
+  lastPrompt: string;
+  script: ((call: number) => Promise<{ text: string; inputTokens: number; outputTokens: number }>) | null;
+} = {
   calls: 0,
   lastPrompt: "",
+  script: null,
   async complete({ system, user }) {
     echoClient.calls += 1;
     echoClient.lastPrompt = `${system}\n${user}`;
+    if (echoClient.script) return echoClient.script(echoClient.calls);
     const match = user.match(/<utterance>(.*)<\/utterance>/s);
     return { text: `ES:${match?.[1] ?? ""}`, inputTokens: 100, outputTokens: 10 };
   },
@@ -174,12 +194,21 @@ async function createRoom(client: Client, username = "Ana", dialect = "en-US") {
 
 beforeEach(async () => {
   echoClient.calls = 0;
+  echoClient.script = null;
+  throwOnGateCheck = null;
   root = mkdtempSync(join(tmpdir(), "ws-"));
   mkdirSync(join(root, "out", "translatv"), { recursive: true });
   writeFileSync(join(root, "out", "translatv", "spend_log.jsonl"), "", "utf8");
 
   const cfg = config();
   const gate = new SpendGate(root, { dailyCapUsd: cfg.dailyCapUsd, roomCapUsd: cfg.roomCapUsd });
+  const check = gate.check.bind(gate);
+  let gateChecks = 0;
+  gate.check = (room) => {
+    gateChecks += 1;
+    if (gateChecks === throwOnGateCheck) throw new Error("EACCES: permission denied, open 'spend_log.jsonl'");
+    return check(room);
+  };
   const translation = new TranslationService(echoClient, gate, root);
 
   server = createServer();
@@ -236,7 +265,7 @@ describe("room lifecycle over the wire", () => {
     const ana = await Client.connect();
     const created = await createRoom(ana);
 
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
 
     const joined = await ben.next("room.joined");
@@ -253,11 +282,11 @@ describe("room lifecycle over the wire", () => {
   it("refuses a third person", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana);
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
-    const cam = await Client.connect();
+    const cam = await Client.connect(ORIGIN, { user: "user-cam" });
     cam.send({ t: "room.join", code: created.code, username: "Cam", dialect: "en-US" });
     const error = await cam.next("error");
     expect(error.code).toBe("ROOM_FULL");
@@ -271,7 +300,7 @@ describe("room lifecycle over the wire", () => {
   it("frees the seat on an explicit leave and lets someone new take it", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana);
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -279,7 +308,7 @@ describe("room lifecycle over the wire", () => {
     const left = await ana.next("peer.left");
     expect(left.reason).toBe("left");
 
-    const cam = await Client.connect();
+    const cam = await Client.connect(ORIGIN, { user: "user-cam" });
     cam.send({ t: "room.join", code: created.code, username: "Cam", dialect: "es-MX" });
     const joined = await cam.next("room.joined");
     expect(joined.peer?.username).toBe("Ana");
@@ -293,7 +322,7 @@ describe("room lifecycle over the wire", () => {
     // resume, and to freeze the transcript and offer a download instead.
     const ana = await Client.connect();
     const created = await createRoom(ana);
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -303,7 +332,7 @@ describe("room lifecycle over the wire", () => {
     expect(ended.byUsername).toBe("Ana");
     expect(await ben.closed()).toBe(CLOSE.roomEnded);
 
-    const cam = await Client.connect();
+    const cam = await Client.connect(ORIGIN, { user: "user-cam" });
     cam.send({ t: "room.join", code: created.code, username: "Cam", dialect: "en-US" });
     const error = await cam.next("error");
     expect(error.code).toBe("ROOM_ENDED");
@@ -345,7 +374,7 @@ describe("signaling relay", () => {
   it("relays an offer to the peer and nobody else", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana);
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -367,7 +396,7 @@ describe("transcripts and translation", () => {
     // The decoupling that means a translation failure never costs the user the original line.
     const ana = await Client.connect();
     const created = await createRoom(ana, "Ana", "en-US");
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -388,7 +417,7 @@ describe("transcripts and translation", () => {
   it("relays interim results without storing or translating them", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana);
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -408,7 +437,7 @@ describe("transcripts and translation", () => {
   it("applies a correction immediately and puts it in the glossary", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana, "Ana", "en-US");
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -436,7 +465,7 @@ describe("transcripts and translation", () => {
     async function lineFromAna(text: string) {
       const ana = await Client.connect();
       const created = await createRoom(ana, "Ana", "en-US");
-      const ben = await Client.connect();
+      const ben = await Client.connect(ORIGIN, { user: "user-ben" });
       ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
       const joined = await ben.next("room.joined");
       ana.send({ t: "stt.final", text, seq: 1 });
@@ -539,7 +568,7 @@ describe("transcripts and translation", () => {
   it("routes chat through the same pipeline as speech", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana, "Ana", "en-US");
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     await ben.next("room.joined");
 
@@ -657,7 +686,7 @@ async function settle(ms = 250): Promise<void> {
 async function pair(anaDialect: string, benDialect: string) {
   const ana = await Client.connect();
   const created = await createRoom(ana, "Ana", anaDialect);
-  const ben = await Client.connect();
+  const ben = await Client.connect(ORIGIN, { user: "user-ben" });
   ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: benDialect });
   await ben.next("room.joined");
   await ana.next("peer.joined");
@@ -760,7 +789,7 @@ describe("lines that need no translation", () => {
 
     const ana = await Client.connect();
     const created = await createRoom(ana, "Ana", "en-US");
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "en-GB" });
     await ben.next("room.joined");
 
@@ -960,7 +989,7 @@ describe("media state reaches the peer", () => {
     ana.send({ t: "member.update", micEnabled: false, cameraEnabled: true });
     await settle(100);
 
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
     const joined = await ben.next("room.joined");
 
@@ -1027,6 +1056,147 @@ describe("retrying a line that needs no translation", () => {
   });
 });
 
+// Translations run concurrently, so two calls for the SAME line can be in flight together and
+// come back in either order. The line must end on the answer to the call made LAST, which is
+// what the per room queue used to guarantee by making them wait for each other.
+describe("two translations of one line that land out of order", () => {
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  /** Every result or failure frame for one line, in arrival order. */
+  function outcomesFor(client: Client, lineId: string) {
+    return client.received.filter(
+      (m): m is Extract<ServerMessage, { t: "translation.result" | "translation.failed" }> =>
+        (m.t === "translation.result" || m.t === "translation.failed") && m.lineId === lineId,
+    );
+  }
+
+  it("is not turned back into a failure when both people retry and the first retry fails late", async () => {
+    // The retry button shows on any failed line, for both people, so both clicking it is the
+    // ordinary case. Call 1 fails the line, call 2 (Ana's retry) fails slowly, call 3 (Ben's
+    // retry) succeeds quickly. A paid, successful translation must not be overwritten by the
+    // stale failure that lands after it.
+    echoClient.script = async (call) => {
+      if (call === 1) throw new Error("provider down");
+      if (call === 2) {
+        await delay(150);
+        throw new Error("provider down");
+      }
+      return { text: "GOOD", inputTokens: 100, outputTokens: 10 };
+    };
+    const { ana, ben } = await pair("en-US", "es-AR");
+
+    ana.send({ t: "stt.final", text: "do you have time", seq: 1 });
+    const line = await ben.next("transcript.final");
+    await ana.next("translation.failed");
+
+    ana.send({ t: "translation.retry", lineId: line.line.lineId });
+    await delay(20);
+    ben.send({ t: "translation.retry", lineId: line.line.lineId });
+    await settle(400);
+
+    expect(echoClient.calls).toBe(3);
+    for (const client of [ana, ben]) {
+      const last = outcomesFor(client, line.line.lineId).at(-1);
+      expect(last?.t).toBe("translation.result");
+      expect(last?.t === "translation.result" && last.text).toBe("GOOD");
+    }
+
+    ana.close();
+    ben.close();
+  });
+
+  it("is not overwritten by an earlier call's translation that lands after a retry's", async () => {
+    echoClient.script = async (call) => {
+      if (call === 1) {
+        await delay(150);
+        return { text: "OLD", inputTokens: 100, outputTokens: 10 };
+      }
+      return { text: "NEW", inputTokens: 100, outputTokens: 10 };
+    };
+    const { ana, ben } = await pair("en-US", "es-AR");
+
+    ana.send({ t: "stt.final", text: "do you have time", seq: 1 });
+    const line = await ben.next("transcript.final");
+    ben.send({ t: "translation.retry", lineId: line.line.lineId });
+    await settle(400);
+
+    expect(echoClient.calls).toBe(2);
+    const last = outcomesFor(ben, line.line.lineId).at(-1);
+    expect(last?.t === "translation.result" && last.text).toBe("NEW");
+    // The stale answer is dropped from the screen, never from the ledger: both calls returned, so
+    // both were recorded before either result was looked at.
+    expect(load({ root })).toHaveLength(2);
+
+    ana.close();
+    ben.close();
+  });
+
+  it("drops an older call's answer that lands first, while the newer call is still out", async () => {
+    // The other order. Call 1 fails the line, call 2 (Ana's retry, the OLDER call) fails fast,
+    // call 3 (Ben's retry, issued after it) succeeds slowly. The fast failure is stale the moment
+    // it lands, since a newer call is still out, and taking it would also close the line to the
+    // answer that comes after it.
+    echoClient.script = async (call) => {
+      if (call === 1) throw new Error("provider down");
+      if (call === 2) {
+        await delay(200);
+        throw new Error("provider down");
+      }
+      await delay(400);
+      return { text: "GOOD", inputTokens: 100, outputTokens: 10 };
+    };
+    const { ana, ben } = await pair("en-US", "es-AR");
+
+    ana.send({ t: "stt.final", text: "do you have time", seq: 1 });
+    const line = await ben.next("transcript.final");
+    await ana.next("translation.failed");
+    const before = outcomesFor(ana, line.line.lineId).length;
+
+    ana.send({ t: "translation.retry", lineId: line.line.lineId });
+    await delay(20);
+    ben.send({ t: "translation.retry", lineId: line.line.lineId });
+    await settle(800);
+
+    expect(echoClient.calls).toBe(3);
+    // Nothing from the stale call, then the newest call's answer.
+    const after = outcomesFor(ana, line.line.lineId).slice(before);
+    expect(after.map((m) => m.t)).toEqual(["translation.result"]);
+    expect(after[0]?.t === "translation.result" && after[0].text).toBe("GOOD");
+
+    ana.close();
+    ben.close();
+  });
+
+  it("still shows an older call's answer when the newer call throws instead of answering", async () => {
+    // Call 1 fails the line. Ana's retry reaches the provider and succeeds slowly. Ben's retry
+    // throws in the spend gate (gate check 3) and never answers at all. The line must not wait
+    // forever on Ben's call and throw Ana's paid translation away as stale.
+    throwOnGateCheck = 3;
+    echoClient.script = async (call) => {
+      if (call === 1) throw new Error("provider down");
+      await delay(300);
+      return { text: "GOOD", inputTokens: 100, outputTokens: 10 };
+    };
+    const { ana, ben } = await pair("en-US", "es-AR");
+
+    ana.send({ t: "stt.final", text: "do you have time", seq: 1 });
+    const line = await ben.next("transcript.final");
+    await ana.next("translation.failed");
+
+    ana.send({ t: "translation.retry", lineId: line.line.lineId });
+    await delay(20);
+    ben.send({ t: "translation.retry", lineId: line.line.lineId });
+    await settle(600);
+
+    expect(echoClient.calls).toBe(2);
+    const last = outcomesFor(ana, line.line.lineId).at(-1);
+    expect(last?.t === "translation.result" && last.text).toBe("GOOD");
+
+    ana.close();
+    ben.close();
+  });
+});
+
 describe("a resume that evicts a live socket", () => {
   // The evicted socket's close event arrives a moment AFTER the seat has been handed over, and
   // onClose used to call rooms.disconnect unconditionally. So the member who had just been
@@ -1042,7 +1212,7 @@ describe("a resume that evicts a live socket", () => {
   it("does not report the reclaimed seat as reconnecting when the old socket closes", async () => {
     const ana = await Client.connect();
     const created = await createRoom(ana, "Ana", "en-US");
-    const cam = await Client.connect();
+    const cam = await Client.connect(ORIGIN, { user: "user-cam" });
     cam.send({ t: "room.join", code: created.code, username: "Cam", dialect: "es-AR" });
     await cam.next("room.joined");
 
@@ -1077,7 +1247,7 @@ describe("a resume that evicts a live socket", () => {
     // the state a half open TCP socket produces on its own.
     const ana = await Client.connect();
     const created = await createRoom(ana, "Ana", "en-US");
-    const cam = await Client.connect();
+    const cam = await Client.connect(ORIGIN, { user: "user-cam" });
     cam.send({ t: "room.join", code: created.code, username: "Cam", dialect: "es-AR" });
     await cam.next("room.joined");
 
@@ -1127,7 +1297,7 @@ describe("a connection that is already in a room", () => {
 
   it("cannot join a second room", async () => {
     const ana = await Client.connect();
-    const ben = await Client.connect();
+    const ben = await Client.connect(ORIGIN, { user: "user-ben" });
     const first = await createRoom(ana);
     const second = await createRoom(ben, "Ben", "es-AR");
 
@@ -1148,8 +1318,8 @@ describe("the per connection message limit", () => {
     // It was keyed on connection.ip while documenting itself as per connection, so two users on
     // one NAT split a single 120 token burst and a breach closed whichever socket happened to
     // send the frame that tripped it.
-    const heavy = await Client.connect();
-    const quiet = await Client.connect();
+    const heavy = await Client.connect(ORIGIN, { user: "user-heavy" });
+    const quiet = await Client.connect(ORIGIN, { user: "user-quiet" });
 
     for (let i = 0; i < 200; i += 1) heavy.send({ t: "ping" });
 
@@ -1230,7 +1400,7 @@ describe("the liveness heartbeat", () => {
     // The other half, and the reason it has to be here: a reaper that terminated unconditionally
     // would satisfy the test above and disconnect every healthy person on the server every
     // thirty seconds.
-    const healthy = await Client.connect();
+    const healthy = await Client.connect(ORIGIN, { user: "user-healthy" });
     const created = await createRoom(healthy, "Ana", "en-US");
 
     signaling.pingRound();
@@ -1281,7 +1451,7 @@ describe("an async handler that rejects", () => {
     try {
       const ana = await Client.connect();
       const created = await createRoom(ana, "Ana", "en-US");
-      const ben = await Client.connect();
+      const ben = await Client.connect(ORIGIN, { user: "user-ben" });
       ben.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
       await ben.next("room.joined");
 
@@ -1476,6 +1646,27 @@ describe("accounts on the socket", () => {
     });
   });
 
+  describe("the upgrade, from a static site on its own origin (a split deploy)", () => {
+    // The web client served by a static host, this server API only. The page's Origin is the
+    // static host's, not this server's, so the socket is cross origin and passes only because
+    // that origin is listed in ORIGIN. The same rule CORS reads (security/origin.ts).
+    const STATIC_SITE = "https://app.example.com";
+    beforeEach(() => start({ isProduction: true, allowedOrigins: [STATIC_SITE], serveClient: false }));
+
+    it("accepts a browser upgrade from the listed static origin, token as a subprotocol", async () => {
+      const client = await connect(STATIC_SITE, { user: "user-ana", viaSubprotocol: true });
+      expect(client.socket.protocol).toBe("translatv.v1");
+      client.close();
+    });
+
+    it("refuses an unlisted origin, including this server's own dev origin, even with a valid token", async () => {
+      expect(await outcome(ORIGIN, { user: "user-ana", viaSubprotocol: true })).toBe("refused with 403");
+      expect(await outcome("https://app.example.com.evil.example", { user: "user-ana", viaSubprotocol: true })).toBe(
+        "refused with 403",
+      );
+    });
+  });
+
   describe("the upgrade, in development", () => {
     beforeEach(() => start({ isProduction: false }));
 
@@ -1510,6 +1701,23 @@ describe("accounts on the socket", () => {
       expect(joined.peer?.isHost).toBe(true);
       // The peer is described by its opaque member id, never by the account behind it.
       expect(JSON.stringify(joined)).not.toContain("user-ana");
+      ana.close();
+      ben.close();
+    });
+
+    it("refuses the host's own account joining from a second device, with SAME_ACCOUNT", async () => {
+      const { ana, code } = await hostsRoom("user-ana");
+      const phone = await connect(ORIGIN, { user: "user-ana" });
+      phone.send({ t: "room.join", code, username: "Ana", dialect: "es-AR" });
+      const error = await phone.next("error");
+      expect(error.code).toBe("SAME_ACCOUNT");
+      expect(error.fatal).toBe(true);
+      // The host's seat and the room are untouched, and a different account still gets in.
+      expect(ana.received.some((m) => m.t === "peer.joined")).toBe(false);
+      const ben = await connect(ORIGIN, { user: "user-ben" });
+      ben.send({ t: "room.join", code, username: "Ben", dialect: "es-AR" });
+      expect((await ben.next("room.joined")).you.isHost).toBe(false);
+      phone.close();
       ana.close();
       ben.close();
     });
@@ -1646,5 +1854,85 @@ describe("accounts on the socket", () => {
       expect((await other.next("room.created")).t).toBe("room.created");
       other.close();
     });
+  });
+});
+
+describe("spend attribution over the wire", () => {
+  // Each paid call's ledger row says where it ran, whether the owner was on the call, and whose
+  // line it was (as a keyed tag). Checked end to end, because the facts come from the room (who is
+  // in it) and the account behind each socket, which no unit of TranslationService can see.
+  const OWNER = "user-owner";
+  const tagKey = spendTagKey("a test secret that is long enough to be a real one");
+  let ownServer: Server;
+  let ownSignaling: SignalingServer;
+  let ownPort: number;
+  let ownRoot: string;
+
+  beforeEach(async () => {
+    ownRoot = mkdtempSync(join(tmpdir(), "ws-attribution-"));
+    mkdirSync(join(ownRoot, "out", "translatv"), { recursive: true });
+    writeFileSync(join(ownRoot, "out", "translatv", "spend_log.jsonl"), "", "utf8");
+    const cfg = { ...config(), repoRoot: ownRoot };
+    const gate = new SpendGate(ownRoot, { dailyCapUsd: cfg.dailyCapUsd, roomCapUsd: cfg.roomCapUsd });
+    const translation = new TranslationService(echoClient, gate, ownRoot, undefined, { env: "pi", tagKey });
+    const ownerAware: AccessVerifier = { ...verifier, isOwner: (userId) => userId === OWNER };
+    ownServer = createServer();
+    ownSignaling = new SignalingServer(ownServer, cfg, translation, ownerAware);
+    await new Promise<void>((resolve) => ownServer.listen(0, "127.0.0.1", resolve));
+    ownPort = (ownServer.address() as { port: number }).port;
+  });
+
+  afterEach(async () => {
+    ownSignaling.close();
+    await new Promise<void>((resolve) => ownServer.close(() => resolve()));
+    rmSync(ownRoot, { recursive: true, force: true });
+  });
+
+  async function call(hostUser: string, guestUser: string): Promise<{ host: Client; guest: Client }> {
+    const host = await Client.connect(ORIGIN, { port: ownPort, user: hostUser });
+    const created = await createRoom(host);
+    const guest = await Client.connect(ORIGIN, { port: ownPort, user: guestUser });
+    guest.send({ t: "room.join", code: created.code, username: "Ben", dialect: "es-AR" });
+    await guest.next("room.joined");
+    return { host, guest };
+  }
+
+  it("marks a call with the owner on it, and tags whoever spoke the line", async () => {
+    const { host, guest } = await call(OWNER, "user-ben");
+
+    host.send({ t: "stt.final", text: "do you have time", seq: 1 });
+    await guest.next("translation.result");
+    guest.send({ t: "stt.final", text: "si, tengo tiempo", seq: 1 });
+    // Both people receive every translation.result, so wait for the ledger rather than a message.
+    for (let i = 0; i < 50 && load({ root: ownRoot }).length < 2; i += 1) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+
+    const rows = load({ root: ownRoot });
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.env)).toEqual(["pi", "pi"]);
+    expect(rows.map((r) => r.owner_call)).toEqual([true, true]);
+    expect(rows.map((r) => r.user_tag)).toEqual([userTag(tagKey, OWNER), userTag(tagKey, "user-ben")]);
+    // The ledger is public: no account id may appear on any row.
+    const text = JSON.stringify(rows);
+    expect(text).not.toContain(OWNER);
+    expect(text).not.toContain("user-ben");
+
+    host.close();
+    guest.close();
+  });
+
+  it("marks a call between two other people as not the owner's", async () => {
+    const { host, guest } = await call("user-cam", "user-dee");
+
+    host.send({ t: "stt.final", text: "do you have time", seq: 1 });
+    await guest.next("translation.result");
+
+    const [row] = load({ root: ownRoot });
+    expect(row?.owner_call).toBe(false);
+    expect(row?.user_tag).toBe(userTag(tagKey, "user-cam"));
+
+    host.close();
+    guest.close();
   });
 });

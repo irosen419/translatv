@@ -3,6 +3,8 @@ import type { RenderedLine } from "@translatv/shared";
 import { captionFor } from "../lib/caption.js";
 import { failureCopyKey } from "../i18n/codes.js";
 import { useCopy } from "../i18n/useCopy.js";
+import { useStickToBottom } from "../lib/useStickToBottom.js";
+import { useStore } from "../state/store.js";
 
 interface Props {
   lines: readonly RenderedLine[];
@@ -39,7 +41,13 @@ export function ConversationOverlay({
   onSendChat,
 }: Props) {
   const interimRef = useRef<HTMLParagraphElement>(null);
-  const scroller = useRef<HTMLDivElement>(null);
+  // Follows new lines while the reader is at the bottom (lib/useStickToBottom.ts).
+  const follow = useStickToBottom<HTMLDivElement>(lines, interimText);
+  // The other person by the name they joined with, as the desktop panel does. "them" is only the
+  // fallback for a line whose speaker this tab never saw.
+  const peerNames = useStore((state) => state.peerNames);
+  const who = (from: string): string =>
+    from === selfId ? copy.t("overlay.you") : peerNames[from] ?? copy.t("overlay.them");
   const [draft, setDraft] = useState("");
   const copy = useCopy();
 
@@ -50,29 +58,18 @@ export function ConversationOverlay({
     node.textContent = interimText;
   }, [interimText]);
 
-  // Stick to the bottom, but only when the reader is already there. Yanking someone back down
-  // while they are reading scrollback is worse than a slightly stale view.
-  useEffect(() => {
-    const node = scroller.current;
-    if (!node) return;
-    const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
-    if (nearBottom) node.scrollTop = node.scrollHeight;
-  }, [lines, interimText]);
-
   const newest = lines.length > 0 ? lines[lines.length - 1]! : null;
   const older = lines.slice(0, -1);
   const caption = captionFor(newest, viewerDialect);
 
   return (
     <div className="conversation">
-      <div className="conversation-log" ref={scroller}>
+      <div className="conversation-log" ref={follow.ref} onScroll={follow.onScroll}>
         {older.map((line) => {
           const past = captionFor(line, viewerDialect);
           return (
             <p key={`${line.lineId}:${line.revision}`} className="past-line">
-              <span className="who">
-                {line.from === selfId ? copy.t("overlay.you") : copy.t("overlay.them")}
-              </span>
+              <span className="who">{who(line.from)}</span>
               <span className="said">{past.primary || past.secondary}</span>
             </p>
           );
@@ -92,9 +89,7 @@ export function ConversationOverlay({
               {/* Labelled, unlike the desktop subtitle. That one only ever shows the PEER, so
                   there is nothing to disambiguate. This log carries both sides, and the newest
                   line is the one you most need to attribute. */}
-              <span className="who">
-                {newest.from === selfId ? copy.t("overlay.you") : copy.t("overlay.them")}
-              </span>
+              <span className="who">{who(newest.from)}</span>
               {caption.primary}
               {caption.untranslated && (
                 <span
@@ -106,7 +101,7 @@ export function ConversationOverlay({
                   {copy.t("caption.notTranslated")}
                 </span>
               )}
-              {caption.noteKey && <span className="note">{copy.t(caption.noteKey)}</span>}
+              {caption.noteKey && <> <span className="note">{copy.t(caption.noteKey)}</span></>}
             </p>
             {caption.secondary && (
               <p
@@ -140,6 +135,7 @@ export function ConversationOverlay({
           const text = draft.trim();
           if (!text) return;
           onSendChat(text);
+          follow.pin(true);
           setDraft("");
         }}
       >

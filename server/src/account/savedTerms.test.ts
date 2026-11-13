@@ -28,7 +28,7 @@ import { SignalingServer } from "../ws/server.js";
 import { AccountService } from "./service.js";
 
 const ORIGIN = "http://localhost:5173";
-const PASSWORD = randomBytes(12).toString("hex");
+const PASSWORD = `Aa1!${randomBytes(12).toString("hex")}`;
 
 /** Every prompt the stub was asked, in order. */
 const prompts: string[] = [];
@@ -70,6 +70,7 @@ beforeEach(async () => {
     authSecret: null,
     signupMode: "open",
     ownerEmail: null,
+    supportEmail: null,
     dailyCapUsd: 10,
     roomCapUsd: 1.5,
     iceServers: [],
@@ -77,6 +78,7 @@ beforeEach(async () => {
     trustProxy: false,
     dataDir: root,
     databasePath: ":memory:",
+    serveClient: true,
   };
   const translation = new TranslationService(stub, new SpendGate(root, { dailyCapUsd: 10, roomCapUsd: 1.5 }), root);
   server = createServer(createApp(cfg, join(root, "no-dist"), translation, auth, account));
